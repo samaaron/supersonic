@@ -8,7 +8,6 @@
  */
 #include "EngineFixture.h"
 #include "JuceAudioCallback.h"
-#include "SampleLoader.h"
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <chrono>
@@ -24,8 +23,8 @@ static std::string dumpReplies(const std::vector<OscReply>& replies) {
     return out;
 }
 
-SupersonicEngine::Config EngineFixture::defaultConfig() {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config EngineFixture::defaultConfig() {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 0;
@@ -47,11 +46,13 @@ EngineFixture::EngineFixture() {
     init(defaultConfig());
 }
 
-EngineFixture::EngineFixture(const SupersonicEngine::Config& cfg) {
+EngineFixture::EngineFixture(const ClockworkEngine::Config& cfg) {
     init(cfg);
 }
 
-void EngineFixture::init(const SupersonicEngine::Config& cfg) {
+void EngineFixture::init(const ClockworkEngine::Config& cfg) {
+    static uint64_t sGeneration = 0;
+    mGeneration = ++sGeneration;
     // In manual-pump mode there is no audio-driver thread; the wait primitives
     // drive process_audio on the test thread instead (see pollUntil/waitForReply).
     mManualPump = cfg.manualAudioPump;
@@ -171,9 +172,34 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
 
 bool EngineFixture::sendAndExpectDone(const osc_test::Packet& pkt,
                                        int timeoutMs) {
+    // The OSC address is the packet's first NUL-terminated string; the /done
+    // that completes it names that address as its first argument.
+    const std::string cmd(reinterpret_cast<const char*>(pkt.ptr()));
     send(pkt);
-    OscReply r;
-    return waitForReply("/done", r, timeoutMs);
+    return waitForDone(cmd, timeoutMs);
+}
+
+// scsynth completes an asynchronous command with `/done <cmd>`; matching the
+// address alone took ANY /done for the one awaited, which held only while
+// every command completed inline, before the guest's off-thread stages. A
+// /done for an earlier command can now arrive later, so the name is checked.
+bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
+    const auto deadline = std::chrono::steady_clock::now()
+                        + std::chrono::milliseconds(timeoutMs);
+    while (true) {
+        if (mManualPump) pumpBlock();
+        {
+            std::lock_guard<std::mutex> lk(mReplyMutex);
+            for (auto it = mReplies.begin(); it != mReplies.end(); ++it) {
+                if (it->address != "/done") continue;
+                if (it->parsed().argCount() < 1 || it->parsed().argString(0) != cmd) continue;
+                mReplies.erase(it);
+                return true;
+            }
+        }
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(mManualPump ? 3 : 2));
+    }
 }
 
 bool EngineFixture::waitForBlocks(uint32_t n, int timeoutMs) {
@@ -242,9 +268,9 @@ bool EngineFixture::loadSynthDef(const std::string& name) {
     // (where test fixtures can drop synthdefs that don't belong in the
     // npm package — e.g. stereo_passthrough used by Link Audio tests).
     std::filesystem::path fsPath =
-        std::filesystem::path(SUPERSONIC_SYNTHDEFS_DIR) / (name + ".scsyndef");
+        std::filesystem::path(CLOCKWORK_SYNTHDEFS_DIR) / (name + ".scsyndef");
     if (!std::filesystem::exists(fsPath)) {
-        fsPath = std::filesystem::path(SUPERSONIC_TEST_SYNTHDEFS_DIR)
+        fsPath = std::filesystem::path(CLOCKWORK_TEST_SYNTHDEFS_DIR)
                  / (name + ".scsyndef");
     }
     if (!std::filesystem::exists(fsPath)) return false;

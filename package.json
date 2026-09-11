@@ -1,7 +1,7 @@
 {
   "name": "supersonic-scsynth",
-  "version": "0.71.0",
-  "description": "SuperCollider scsynth WebAssembly port for AudioWorklet - Run SuperCollider synthesis in the browser",
+  "version": "0.80.0",
+  "description": "SuperCollider scsynth on clockwork, for the browser as an AudioWorklet and natively as a server",
   "main": "dist/supersonic.js",
   "types": "supersonic.d.ts",
   "unpkg": "dist/supersonic.js",
@@ -15,12 +15,13 @@
     "pretest": "esbuild node_modules/fast-check/lib/fast-check.js --bundle --format=esm --outfile=test/assets/fast-check.bundle.js",
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
-    "test:unit": "node --test \"test/unit/*.test.mjs\"",
+    "test:native": "./build/native/test/native/SuperSonicNativeTests '~[benchmark]'",
+    "test:transports": "./test/transport-harness/run.sh",
     "prepublishOnly": "./scripts/build-web.sh --release",
     "test:types": "tsd",
+    "test:simd": "node test/wasm_simd/run_tests.mjs",
     "docs:api": "typedoc && mv docs/api-generated/README.md docs/API.md && rm -rf docs/api-generated",
-    "docs:npm-readme": "node scripts/build-npm-readme.mjs",
-    "gen:metrics-header": "node scripts/gen-metrics-schema-header.mjs"
+    "docs:npm-readme": "node scripts/build-npm-readme.mjs"
   },
   "tsd": {
     "compilerOptions": {
@@ -43,7 +44,7 @@
     "sound"
   ],
   "author": "Sam Aaron",
-  "license": "MIT",
+  "license": "AGPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/samaaron/supersonic/issues"
   },
@@ -58,15 +59,14 @@
   },
   "files": [
     "dist/supersonic.js",
+    "dist/clockwork.js",
     "supersonic.d.ts",
     "dist/osc_channel.js",
     "dist/osc_fast.js",
     "dist/metrics_component.js",
     "dist/metrics-dark.css",
     "dist/metrics-light.css",
-    "dist/workers/debug_worker.js",
     "dist/workers/osc_in_worker.js",
-    "dist/workers/osc_out_prescheduler_worker.js",
     "dist/workers/osc_out_log_sab_worker.js",
     "README.md",
     "LICENSE"

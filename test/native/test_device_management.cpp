@@ -64,30 +64,24 @@ TEST_CASE("DeviceManagement: onSwapEvent callback fires", "[DeviceManagement]") 
     REQUIRE(events[1] == "swap:complete");
 }
 
-// ── State cache interception ─────────────────────────────────────────────────
-
-TEST_CASE("DeviceManagement: sendOSC intercepts /d_recv for cache",
-          "[DeviceManagement]") {
-    EngineFixture fix;
-
-    // Load a real synthdef file
-    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
-
-    // Verify the state cache captured it
-    auto defs = fix.engine().stateCache().synthDefs();
-    REQUIRE(defs.count("sonic-pi-beep") == 1);
-    REQUIRE(defs.at("sonic-pi-beep").size() > 0);
-}
-
-TEST_CASE("DeviceManagement: /d_free removes from cache", "[DeviceManagement]") {
-    EngineFixture fix;
-    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
-    REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 1);
-
-    fix.send(osc_test::message("/d_free", "sonic-pi-beep"));
-
-    REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 0);
-}
+// ── /d_recv, /d_free and /d_freeAll interception — REMOVED ──────────────────
+//
+// Three cases here asserted that ClockworkEngine watched those three addresses go
+// past and kept the synthdefs they carried in a StateCache. That whole seam is
+// gone: DspInfo no longer carries definition_verb/forget_verb/forget_all_verb,
+// there is no dsp_definition_name(), and StateCache itself has been deleted —
+// it asked clockwork to know which of a guest's messages carry state worth
+// keeping, which is a question it cannot answer.
+//
+// What replaced it is not a smaller cache. A guest that must survive its own
+// destruction writes into DspConfig::persistent, which clockwork carries
+// across a rebuild without reading; everything else lives in
+// DspConfig::guest_memory and is cleared at each dsp_new. Covered by
+// clockwork/test/test_dsp_regions.cpp and test_rebuild_contract.cpp.
+//
+// Restore across a device swap is the client's, by design — see the cold-swap
+// resume in ClockworkEngine.cpp and SuperSonic::restoreClientState(), covered by
+// recover.spec.mjs and load_sample.spec.mjs.
 
 // ── Per-driver device table broadcast ───────────────────────────────────────
 
@@ -96,65 +90,40 @@ TEST_CASE("DeviceManagement: device report carries a well-formed per-driver tabl
     EngineFixture fix;
     fix.clearReplies();
     // Subscribing a reply port makes the engine broadcast the report set.
-    fix.send(osc_test::message("/supersonic/devices/report",
+    fix.send(osc_test::message("/clockwork/devices/report",
                                static_cast<int32_t>(1)));
 
     // The grouped table is broadcast alongside the flat report. Headless:
     // no device manager, so both driver fields are empty and there are no
     // driver groups — but the header must still parse counts-first.
     OscReply table;
-    REQUIRE(fix.waitForReply("/supersonic/device-table", table));
+    REQUIRE(fix.waitForReply("/clockwork/device-table", table));
     CHECK(table.parsed().argString(0) == "");   // currentDriver
     CHECK(table.parsed().argString(1) == "");   // intendedDriver
     CHECK(table.parsed().argInt(2) == 0);       // numDrivers
 
     // The legacy flat report still goes out unchanged.
     OscReply flat;
-    CHECK(fix.waitForReply("/supersonic/devices", flat));
+    CHECK(fix.waitForReply("/clockwork/devices", flat));
 }
 
-TEST_CASE("DeviceManagement: /d_freeAll clears cache", "[DeviceManagement]") {
-    EngineFixture fix;
-    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
-
-    fix.send(osc_test::message("/d_freeAll"));
-
-    REQUIRE(fix.engine().stateCache().synthDefs().empty());
-}
-
-TEST_CASE("DeviceManagement: /b_allocRead caches buffer metadata",
-          "[DeviceManagement]") {
-    EngineFixture fix;
-
-    osc_test::Builder b;
-    auto& s = b.begin("/b_allocRead");
-    s << static_cast<osc::int32>(5) << "/samples/test.wav"
-      << static_cast<osc::int32>(0) << static_cast<osc::int32>(44100);
-    auto pkt = b.end();
-    fix.send(pkt);
-
-    auto bufs = fix.engine().stateCache().buffers();
-    REQUIRE(bufs.size() == 1);
-    REQUIRE(bufs[0].bufnum == 5);
-    REQUIRE(bufs[0].path == "/samples/test.wav");
-}
-
-TEST_CASE("DeviceManagement: /b_free uncaches buffer", "[DeviceManagement]") {
-    EngineFixture fix;
-
-    osc_test::Builder b;
-    auto& s = b.begin("/b_allocRead");
-    s << static_cast<osc::int32>(5) << "/samples/test.wav"
-      << static_cast<osc::int32>(0) << static_cast<osc::int32>(0);
-    auto pkt = b.end();
-    fix.send(pkt);
-
-    REQUIRE(fix.engine().stateCache().buffers().size() == 1);
-
-    fix.send(osc_test::message("/b_free", 5));
-
-    REQUIRE(fix.engine().stateCache().buffers().empty());
-}
+// ── /b_allocRead and /b_free caching — REMOVED ──────────────────────────────
+//
+// Two cases here asserted that clockwork's StateCache remembered buffer
+// metadata as /b_allocRead and /b_free went past. It did so by matching those
+// two addresses inside ClockworkEngine — scsynth vocabulary in a host whose whole
+// premise is not having any — and storing them in a struct that was
+// /b_allocRead's signature transcribed field by field.
+//
+// The cache had no reader. Restore across a device swap is the client's, by
+// design: see the cold-swap resume in ClockworkEngine.cpp, which says so, and
+// SuperSonic::restoreClientState(), which does it. Covered by
+// recover.spec.mjs and load_sample.spec.mjs.
+//
+// A guest-agnostic buffer cache is buildable, but nothing needs it yet, and
+// the version that was here could not have been made correct by adjusting it.
+// The definition cache this comment once pointed to as the model has since
+// been removed for the same reason — see the /d_recv note below.
 
 // ── Pause/resume ─────────────────────────────────────────────────────────────
 
@@ -174,22 +143,6 @@ TEST_CASE("DeviceManagement: pause and resume", "[DeviceManagement]") {
     OscReply reply;
     fix.send(osc_test::message("/status"));
     REQUIRE(fix.waitForReply("/status.reply", reply));
-}
-
-// ── Clock offset ─────────────────────────────────────────────────────────────
-
-TEST_CASE("DeviceManagement: setClockOffset / getClockOffset", "[DeviceManagement]") {
-    EngineFixture fix;
-
-    fix.engine().setClockOffset(0.0);
-    REQUIRE(fix.engine().getClockOffset() == 0.0);
-
-    fix.engine().setClockOffset(1.5);
-    // int32 ms precision: 1.5 * 1000 = 1500, 1500 / 1000.0 = 1.5
-    REQUIRE(fix.engine().getClockOffset() == 1.5);
-
-    fix.engine().setClockOffset(-0.25);
-    REQUIRE(fix.engine().getClockOffset() == -0.25);
 }
 
 // ── Purge ────────────────────────────────────────────────────────────────────
@@ -234,18 +187,8 @@ TEST_CASE("OscBuilder: variadic send via engine", "[OscBuilder]") {
     REQUIRE(fix.waitForReply("/status.reply", reply));
 }
 
-// ── State cache module registration ──────────────────────────────────────────
-
-TEST_CASE("DeviceManagement: stateCache module registration", "[DeviceManagement]") {
-    EngineFixture fix;
-    int captured = 0, restored = 0;
-
-    fix.engine().stateCache().registerModule({
-        "test-module",
-        [&]() { captured++; },
-        [&]() { restored++; }
-    });
-
-    fix.engine().stateCache().captureAll();
-    REQUIRE(captured == 1);
-}
+// ── State cache module registration — REMOVED ───────────────────────────────
+//
+// StateCache::registerModule had no caller outside this test for the whole of
+// its life, so captureAll() walked an empty vector on every cold swap. Removed
+// with the class.

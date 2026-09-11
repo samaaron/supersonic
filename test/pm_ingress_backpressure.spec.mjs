@@ -4,7 +4,7 @@
 // (handleMessage → writeOscToRingBuffer). When the ring is full the write
 // returns false — the message is gone, and the sender was already told
 // "true" at postMessage time. The one place that can still account for the
-// loss is the worklet: it must count the drop into scsynthMessagesDropped
+// loss is the worklet: it must count the drop into engineMessagesDropped
 // and must NOT count the message as received/sent traffic.
 //
 // SAB mode already reports backpressure to the sender synchronously
@@ -48,7 +48,7 @@ test.describe("PM-mode ingress backpressure", () => {
       let after = sonic.getMetrics();
       while (Date.now() < deadline) {
         after = sonic.getMetrics();
-        if (after.scsynthMessagesDropped - before.scsynthMessagesDropped > 0)
+        if (after.engineMessagesDropped - before.engineMessagesDropped > 0)
           break;
         await new Promise((r) => setTimeout(r, 100));
       }
@@ -57,7 +57,7 @@ test.describe("PM-mode ingress backpressure", () => {
         sent: SENT,
         sentDelta: after.oscOutMessagesSent - before.oscOutMessagesSent,
         droppedDelta:
-          after.scsynthMessagesDropped - before.scsynthMessagesDropped,
+          after.engineMessagesDropped - before.engineMessagesDropped,
       };
     }, sonicConfig);
 

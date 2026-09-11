@@ -242,7 +242,7 @@ int run_simd_tests() {
       fvec r1 = select(a, b, mask);
       check("select_all_a", r1.get(0) == 1.0f);
       // mask all ones → select b
-      fvec ones_mask = a == a;
+      fvec ones_mask = mask_eq(a, a);   // raw bits: operator== yields 1.0f here
       fvec r2 = select(a, b, ones_mask);
       check("select_all_b", r2.get(0) == 2.0f); }
 
@@ -409,7 +409,9 @@ int run_simd_tests() {
     // ========== ANDNOT (float) ==========
     // andnot(a,b) = ~a & b (matches SSE _mm_andnot semantics)
 
-    { fvec all_ones = fvec(1.0f) == fvec(1.0f); // all bits set
+    // operator== returns 1.0f/0.0f on this backend (valid audio, see
+    // vec_wasm128.hpp); a raw all-ones mask comes from mask_eq.
+    { fvec all_ones = mask_eq(fvec(1.0f), fvec(1.0f)); // all bits set
       fvec val(3.14f);
       // andnot(all_ones, val) = ~all_ones & val = 0
       fvec r1 = andnot(all_ones, val);

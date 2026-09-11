@@ -29,23 +29,23 @@ TEST_CASE("Clock notify subscribe is acked on every tokened request",
     // Untokened subscribe first — mirrors SupersonicComms, which fires a
     // plain subscribe before its tokened confirm loop. This registers the
     // caller, making the next subscribe a re-registration.
-    fx.send(osc_test::message("/clock/notify/subscribe"));
+    fx.send(osc_test::message("/clockwork/clock/notify/subscribe"));
 
     // First tokened confirm: must be acked with the token echoed.
-    fx.send(osc_test::message("/clock/notify/subscribe", 111));
+    fx.send(osc_test::message("/clockwork/clock/notify/subscribe", 111));
     OscReply r1;
-    REQUIRE(fx.waitForReply("/clock/notify/subscribe.reply", r1));
+    REQUIRE(fx.waitForReply("/clockwork/clock/notify/subscribe.reply", r1));
     auto p1 = r1.parsed();
     REQUIRE(p1.argCount() >= 1);
     CHECK(p1.argInt(p1.argCount() - 1) == 111);
 
     // Second tokened confirm (already registered): must STILL be acked.
-    fx.send(osc_test::message("/clock/notify/subscribe", 222));
+    fx.send(osc_test::message("/clockwork/clock/notify/subscribe", 222));
     // Wait for the reply carrying THIS token (the first reply may still be
     // in the collection buffer).
     const bool acked = fx.pollUntil([&] {
         for (auto& r : fx.allReplies()) {
-            if (r.address != "/clock/notify/subscribe.reply") continue;
+            if (r.address != "/clockwork/clock/notify/subscribe.reply") continue;
             auto p = r.parsed();
             if (p.argCount() >= 1 && p.argInt(p.argCount() - 1) == 222) return true;
         }
@@ -58,13 +58,13 @@ TEST_CASE("Notify registration replays lifecycle state, never the setup event",
           "[notify][statechange]") {
     EngineFixture fx;
 
-    fx.send(osc_test::message("/supersonic/notify"));
+    fx.send(osc_test::message("/clockwork/notify"));
     OscReply ack;
-    REQUIRE(fx.waitForReply("/supersonic/notify.reply", ack));
+    REQUIRE(fx.waitForReply("/clockwork/notify.reply", ack));
 
     // The registrant is told the CURRENT state (running, post-init).
     OscReply state;
-    REQUIRE(fx.waitForReply("/supersonic/statechange", state));
+    REQUIRE(fx.waitForReply("/clockwork/statechange", state));
     auto ps = state.parsed();
     REQUIRE(ps.argCount() >= 1);
     CHECK(ps.argString(0) == "running");
@@ -74,7 +74,7 @@ TEST_CASE("Notify registration replays lifecycle state, never the setup event",
     // stray setup a few blocks to surface before asserting its absence.
     fx.waitForBlocks(8);
     for (auto& r : fx.allReplies())
-        CHECK(r.address != "/supersonic/setup");
+        CHECK(r.address != "/clockwork/setup");
 }
 
 TEST_CASE("devices/report with no port registers the caller connection",
@@ -84,7 +84,7 @@ TEST_CASE("devices/report with no port registers the caller connection",
     // Portless form (stream transports have no addressable reply port):
     // must subscribe the caller and trigger a device report broadcast that
     // reaches it. Headless engines still produce a (possibly empty) report.
-    fx.send(osc_test::message("/supersonic/devices/report"));
+    fx.send(osc_test::message("/clockwork/devices/report"));
     OscReply devices;
-    CHECK(fx.waitForReply("/supersonic/devices", devices, 10000));
+    CHECK(fx.waitForReply("/clockwork/devices", devices, 10000));
 }

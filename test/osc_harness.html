@@ -7,17 +7,24 @@
     <h1>OSC Fast Test Harness</h1>
     <p>This page is driven by Playwright tests for osc_fast.js</p>
 
+    <!--
+      The encoder and the classifier are pure functions over bytes with no
+      imports of their own, so they are loaded from source rather than from a
+      bundle: there is nothing to bundle, and a bundle would only add a step
+      between the test and the code it is testing.
+
+      They live in clockwork now, not in this product, which is the only
+      difference from the page this was taken from.
+    -->
     <script type="module">
-      import * as oscFast from "../js/lib/osc_fast.js";
-      import { readTimetag } from "../js/lib/osc_classifier.js";
+      import * as oscFast from "../clockwork/js/lib/osc_fast.js";
+      import { readTimetag } from "../clockwork/js/lib/osc_classifier.js";
       import * as fc from "./assets/fast-check.bundle.js";
 
-      // Expose to window for Playwright
       window.oscFast = oscFast;
       window.readTimetag = readTimetag;
       window.fc = fc;
 
-      // Signal ready
       window.oscReady = true;
     </script>
   </body>

@@ -23,19 +23,20 @@ Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated
 - The forked scsynth *core* is **GPL-3.0-or-later** (inherited from upstream). This is the expected licence to keep syncing.
 - Upstream's **WASM port** ([PR #7428](https://github.com/supercollider/supercollider/pull/7428), `wasm-audio-worklet`) is licensed **GNU Affero GPL v3 (AGPL-3.0-or-later)**, which is broader than the GPL-3.0 core.
 
-### SuperSmoothy (native backend only) — vendored ISC JUCE 7 fork, never JUCE 8+
+### The audio layer is clockwork's — smoothie, never JUCE 8+
 
-The native backend does not fetch JUCE at all. **JUCE ≥ 8 is dual-licensed
-AGPLv3 / commercial** — its AGPL side is inside this boundary, and we do not
-take commercial licences. Instead, `supersmoothy/` vendors the four
-**ISC-licensed** modules of JUCE 7.0.12 (`juce_core`, `juce_events`,
-`juce_audio_basics`, `juce_audio_devices`) as our own subproject, which we
-maintain directly (changelog: `supersmoothy/SUPERSONIC-CHANGES.md`).
-`juce_audio_formats` (GPL-dual) was not vendored — the recorder uses
-libsndfile. Same rule as above: **never sync, backport, or transcribe code
-from JUCE 8 or later into supersmoothy/** — those trees are AGPL-side, and a
-retyped fragment still carries AGPL. Vendoring also means no distro build can
-accidentally bind a system JUCE 8+. (The WASM build links none of this.)
+The native backend fetches no JUCE. The device layer is `clockwork/smoothie`,
+clockwork's vendored fork of the four **ISC-licensed** modules of JUCE 7.0.12
+(`juce_core`, `juce_events`, `juce_audio_basics`, `juce_audio_devices`),
+maintained in the clockwork repository. **Never sync, backport, or transcribe
+code from JUCE 8 or later into it** — JUCE ≥ 8 is AGPL/commercial-only, and a
+retyped fragment still carries that licence. That rule and its changelog live
+with clockwork now; nothing in this repository touches JUCE.
+
+Note on the boundary below: SuperSonic as a whole is AGPL-3.0-or-later,
+because clockwork is. What the rule protects is the guest: `dsp/scsynth`
+stays GPL-3.0-or-later and separable, so scsynth can be taken without
+clockwork's terms attached.
 
 AGPL §13 ("Remote Network Interaction") requires that anyone who lets users interact with the software **over a network** be offered its complete corresponding source. A browser-delivered audio engine meets that description. GPL-3.0 → AGPL-3.0 compatibility is **one-way**: incorporating any AGPL code places the **combined work** under AGPL. That would extend the network-source-offer requirement to everyone who deploys it and change the platform layer's effective licence from MIT/GPL to AGPL. The change applies to every copy already distributed, so it cannot be undone after a release. Keeping the two licence domains separate is therefore a release-time decision, made here, on the way in.
 
@@ -246,14 +247,14 @@ git log --all --grep="$UPSTREAM_HASH"
 ```bash
 # Read the relevant file to see if the fix is present
 # Example: checking if EnvGen has counter_fractional
-grep -n "counter_fractional" src/synth/plugins/LFUGens.cpp
+grep -n "counter_fractional" dsp/scsynth/synth/plugins/LFUGens.cpp
 ```
 
 ### Method 3: Check Function Signatures
 
 ```bash
 # Example: checking if World_TotalFree exists (for rtMemoryStatus)
-grep -r "World_TotalFree" src/synth/
+grep -r "World_TotalFree" dsp/scsynth/synth/
 ```
 
 **Always verify by reading code** - commit messages can be misleading!
@@ -291,7 +292,7 @@ When cherry-pick isn't feasible:
 2. **Read the relevant supersonic file**:
    ```bash
    # Use absolute path
-   cat src/synth/plugins/LFUGens.cpp
+   cat dsp/scsynth/synth/plugins/LFUGens.cpp
    ```
 
 3. **Apply changes manually** using the Edit tool
@@ -367,7 +368,7 @@ If a commit modifies a file that doesn't exist in supersonic:
 
 ```bash
 # Check if the plugin exists
-ls src/synth/plugins/ | grep "PluginName"
+ls dsp/scsynth/synth/plugins/ | grep "PluginName"
 
 # If it doesn't exist, skip this part
 git rm -f server/plugins/PluginName.cpp
@@ -380,7 +381,7 @@ git cherry-pick --abort
 
 ```bash
 # If you have unstaged changes that need to be included
-git add src/synth/server/SC_GraphDef.cpp
+git add dsp/scsynth/synth/server/SC_GraphDef.cpp
 
 # Then continue
 git cherry-pick --continue
@@ -604,7 +605,7 @@ https://github.com/supercollider/supercollider/commit/$COMMIT
 git cherry-pick --abort
 
 # Verify by checking the code
-grep -n "the_fix" src/synth/plugins/SomeUGen.cpp
+grep -n "the_fix" dsp/scsynth/synth/plugins/SomeUGen.cpp
 ```
 
 ### Problem: Too many conflicts
@@ -623,7 +624,7 @@ git show $COMMIT
 
 ```bash
 # Check if plugin exists
-ls src/synth/plugins/ | grep PluginName
+ls dsp/scsynth/synth/plugins/ | grep PluginName
 
 # If not, this commit is not applicable
 git cherry-pick --abort
@@ -692,7 +693,7 @@ request. **Nothing backported.** Not a full-range sweep — only this commit.
   inspect): upstream switches the STATIC_PLUGINS DiskIO/UIUGens load/unload
   guards from `#ifndef __EMSCRIPTEN__` to capability macros (`NO_LIBSNDFILE`,
   `NO_X11`) driven by new CMake options. **Already present** — SuperSonic
-  guards these with `NO_LIBSNDFILE` (src/synth/server/SC_Lib_Cintf.cpp:74,
+  guards these with `NO_LIBSNDFILE` (dsp/scsynth/synth/server/SC_Lib_Cintf.cpp:74,
   100, 129; `-DNO_LIBSNDFILE` in build-web.sh) and additionally provides no-op
   stubs for `DiskIO_Load`/`DiskIO_Unload`/`UIUGens_Unload` (SC_Stubs.cpp:380),
   implemented independently before this upstream change. The remaining delta
@@ -949,19 +950,19 @@ Applied SuperCollider PR #7329 which converts the Plugin API from C++ to C:
 - Added `kSCTrue`/`kSCFalse` enum constants
 
 **Files Modified:**
-- `src/synth/include/common/SC_Types.h`
-- `src/synth/include/common/SC_fftlib.h`
-- `src/synth/common/SC_fftlib.hpp` (new - private header)
-- `src/synth/common/SC_fftlib.cpp`
-- `src/synth/include/plugin_interface/SC_InterfaceTable.h`
-- `src/synth/include/plugin_interface/SC_World.h`
-- `src/synth/include/plugin_interface/SC_Unit.h`
-- `src/synth/include/plugin_interface/SC_FifoMsg.h`
-- `src/synth/server/SC_World.cpp`
-- `src/synth/server/SC_Prototypes.h`
-- `src/synth/server/SC_SequencedCommand.h`
-- `src/synth/server/SC_SequencedCommand.cpp`
-- `src/synth/plugins/DelayUGens.cpp`
+- `dsp/scsynth/synth/include/common/SC_Types.h`
+- `dsp/scsynth/synth/include/common/SC_fftlib.h`
+- `dsp/scsynth/synth/common/SC_fftlib.hpp` (new - private header)
+- `dsp/scsynth/synth/common/SC_fftlib.cpp`
+- `dsp/scsynth/synth/include/plugin_interface/SC_InterfaceTable.h`
+- `dsp/scsynth/synth/include/plugin_interface/SC_World.h`
+- `dsp/scsynth/synth/include/plugin_interface/SC_Unit.h`
+- `dsp/scsynth/synth/include/plugin_interface/SC_FifoMsg.h`
+- `dsp/scsynth/synth/server/SC_World.cpp`
+- `dsp/scsynth/synth/server/SC_Prototypes.h`
+- `dsp/scsynth/synth/server/SC_SequencedCommand.h`
+- `dsp/scsynth/synth/server/SC_SequencedCommand.cpp`
+- `dsp/scsynth/synth/plugins/DelayUGens.cpp`
 
 **Benefits for WASM:**
 - Eliminates C++ vtable overhead for FFT allocator
@@ -1039,7 +1040,7 @@ Marks where SuperSonic intentionally diverges from upstream scsynth. The origina
 
 ```bash
 # Find all fork divergence points
-grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" src/synth/
+grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" dsp/scsynth/synth/
 ```
 
 **During upstream syncs:** Update the `#else` branch to match upstream. Then check whether the `SUPERSONIC` branch needs corresponding changes.
@@ -1077,7 +1078,7 @@ upstream code that uses them:
 | `boost::optional<T>` / `<boost/optional.hpp>` | `std::optional<T>` / `<optional>` |
 | `boost::enable_if_c<C, T>::type` / `boost::disable_if_c<C, T>::type` | `std::enable_if<C, T>::type` / `std::enable_if<!C, T>::type` (`<type_traits>`) |
 | `<boost/predef/hardware.h>` + `BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE_VERSION` | `defined(__SSE__) \|\| defined(_M_X64) \|\| (defined(_M_IX86_FP) && _M_IX86_FP >= 1)` |
-| `boost::sync::semaphore` (via the old NativeShim stub) | `sc::sync::semaphore` — no-op stub in `src/synth/include/common/SC_QuitSemaphore.hpp` |
+| `boost::sync::semaphore` (via the old NativeShim stub) | `sc::sync::semaphore` — no-op stub in `dsp/scsynth/synth/include/common/SC_QuitSemaphore.hpp` |
 | `boost::alignment::aligned_alloc/aligned_free` (in `malloc_aligned.hpp`) | `_aligned_malloc/_aligned_free` (Windows) / `posix_memalign` + `free` (elsewhere) |
 | `boost::iequals` (in `SC_SndFileHelpers.hpp`) | local ASCII `iequals` helper defined in the same file |
 
@@ -1095,7 +1096,7 @@ Guards upstream code that requires APIs unavailable in WASM (filesystem, shared 
 
 ```bash
 # Find all platform guards
-grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" src/synth/
+grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" dsp/scsynth/synth/
 ```
 
 **During upstream syncs:** Update the guarded code to match upstream exactly (uses `scprintf`, not `ss_log`). Don't skip these blocks — they contain the upstream code that native builds use.

@@ -46,8 +46,8 @@ TEST_CASE("OUT-ring and NRT-out replies both arrive via the unified egress drain
     REQUIRE(fx.waitForReply("/status.reply", r));
 
     // NRT-out ring.
-    fx.send(osc_test::message("/clock/tempo/get"));
-    REQUIRE(fx.waitForReply("/clock/tempo.reply", r));
+    fx.send(osc_test::message("/clockwork/clock/tempo/get"));
+    REQUIRE(fx.waitForReply("/clockwork/clock/tempo.reply", r));
 }
 
 TEST_CASE("/sync generates exactly one /synced callback with matching ID", "[callback]") {

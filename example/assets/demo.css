@@ -751,16 +751,18 @@ textarea:disabled, select:disabled, input:disabled {
 
 .osc-guide__content strong { color: var(--c-orange-dark); }
 
+/* A ring, not a disc: the trail is drawn underneath and should show through. */
 .synth-pad-touch {
   position: absolute;
   width: 40px; height: 40px;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--c-gold) 0%, var(--c-orange-dark) 70%, transparent 100%);
+  background: transparent;
+  border: 3px solid var(--c-gold);
+  box-shadow: 0 0 10px var(--c-orange-dark), inset 0 0 6px var(--c-orange-dark);
   pointer-events: none;
   transform: translate(-50%, -50%);
   opacity: 0;
   transition: opacity 0.15s ease-out;
-  box-shadow: none;
   animation: pulse-touch 1s ease-in-out infinite;
   z-index: 4;
 }

@@ -9,15 +9,15 @@
  * in-place delivery, consume-after-callback, Retain backpressure, scratch
  * linearisation of wrapped payloads, cursor repair, and padding follow.
  * The full ingress→tick→egress path is already covered by every engine test,
- * since native ingress IS ss_ingress_write and the per-block tick IS ss_tick.
+ * since native ingress IS clockwork_ingress_write and the per-block tick IS clockwork_tick.
  */
 #include <catch2/catch_test_macros.hpp>
 
 #include "lanes/lanes.h"                // the host ABI under test (self-guards extern "C")
-#include "lanes/lanes_internal.h"       // ss_egress_nrt_write — inject NRT frames for the drain test
+#include "lanes/lanes_internal.h"       // clockwork_egress_nrt_write — inject NRT frames for the drain test
 #include "audio_processor.h"            // shared_memory, control, memory_initialized
 #include "shared_memory.h"             // arena layout + EgressRoute
-#include "lanes/ring_drain.h"          // ss_drain_ring — the walker under test
+#include "lanes/ring_drain.h"          // clockwork_drain_ring — the walker under test
 #include "workers/RingBufferWriter.h"  // inject frames for walker/drain tests
 
 #include <atomic>
@@ -59,7 +59,7 @@ struct LanesArena {
         control            = reinterpret_cast<ControlPointers*>(buf.data() + CONTROL_START);
         metrics            = reinterpret_cast<PerformanceMetrics*>(buf.data() + METRICS_START);
         memory_initialized = true;
-        ss_lanes_reset_drains();  // fresh arena → fresh sequence-gap tracking
+        clockwork_lanes_reset_drains();  // fresh arena → fresh sequence-gap tracking
     }
     ~LanesArena() {
         shared_memory = savedMem; control = savedCtrl;
@@ -67,7 +67,7 @@ struct LanesArena {
     }
 };
 
-// SsEgressFn capture sink.
+// ClockworkEgressFn capture sink.
 struct Captured {
     int      frames = 0;
     uint32_t sourceId = 0, route = 0, seq = 0;
@@ -86,7 +86,7 @@ void capture(void* ctx, uint32_t sourceId, uint32_t route,
 struct TestRing {
     std::vector<uint8_t>  buf;
     std::atomic<int32_t>  head{0}, tail{0}, seq{0}, lock{0};
-    SsDrainState          st;
+    ClockworkDrainState          st;
 
     explicit TestRing(uint32_t size) : buf(size, 0) {}
     bool write(const void* data, uint32_t len, uint32_t sourceId = 0) {
@@ -96,9 +96,9 @@ struct TestRing {
                                        data, len, sourceId);
     }
     template <typename Fn>
-    uint32_t drain(Fn&& fn, uint32_t maxFrames = 0, SsDrainStop* stop = nullptr) {
-        return ss_drain_ring(buf.data(), static_cast<uint32_t>(buf.size()),
-                             &head, &tail, st, SsDrainMetrics{}, maxFrames,
+    uint32_t drain(Fn&& fn, uint32_t maxFrames = 0, ClockworkDrainStop* stop = nullptr) {
+        return clockwork_drain_ring(buf.data(), static_cast<uint32_t>(buf.size()),
+                             &head, &tail, st, ClockworkDrainMetrics{}, maxFrames,
                              std::forward<Fn>(fn), stop);
     }
 };
@@ -116,7 +116,7 @@ TEST_CASE("walker: contiguous payload is delivered in place (no copy)", "[lanes]
     uint32_t n = ring.drain([&](uint32_t, const uint8_t* p, uint32_t len, uint32_t) {
         seen = p;
         REQUIRE(len == sizeof(msg));
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     });
     REQUIRE(n == 1);
     // The payload pointer must lie inside the ring itself, not a copy.
@@ -135,7 +135,7 @@ TEST_CASE("walker: tail advances only after the callback consumes", "[lanes][wal
         // Mid-callback the frame is still owned by the consumer: writers
         // measure free space against the tail, which must not have moved.
         REQUIRE(ring.tail.load() == tailBefore);
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     });
     REQUIRE(ring.tail.load() == ring.head.load());  // consumed after return
 }
@@ -145,12 +145,12 @@ TEST_CASE("walker: Retain leaves the frame in the ring for the next drain", "[la
     const uint8_t msg[] = {'/', 'r', 0, 0};
     REQUIRE(ring.write(msg, sizeof(msg), 21));
 
-    SsDrainStop stop;
+    ClockworkDrainStop stop;
     uint32_t n = ring.drain([](uint32_t, const uint8_t*, uint32_t, uint32_t) {
-        return SsDrainVerdict::Retain;  // e.g. scheduler full
+        return ClockworkDrainVerdict::Retain;  // e.g. scheduler full
     }, 0, &stop);
     REQUIRE(n == 0);                       // retained frames are not counted
-    REQUIRE(stop == SsDrainStop::Retained);
+    REQUIRE(stop == ClockworkDrainStop::Retained);
     REQUIRE(ring.tail.load() != ring.head.load());  // still queued
 
     // Next drain delivers the same frame intact.
@@ -158,7 +158,7 @@ TEST_CASE("walker: Retain leaves the frame in the ring for the next drain", "[la
     uint32_t src = 0;
     n = ring.drain([&](uint32_t s, const uint8_t* p, uint32_t len, uint32_t) {
         src = s; got.assign(p, p + len);
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }, 0, &stop);
     REQUIRE(n == 1);
     REQUIRE(src == 21);
@@ -174,7 +174,7 @@ TEST_CASE("writer: frame that misses the boundary is padded and stays contiguous
     std::memset(filler, 0xAA, sizeof(filler));
     REQUIRE(ring.write(filler, sizeof(filler)));
     REQUIRE(ring.drain([](uint32_t, const uint8_t*, uint32_t, uint32_t) {
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }) == 1);
 
     // Second frame (64 bytes) doesn't fit in the 48 bytes before the end:
@@ -192,7 +192,7 @@ TEST_CASE("writer: frame that misses the boundary is padded and stays contiguous
     std::vector<uint8_t> got;
     REQUIRE(ring.drain([&](uint32_t, const uint8_t* p, uint32_t len, uint32_t) {
         seen = p; got.assign(p, p + len);
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }) == 1);
     REQUIRE(seen == ring.buf.data() + sizeof(Message));  // in place at offset 0
     REQUIRE(got == std::vector<uint8_t>(msg, msg + sizeof(msg)));
@@ -206,7 +206,7 @@ TEST_CASE("writer: rejects a frame with free space but no contiguous room", "[la
     REQUIRE(ring.write(small, sizeof(small)));   // frame 32  @ 0
     REQUIRE(ring.write(big, sizeof(big)));       // frame 144 @ 32 → head 176
     REQUIRE(ring.drain([](uint32_t, const uint8_t*, uint32_t, uint32_t) {
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }, 1) == 1);                                 // tail 32
 
     // 96-byte frame: 111 bytes free in total, but only 80 before the end and
@@ -230,15 +230,15 @@ TEST_CASE("walker: frame claiming more bytes than published is corruption, not a
     ring.head.store(24);
 
     std::atomic<uint32_t> corrupted{0};
-    SsDrainMetrics m; m.corrupted = &corrupted;
-    SsDrainStop stop;
-    uint32_t n = ss_drain_ring(ring.buf.data(), static_cast<uint32_t>(ring.buf.size()),
+    ClockworkDrainMetrics m; m.corrupted = &corrupted;
+    ClockworkDrainStop stop;
+    uint32_t n = clockwork_drain_ring(ring.buf.data(), static_cast<uint32_t>(ring.buf.size()),
                                &ring.head, &ring.tail, ring.st, m, 0,
                                [](uint32_t, const uint8_t*, uint32_t, uint32_t) {
-                                   return SsDrainVerdict::Consume;
+                                   return ClockworkDrainVerdict::Consume;
                                }, &stop);
     REQUIRE(n == 0);
-    REQUIRE(stop == SsDrainStop::BadLength);
+    REQUIRE(stop == ClockworkDrainStop::BadLength);
     REQUIRE(corrupted.load() == 1);
     REQUIRE(ring.tail.load() == ring.head.load());  // resynced, not waiting
 }
@@ -257,15 +257,15 @@ TEST_CASE("OUT writer (ring_buffer_write) follows the unified convention: exact 
     // Frame: 16 header + 4 route + 3 payload = 23 exact, 24-byte footprint.
     REQUIRE(head.load() == 24);
 
-    SsDrainState st;
+    ClockworkDrainState st;
     uint32_t gotSrc = 0, gotRoute = 0;
     std::vector<uint8_t> gotOsc;
-    REQUIRE(ss_drain_ring(buf.data(), 128, &head, &tail, st, SsDrainMetrics{}, 0,
+    REQUIRE(clockwork_drain_ring(buf.data(), 128, &head, &tail, st, ClockworkDrainMetrics{}, 0,
         [&](uint32_t src, const uint8_t* p, uint32_t n, uint32_t) {
             gotSrc = src;
             std::memcpy(&gotRoute, p, sizeof(gotRoute));
             gotOsc.assign(p + EGRESS_ROUTE_SIZE, p + n);
-            return SsDrainVerdict::Consume;
+            return ClockworkDrainVerdict::Consume;
         }) == 1);
     REQUIRE(gotSrc == 5);
     REQUIRE(gotRoute == static_cast<uint32_t>(EGRESS_REPLY));
@@ -288,17 +288,17 @@ TEST_CASE("walker: frame crossing the ring boundary is corruption, not an OOB re
     ring.head.store(16);  // as if the frame wrapped to 16
 
     std::atomic<uint32_t> corrupted{0};
-    SsDrainMetrics m; m.corrupted = &corrupted;
-    SsDrainStop stop;
+    ClockworkDrainMetrics m; m.corrupted = &corrupted;
+    ClockworkDrainStop stop;
     int delivered = 0;
-    ss_drain_ring(ring.buf.data(), static_cast<uint32_t>(ring.buf.size()),
+    clockwork_drain_ring(ring.buf.data(), static_cast<uint32_t>(ring.buf.size()),
                   &ring.head, &ring.tail, ring.st, m, 0,
                   [&](uint32_t, const uint8_t*, uint32_t, uint32_t) {
                       delivered++;
-                      return SsDrainVerdict::Consume;
+                      return ClockworkDrainVerdict::Consume;
                   }, &stop);
     REQUIRE(delivered == 0);
-    REQUIRE(stop == SsDrainStop::BadLength);
+    REQUIRE(stop == ClockworkDrainStop::BadLength);
     REQUIRE(corrupted.load() == 1);
     REQUIRE(ring.tail.load() == ring.head.load());  // resynced
 }
@@ -311,7 +311,7 @@ TEST_CASE("writer: non-aligned payload round-trips exactly; cursors stay 4-align
     std::vector<uint8_t> got;
     REQUIRE(ring.drain([&](uint32_t, const uint8_t* p, uint32_t len, uint32_t) {
         got.assign(p, p + len);
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }) == 1);
     // Header length is exact, so the payload size round-trips untouched —
     // while the cursor advances by the 4-aligned footprint (16+5 → 24).
@@ -325,12 +325,12 @@ TEST_CASE("walker: out-of-range tail is repaired to head", "[lanes][walker]") {
     REQUIRE(ring.write(msg, sizeof(msg)));
     ring.tail.store(static_cast<int32_t>(ring.buf.size()) + 5);
 
-    SsDrainStop stop;
+    ClockworkDrainStop stop;
     uint32_t n = ring.drain([](uint32_t, const uint8_t*, uint32_t, uint32_t) {
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }, 0, &stop);
     REQUIRE(n == 0);
-    REQUIRE(stop == SsDrainStop::BadCursor);
+    REQUIRE(stop == ClockworkDrainStop::BadCursor);
     REQUIRE(ring.tail.load() == ring.head.load());  // repaired, not dereferenced
 }
 
@@ -361,7 +361,7 @@ TEST_CASE("walker: padding marker is followed within a single drain call", "[lan
     std::vector<uint8_t> got;
     REQUIRE(ring.drain([&](uint32_t, const uint8_t* p, uint32_t len, uint32_t) {
         got.assign(p, p + len);
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     }) == 1);  // padding followed AND frame delivered in one call
     REQUIRE(got == std::vector<uint8_t>(osc, osc + sizeof(osc)));
 }
@@ -370,35 +370,35 @@ TEST_CASE("walker: sequence gaps are counted by missed-frame count", "[lanes][wa
     TestRing ring(1024);
     const uint8_t msg[] = {1, 2, 3, 4};
     std::atomic<uint32_t> gaps{0};
-    SsDrainMetrics m; m.seqGaps = &gaps;
+    ClockworkDrainMetrics m; m.seqGaps = &gaps;
     auto consume = [](uint32_t, const uint8_t*, uint32_t, uint32_t) {
-        return SsDrainVerdict::Consume;
+        return ClockworkDrainVerdict::Consume;
     };
 
     REQUIRE(ring.write(msg, sizeof(msg)));   // seq 0
     ring.seq.fetch_add(3);                   // frames 1..3 lost
     REQUIRE(ring.write(msg, sizeof(msg)));   // seq 4
-    ss_drain_ring(ring.buf.data(), static_cast<uint32_t>(ring.buf.size()),
+    clockwork_drain_ring(ring.buf.data(), static_cast<uint32_t>(ring.buf.size()),
                   &ring.head, &ring.tail, ring.st, m, 0, consume);
     REQUIRE(gaps.load() == 3);
 }
 
 // ── Lanes ABI ────────────────────────────────────────────────────────────────
 
-TEST_CASE("lanes ABI: ss_ingress_write frames a message onto the IN ring", "[lanes][abi]") {
+TEST_CASE("lanes ABI: clockwork_ingress_write frames a message onto the IN ring", "[lanes][abi]") {
     LanesArena arena;
     const uint8_t msg[] = {1, 2, 3, 4, 5, 6, 7, 8};
-    REQUIRE(ss_ingress_write(msg, sizeof(msg), 7));
+    REQUIRE(clockwork_ingress_write(msg, sizeof(msg), 7));
 
     // Drain the IN ring with the shared walker; the frame must round-trip.
-    SsDrainState st;
+    ClockworkDrainState st;
     int frames = 0; uint32_t gotSrc = 0; std::vector<uint8_t> gotOsc;
-    uint32_t delivered = ss_drain_ring(
+    uint32_t delivered = clockwork_drain_ring(
         shared_memory + IN_BUFFER_START, IN_BUFFER_SIZE,
-        &control->in_head, &control->in_tail, st, SsDrainMetrics{}, 0,
+        &control->in_head, &control->in_tail, st, ClockworkDrainMetrics{}, 0,
         [&](uint32_t src, const uint8_t* p, uint32_t n, uint32_t) {
             frames++; gotSrc = src; gotOsc.assign(p, p + n);
-            return SsDrainVerdict::Consume;
+            return ClockworkDrainVerdict::Consume;
         });
     REQUIRE(delivered == 1);
     REQUIRE(frames == 1);
@@ -409,10 +409,10 @@ TEST_CASE("lanes ABI: ss_ingress_write frames a message onto the IN ring", "[lan
 TEST_CASE("lanes ABI: NRT egress write -> drain round-trips route, token, payload", "[lanes][abi]") {
     LanesArena arena;
     const uint8_t osc[] = {'/', 'x', 0, 0};
-    REQUIRE(ss_egress_nrt_write(EGRESS_BROADCAST_NOTIFY, 42, osc, sizeof(osc)));
+    REQUIRE(clockwork_egress_nrt_write(EGRESS_BROADCAST_NOTIFY, 42, osc, sizeof(osc)));
 
     Captured cap;
-    REQUIRE(ss_egress_nrt_drain(capture, &cap, 0) == 1);
+    REQUIRE(clockwork_egress_nrt_drain(capture, &cap, 0) == 1);
     REQUIRE(cap.frames == 1);
     REQUIRE(cap.route == static_cast<uint32_t>(EGRESS_BROADCAST_NOTIFY));
     REQUIRE(cap.sourceId == 42);  // token rides through as the frame sourceId
@@ -421,7 +421,7 @@ TEST_CASE("lanes ABI: NRT egress write -> drain round-trips route, token, payloa
 
 TEST_CASE("lanes ABI: RT egress drain delivers a framed OUT frame", "[lanes][abi]") {
     LanesArena arena;
-    // RT egress is written inside ss_tick; inject one [route][osc] frame directly.
+    // RT egress is written inside clockwork_tick; inject one [route][osc] frame directly.
     std::atomic<int32_t> lock{0};
     uint8_t framed[EGRESS_ROUTE_SIZE + 4];
     uint32_t route = EGRESS_REPLY;
@@ -433,7 +433,7 @@ TEST_CASE("lanes ABI: RT egress drain delivers a framed OUT frame", "[lanes][abi
         framed, sizeof(framed), 99));
 
     Captured cap;
-    REQUIRE(ss_egress_rt_drain(capture, &cap, 0) == 1);
+    REQUIRE(clockwork_egress_rt_drain(capture, &cap, 0) == 1);
     REQUIRE(cap.route == static_cast<uint32_t>(EGRESS_REPLY));
     REQUIRE(cap.sourceId == 99);
     REQUIRE(std::string(reinterpret_cast<const char*>(cap.osc.data())) == "/ok");
@@ -441,11 +441,11 @@ TEST_CASE("lanes ABI: RT egress drain delivers a framed OUT frame", "[lanes][abi
 
 TEST_CASE("lanes ABI: ingress/egress reject bad input and empty drains", "[lanes][abi]") {
     LanesArena arena;
-    REQUIRE_FALSE(ss_ingress_write(nullptr, 4, 0));
-    REQUIRE_FALSE(ss_ingress_write(reinterpret_cast<const uint8_t*>("x"), 0, 0));
+    REQUIRE_FALSE(clockwork_ingress_write(nullptr, 4, 0));
+    REQUIRE_FALSE(clockwork_ingress_write(reinterpret_cast<const uint8_t*>("x"), 0, 0));
 
     Captured cap;
-    REQUIRE(ss_egress_rt_drain(capture, &cap, 0) == 0);   // nothing queued
-    REQUIRE(ss_egress_nrt_drain(capture, &cap, 0) == 0);
+    REQUIRE(clockwork_egress_rt_drain(capture, &cap, 0) == 0);   // nothing queued
+    REQUIRE(clockwork_egress_nrt_drain(capture, &cap, 0) == 0);
     REQUIRE(cap.frames == 0);
 }

@@ -1,6 +1,6 @@
 /*
  * test_midi.cpp — the /midi/ subsystem routed through the engine ingress
- * (sendOSC -> ingest -> MidiControl -> Rust ss_midi subsystem -> egress).
+ * (sendOSC -> ingest -> MidiControl -> Rust clockwork_midi subsystem -> egress).
  *
  * No MIDI hardware required: these pin that /midi commands reach the subsystem
  * and that its replies/pushes come back through the egress, that subscription
@@ -13,12 +13,12 @@
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
 #include "RingTestUtils.h"
-#include "WallClock.h"
-#include "scheduler/EngineScheduler.h"
-#include "scheduler/MidiClockOut.h"
-#include "src/SuperClock.h"
+#include "clock/clock_math.h"   // wallClockNTP; WallClock.h was a shim for this
+#include "scheduler/engine_schedule.h"
+#include "clock/MidiClockOut.h"
+#include "clock/ClockworkClock.h"
 
-#ifdef SUPERSONIC_MIDI
+#ifdef CLOCKWORK_MIDI
 
 using ring_test::countByAddr;
 
@@ -28,35 +28,35 @@ using ring_test::countByAddr;
 // distant past": it compares as the far future and the event never fires.
 // Always timetag relative to wall-clock now (wallClockNTP from WallClock.h).
 
-TEST_CASE("/midi/ports/list replies through the engine", "[midi]") {
+TEST_CASE("/clockwork/midi/ports/list replies through the engine", "[midi]") {
     EngineFixture fx;
     fx.clearReplies();
-    fx.send(osc_test::message("/midi/ports/list"));
+    fx.send(osc_test::message("/clockwork/midi/ports/list"));
 
     OscReply r;
-    REQUIRE(fx.waitForReply("/midi/ports.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/midi/ports.reply", r));
     // First arg is the input-port count: ≥ 0 even with no devices attached.
     CHECK(r.parsed().argInt(0) >= 0);
 }
 
-TEST_CASE("/midi/notify/subscribe pushes a ports snapshot", "[midi]") {
+TEST_CASE("/clockwork/midi/notify/subscribe pushes a ports snapshot", "[midi]") {
     EngineFixture fx;
     fx.clearReplies();
-    fx.send(osc_test::message("/midi/notify/subscribe"));
+    fx.send(osc_test::message("/clockwork/midi/notify/subscribe"));
 
     OscReply r;
-    CHECK(fx.waitForReply("/midi/ports.reply", r));
+    CHECK(fx.waitForReply("/clockwork/midi/ports.reply", r));
 }
 
-TEST_CASE("/midi/refresh broadcasts a ports update", "[midi]") {
+TEST_CASE("/clockwork/midi/refresh broadcasts a ports update", "[midi]") {
     EngineFixture fx;
     // A subscriber is needed for the broadcast to have an in-process audience.
-    fx.send(osc_test::message("/midi/notify/subscribe"));
+    fx.send(osc_test::message("/clockwork/midi/notify/subscribe"));
     fx.clearReplies();
-    fx.send(osc_test::message("/midi/refresh"));
+    fx.send(osc_test::message("/clockwork/midi/refresh"));
 
     OscReply r;
-    CHECK(fx.waitForReply("/midi/ports", r));
+    CHECK(fx.waitForReply("/clockwork/midi/ports", r));
 }
 
 TEST_CASE("/midi out + clock dispatch is robust with no devices open", "[midi]") {
@@ -65,32 +65,32 @@ TEST_CASE("/midi out + clock dispatch is robust with no devices open", "[midi]")
     // None of these have an open destination, so they are no-ops — but must not
     // crash the subsystem or the engine.
     osc_test::Builder noteOn;
-    noteOn.begin("/midi/out/note_on")
+    noteOn.begin("/clockwork/midi/out/note_on")
         << "*" << static_cast<osc::int32>(1) << static_cast<osc::int32>(60)
         << static_cast<osc::int32>(100);
     fx.send(noteOn.end());
 
     osc_test::Builder beat;
-    beat.begin("/midi/clock/beat") << "out" << 500.0f;
+    beat.begin("/clockwork/midi/clock/beat") << "out" << 500.0f;
     fx.send(beat.end());
 
     osc_test::Builder sync;
-    sync.begin("/midi/clock/sync") << "in" << static_cast<osc::int32>(1);
+    sync.begin("/clockwork/midi/clock/sync") << "in" << static_cast<osc::int32>(1);
     fx.send(sync.end());
 
     // The engine is still alive and serving /midi afterwards.
     fx.clearReplies();
-    fx.send(osc_test::message("/midi/ports/list"));
+    fx.send(osc_test::message("/clockwork/midi/ports/list"));
     OscReply r;
-    CHECK(fx.waitForReply("/midi/ports.reply", r));
+    CHECK(fx.waitForReply("/clockwork/midi/ports.reply", r));
 }
 
-TEST_CASE("/midi/at schedules a wrapped event without crashing", "[midi]") {
+TEST_CASE("/clockwork/midi/at schedules a wrapped event without crashing", "[midi]") {
     EngineFixture fx;
 
     // Inner event the scheduler will dispatch when due.
     osc_test::Builder inner;
-    inner.begin("/midi/out/note_on")
+    inner.begin("/clockwork/midi/out/note_on")
         << "*" << static_cast<osc::int32>(1) << static_cast<osc::int32>(60)
         << static_cast<osc::int32>(100);
     osc_test::Packet innerPkt = inner.end();
@@ -110,9 +110,9 @@ TEST_CASE("/midi/at schedules a wrapped event without crashing", "[midi]") {
 
     // Engine is still alive and serving /midi.
     fx.clearReplies();
-    fx.send(osc_test::message("/midi/ports/list"));
+    fx.send(osc_test::message("/clockwork/midi/ports/list"));
     OscReply r;
-    CHECK(fx.waitForReply("/midi/ports.reply", r));
+    CHECK(fx.waitForReply("/clockwork/midi/ports.reply", r));
 }
 
 TEST_CASE("/schedule-wrapped /midi/clock/beat reaches the engine clock-out", "[midi][midi_clock]") {
@@ -128,7 +128,7 @@ TEST_CASE("/schedule-wrapped /midi/clock/beat reaches the engine clock-out", "[m
     EngineFixture fx;
 
     osc_test::Builder inner;
-    inner.begin("/midi/clock/beat") << "clk" << 100.0f;   // 24 ticks over 100 ms
+    inner.begin("/clockwork/midi/clock/beat") << "clk" << 100.0f;   // 24 ticks over 100 ms
     osc_test::Packet innerPkt = inner.end();
 
     osc_test::Builder at;
@@ -142,9 +142,9 @@ TEST_CASE("/schedule-wrapped /midi/clock/beat reaches the engine clock-out", "[m
 
     // Engine is still alive and serving /midi after the deferred clock-out path ran.
     fx.clearReplies();
-    fx.send(osc_test::message("/midi/ports/list"));
+    fx.send(osc_test::message("/clockwork/midi/ports/list"));
     OscReply r;
-    CHECK(fx.waitForReply("/midi/ports.reply", r));
+    CHECK(fx.waitForReply("/clockwork/midi/ports.reply", r));
 }
 
 TEST_CASE("Engine init clears leftover MIDI clock bursts", "[midi][midi_clock]") {
@@ -154,7 +154,7 @@ TEST_CASE("Engine init clears leftover MIDI clock bursts", "[midi][midi_clock]")
     // engine must start with that queue cleared, or the stale ticks leak into
     // the shared OUT ring under a later fixture — making exact tick-count
     // assertions flaky on a slow box.
-    SuperClock ghost;
+    ClockworkClock ghost;
     get_midi_clock_out().onBeat(ghost, "ghost", 1.0);   // pollute: a queued burst
 
     EngineFixture fx;                  // init() must reset the singleton
@@ -167,7 +167,7 @@ TEST_CASE("Engine init clears leftover MIDI clock bursts", "[midi][midi_clock]")
     get_midi_clock_out().generate(ghost.now() + 10.0);
     auto fired = ring_test::drainDue(es, INT64_MAX);
 
-    CHECK(countByAddr(fired, "/midi/clock/tick") == 0);
+    CHECK(countByAddr(fired, "/clockwork/midi/clock/tick") == 0);
 }
 
-#endif // SUPERSONIC_MIDI
+#endif // CLOCKWORK_MIDI

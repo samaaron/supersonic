@@ -15,9 +15,15 @@ discover it.
 ## What gets built
 
 One binary package, `supersonic`: the native server (`/usr/bin/supersonic`,
-an scsynth drop-in) plus a man page. The BEAM NIF, npm/web assets, synthdefs
-and samples are not packaged (the latter two remain in the source tarball
-because the test suite loads them).
+an scsynth drop-in), the plugin bridge it spawns
+(`/usr/libexec/supersonic/clockwork-plugin-bridge`, out of PATH; the engine is
+built knowing to look there) and a man page. The BEAM NIF, npm/web
+assets, synthdefs and samples are not packaged (the latter two remain in the
+source tarball because the test suite loads them).
+
+clockwork, the substrate SuperSonic runs on, is a git submodule; the source
+package carries it under `clockwork/` in the orig tarball, so the package is
+the whole program and needs no separate clockwork package.
 
 ## Where things live
 
@@ -40,12 +46,16 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 
 | Dependency | Developer build | Debian build |
 |---|---|---|
-| SuperSmoothy (audio layer) | in-tree `supersmoothy/` (vendored ISC fork of JUCE 7 modules — see its README) | same in-tree sources; no system JUCE, no juceaide |
-| libsndfile + ogg/vorbis/flac/opus | FetchContent static stack | `libsndfile1-dev` (shared, codecs included) via `-DSUPERSONIC_SYSTEM_SNDFILE=ON` |
+| clockwork (substrate) | git submodule `clockwork/` | same sources, archived into the orig tarball |
+| smoothie (audio layer) | `clockwork/smoothie/` (clockwork's vendored ISC fork of JUCE 7 modules) | same in-tree sources; no system JUCE, no juceaide |
+| zlib (inside smoothie) | vendored copy | `zlib1g-dev` via `-DCLOCKWORK_SYSTEM_ZLIB=ON` |
+| stb_vorbis (inside clockwork) | vendored copy (v1.22, unmodified) | `libstb-dev` via `-DCLOCKWORK_SYSTEM_STB=ON` |
+| Audio file codecs | clockwork's own (`clockwork_audio_file`, dr_libs, flac encoder) | same — no libsndfile; dr_libs has no distro package |
 | Catch2 (tests) | FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
-| Ableton Link | FetchContent Link-4.0 + 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
-| Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built `--locked --offline` |
-| midir (patched fork) | in-tree `external/midir` (cargo path dep) | same — path deps need no vendoring |
+| Ableton Link | FetchContent Link-4.0 + clockwork's 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
+| CLAP / VST3 SDKs (plugin hosting) | fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
+| Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built offline (`-DCLOCKWORK_CARGO_OFFLINE=ON`) |
+| midir (patched fork) | `clockwork/external/midir` (cargo path dep) | same — path deps need no vendoring |
 | tlsf / oscpack / nova-simd | in-tree (as in Debian's own supercollider package) | same |
 
 The relevant CMake switches are all independent and default OFF, so
@@ -58,16 +68,16 @@ instead of silently rewriting it).
 Format 3.0 (quilt), three upstream tarballs (see
 `packaging/debian/README.source`):
 
-- `supersonic_<v>.orig.tar.xz` — git archive minus `Files-Excluded`
-  (currently only the Steinberg ASIO SDK: Windows-only, and its directory
-  carries non-free PDFs/logo artwork)
+- `supersonic_<v>.orig.tar.xz` — git archive with the clockwork submodule
+  archived into `clockwork/`, minus `Files-Excluded` (currently only the
+  Steinberg ASIO SDK inside clockwork: Windows-only, dual-licensed)
 - `supersonic_<v>.orig-link.tar.xz` — pristine Link 4.0 **with the
   asio-standalone submodule** (GitHub tag tarballs omit submodules)
 - `supersonic_<v>.orig-rust-vendor.tar.xz` — `cargo vendor` for the
   committed `rust/Cargo.lock`
 
-The four Link patches remain single-sourced in `external/*.patch`; the
-assembly script path-shifts them under `link/` into `debian/patches/`, so
+The four Link patches remain single-sourced in `clockwork/external/*.patch`;
+the assembly script path-shifts them under `link/` into `debian/patches/`, so
 they flow through the normal quilt machinery.
 
 Snapshot builds are versioned `<v>+git<date>.<sha>-1~ci1` so they sort below
@@ -77,13 +87,14 @@ the eventual `<v>-1` release.
 
 - **During the build** (`debian/rules` `dh_auto_test` override): the full
   Catch2 suite (~everything except `[benchmark]`), compiled and run against
-  the *Debian* versions of libsndfile/Catch2 — this is the
-  compatibility proof for archive dependency versions.
+  the *Debian* versions of Catch2, zlib and stb — this is the compatibility
+  proof for archive dependency versions.
 - **autopkgtest**: `supersonic -v` (superficial) plus the transport harness
   (`test/transport-harness/run.sh`) against the *installed*
   `/usr/bin/supersonic` — boots headless once per transport (UDP, TCP, UDS
-  stream, UDS datagram) and drives OSC load over each. The probe client
-  builds offline from the vendored crates.
+  stream, UDS datagram, the shared-memory command plane) and drives OSC load
+  over each. The probe client (`rust/supersonic-transport-probe`) builds
+  offline from the vendored crates.
 - **Smoke**: a pristine container `apt install`s the .deb (resolving runtime
   deps from the archive), checks `-v` and the man page, and boots the server
   headless.
@@ -113,11 +124,18 @@ docker run --rm -v "$PWD:/src" -w /src debian:sid bash scripts/ci-debian-package
 
 Points a prospective maintainer will care about, and where they stand:
 
-- **No system JUCE** — the audio layer is the in-tree `supersmoothy/`
+- **The whole program is AGPL-3+** — clockwork is AGPL-3.0-or-later (or
+  commercially licensed) and scsynth is GPL-3+, so the binary is AGPL. The
+  `debian/copyright` stanzas record the components individually.
+- **No system JUCE** — the audio layer is clockwork's in-tree `smoothie/`
   subproject (ISC, DFSG-free), so there is no JUCE build-dependency and no
-  version skew. Debian's `juce-modules-source` (>= 8) must never be
-  reintroduced: JUCE >= 8 is AGPL, which SuperSonic's licence boundary
-  forbids (docs/UPSTREAM_SYNC_GUIDE.md).
+  version skew.
+- **No plugin hosting** — the CLAP and VST3 SDKs are fetched at configure
+  time and Debian packages neither, so the Debian build compiles the plugin
+  bridge's hosting out. The bridge binary is still shipped, under
+  `/usr/libexec/supersonic` (`-DSUPERSONIC_BRIDGE_INSTALL_DIR`), and the
+  engine is built with that directory as its second place to look
+  (clockwork's `CLOCKWORK_PLUGIN_BRIDGE_DIR`).
 - **Ableton Link is embedded** — Debian's `ableton-link-dev` (3.x) is too old
   and lacks four functional patches (loopback-only discovery, peer
   enumeration, monotonic commit timestamps, LinkAudio teardown race). Until
@@ -125,9 +143,9 @@ Points a prospective maintainer will care about, and where they stand:
   is the honest representation.
 - **Rust crates are vendored** — accepted Debian practice for applications,
   but an archive maintainer may prefer `librust-*-dev` packages + `dh-cargo`.
-  The dependency surface is small (gilrs, socket2, alsa, plus the in-tree
-  midir fork) and the licence allow-list is machine-enforced by
-  `rust/deny.toml`.
+  The dependency surface is small (gilrs, socket2, alsa, plus clockwork's
+  in-tree midir fork) and the licence allow-list is machine-enforced by
+  `clockwork/rust/deny.toml`.
 - **Compiled synthdefs in the source tarball** — the 131 `.scsyndef` files
   under `packages/supersonic-scsynth-synthdefs/` are compiled artifacts whose
   sclang sources live in the Sonic Pi repository (noted in

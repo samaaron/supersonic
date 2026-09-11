@@ -51,7 +51,7 @@ constexpr int kReopenScale = 1;
 #endif
 constexpr int kReopenTimeoutMs = 20000 * kReopenScale;
 
-SupersonicEngine::Config recoverConfig() {
+ClockworkEngine::Config recoverConfig() {
     auto cfg = EngineFixture::defaultConfig();
     // Non-manual-pump: a real audio source (headless driver) actually runs, so
     // audioSource() is meaningful and recoverAudio's stop/start hits real state.
@@ -65,7 +65,7 @@ SupersonicEngine::Config recoverConfig() {
 
 // Sanity/enabler: requestAudioRecovery launches recoverAudio on its worker
 // thread, which always ends by broadcasting /supersonic/devices/reopen.done.
-// If this fails, the harness can't drive recovery and the tests below are moot.
+// If this fails, clockwork can't drive recovery and the tests below are moot.
 TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.done",
           "[Recover]") {
     EngineFixture fix(recoverConfig());
@@ -75,7 +75,7 @@ TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.do
     REQUIRE(reason == "started");
 
     OscReply r;
-    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", r, kReopenTimeoutMs));
+    REQUIRE(fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs));
 }
 
 // Use-after-free guard: recoverAudio -> recreateDeviceManager resets
@@ -116,7 +116,7 @@ TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
         std::string reason;
         fix.engine().requestAudioRecovery(reason);   // launches the worker
         OscReply r;
-        fix.waitForReply("/supersonic/devices/reopen.done", r, kReopenTimeoutMs);
+        fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs);
         std::this_thread::sleep_for(std::chrono::milliseconds(3200));
     }
 
@@ -134,12 +134,12 @@ TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
 TEST_CASE("Recover: recovery never strands the engine with no audio source",
           "[Recover]") {
     EngineFixture fix(recoverConfig());
-    REQUIRE(fix.engine().audioSource() != SupersonicEngine::AudioSource::None);
+    REQUIRE(fix.engine().audioSource() != ClockworkEngine::AudioSource::None);
 
     std::string reason;
     fix.engine().requestAudioRecovery(reason);
 
     OscReply r;
-    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", r, kReopenTimeoutMs));
-    CHECK(fix.engine().audioSource() != SupersonicEngine::AudioSource::None);
+    REQUIRE(fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs));
+    CHECK(fix.engine().audioSource() != ClockworkEngine::AudioSource::None);
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later OR LicenseRef-Clockwork-Commercial
 // Copyright (c) 2025 Sam Aaron
 
 /**
@@ -10,20 +10,29 @@
  * @param {Object} bufferConstants - Layout constants
  * @returns {Object} {nodeCount, version, nodes}
  */
-export function parseNodeTree(buffer, treeOffset, bufferConstants) {
-  const bc = bufferConstants;
+export const NODE_TREE_HEADER_SIZE   = 16;
+export const NODE_TREE_ENTRY_SIZE    = 96;
+export const NODE_TREE_DEF_NAME_SIZE = 32;
+
+export function parseNodeTree(buffer, treeOffset, windowBytes) {
 
   // Read header (3 x uint32)
   const headerView = new Uint32Array(buffer, treeOffset, 3);
-  const nodeCount = headerView[0];
-  const version = headerView[1];
+  // Version first: clockwork reads that word to decide when to copy the
+  // window out, and reads nothing else in it.
+  const version = headerView[0];
+  const nodeCount = headerView[1];
   const droppedCount = headerView[2];
 
   // Read entries - each entry is 72 bytes: 6 int32s (24) + def_name (32) + uuid (16)
-  const entriesBase = treeOffset + bc.NODE_TREE_HEADER_SIZE;
-  const maxNodes = bc.NODE_TREE_MIRROR_MAX_NODES;
-  const entrySize = bc.NODE_TREE_ENTRY_SIZE; // 72 bytes
-  const defNameSize = bc.NODE_TREE_DEF_NAME_SIZE; // 32 bytes
+  // SuperSonic's own layout, not the host's. Clockwork reserves the window
+  // and reads only its first word; the shape of everything after that is
+  // ours, and these must match supersonic-node-mirror's NodeTreeHeader and
+  // NodeEntry.
+  const entriesBase = treeOffset + NODE_TREE_HEADER_SIZE;
+  const maxNodes = Math.floor((windowBytes - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
+  const entrySize = NODE_TREE_ENTRY_SIZE;
+  const defNameSize = NODE_TREE_DEF_NAME_SIZE;
 
   // Use DataView for mixed int32/string access
   const dataView = new DataView(buffer, entriesBase, maxNodes * entrySize);
@@ -66,8 +75,11 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
       for (let j = 0; j < 8; j++) { uuid[8 + j] = uuidRaw[15 - j]; }
     }
 
-    nodes.push({
-      id,
+    const node = {
+      // INT32_MIN marks a real row with no compat alias — a clockwork-API
+      // process the engine surface cannot address. -1 stays the
+      // empty-slot sentinel, skipped above.
+      id: id === -2147483648 ? null : id,
       parentId: dataView.getInt32(byteOffset + 4, true),
       isGroup: dataView.getInt32(byteOffset + 8, true) === 1,
       prevId: dataView.getInt32(byteOffset + 12, true),
@@ -75,7 +87,26 @@ export function parseNodeTree(buffer, treeOffset, bufferConstants) {
       headId: dataView.getInt32(byteOffset + 20, true),
       defName,
       uuid
-    });
+    };
+    // Entry v2 — process-tree semantics, appended after the v1 fields.
+    if (entrySize >= 96) {
+      const parentUuidRaw = new Uint8Array(buffer, entriesBase + byteOffset + 72, 16);
+      let hasParent = false;
+      for (let j = 0; j < 16; j++) {
+        if (parentUuidRaw[j] !== 0) { hasParent = true; break; }
+      }
+      let parentUuid = null;
+      if (hasParent) {
+        parentUuid = new Uint8Array(16);
+        for (let j = 0; j < 8; j++) { parentUuid[j] = parentUuidRaw[7 - j]; }
+        for (let j = 0; j < 8; j++) { parentUuid[8 + j] = parentUuidRaw[15 - j]; }
+      }
+      node.parentUuid = parentUuid;
+      node.outPeak = dataView.getFloat32(byteOffset + 88, true);
+      node.synthCount = dataView.getUint16(byteOffset + 92, true);
+      node.listens = dataView.getUint8(byteOffset + 94) === 1;
+    }
+    nodes.push(node);
   }
 
   return { nodeCount, version, droppedCount, nodes };

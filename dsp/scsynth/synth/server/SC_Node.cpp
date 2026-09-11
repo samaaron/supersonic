@@ -1,0 +1,590 @@
+/*
+    SuperCollider real time audio synthesis system
+    Copyright (c) 2002 James McCartney. All rights reserved.
+    http://www.audiosynth.com
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+*/
+
+
+#include "SC_Group.h"
+#include "SC_SynthDef.h"
+#include "SC_World.h"
+#include "SC_WorldOptions.h"
+#include "SC_Errors.h"
+#include <stdio.h>
+#include <stdexcept>
+#include <limits.h>
+#include <atomic>
+#include "SC_Prototypes.h"
+#include "SC_HiddenWorld.h"
+#include "Unroll.h"
+
+// =============================================================================
+// TAU MODIFICATION START - Node Tree for SharedArrayBuffer
+// This section adds support for tracking the node tree in shared memory,
+// allowing JavaScript to poll the synth/group hierarchy without OSC latency.
+// When merging upstream changes, preserve this block.
+// =============================================================================
+extern "C" {
+    int clockwork_log(const char* fmt, ...);
+    extern uint8_t* shared_memory;
+}
+#include "../../node_tree.h"
+// =============================================================================
+// TAU MODIFICATION END
+// =============================================================================
+
+void Node_StateMsg(Node* inNode, int inState);
+
+// create a new node
+int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
+    if (inID < 0) {
+        if (inID == -1) { // -1 means generate an id for the event
+            HiddenWorld* hw = inWorld->hw;
+            inID = hw->mHiddenID = (hw->mHiddenID - 8) | 0x80000000;
+        } else {
+            clockwork_log("[Node_New] ERROR: Reserved node ID: %d", inID);
+            return kSCErr_ReservedNodeID;
+        }
+    }
+
+    if (World_GetNode(inWorld, inID)) {
+        clockwork_log("[Node_New] ERROR: Duplicate node ID: %d", inID);
+        return kSCErr_DuplicateNodeID;
+    }
+
+    Node* node = (Node*)World_Alloc(inWorld, def->mAllocSize);
+
+    if (!node) {
+        clockwork_log("[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
+        return kSCErr_OutOfRealTimeMemory;
+    }
+    node->mWorld = inWorld;
+    node->mDef = def;
+    node->mParent = nullptr;
+    node->mPrev = nullptr;
+    node->mNext = nullptr;
+    node->mIsGroup = false;
+
+    node->mID = inID;
+    node->mHash = Hash(inID);
+    if (!World_AddNode(inWorld, node)) {
+        clockwork_log("[Node_New] ERROR: World_AddNode failed - too many nodes");
+        World_Free(inWorld, node);
+        return kSCErr_TooManyNodes;
+    }
+
+    inWorld->hw->mRecentID = inID;
+
+    *outNode = node;
+
+    return kSCErr_None;
+}
+
+// node destructor
+void Node_Dtor(Node* inNode) {
+    Node_StateMsg(inNode, kNode_End);
+    Node_Remove(inNode);
+    World* world = inNode->mWorld;
+    world->hw->mNodeLib->Remove(inNode);
+    World_Free(world, inNode);
+}
+
+// remove a node from a group
+void Node_Remove(Node* s) {
+    Group* group = s->mParent;
+    if (group == nullptr)
+        return;
+
+    if (s->mPrev)
+        s->mPrev->mNext = s->mNext;
+    else if (group)
+        group->mHead = s->mNext;
+
+    if (s->mNext)
+        s->mNext->mPrev = s->mPrev;
+    else if (group)
+        group->mTail = s->mPrev;
+
+    s->mPrev = s->mNext = nullptr;
+    s->mParent = nullptr;
+}
+
+void Node_RemoveID(Node* inNode) {
+    if (inNode->mID == 0)
+        return; // failed
+
+    // =========================================================================
+    // TAU MODIFICATION - Send kNode_End notification before ID change
+    // This ensures the SAB node tree is updated with the original ID.
+    // The Node_Delete path will skip the notification due to negative ID check.
+    // =========================================================================
+    Node_StateMsg(inNode, kNode_End);
+
+    World* world = inNode->mWorld;
+    if (!World_RemoveNode(world, inNode)) {
+        int err = kSCErr_Failed; // shouldn't happen..
+        throw err;
+    }
+
+    HiddenWorld* hw = world->hw;
+    int id = hw->mHiddenID = (hw->mHiddenID - 8) | 0x80000000;
+    inNode->mID = id;
+    inNode->mHash = Hash(id);
+    if (!World_AddNode(world, inNode)) {
+        clockwork_log("mysterious failure in Node_RemoveID\n");
+        Node_Delete(inNode);
+        // enums are uncatchable. must throw an int.
+        int err = kSCErr_Failed; // shouldn't happen..
+        throw err;
+    }
+
+    // inWorld->hw->mRecentID = id;
+}
+
+// delete a node
+void Node_Delete(Node* inNode) {
+    if (inNode->mID == 0)
+        return; // failed
+    if (inNode->mIsGroup)
+        Group_Dtor((Group*)inNode);
+    else
+        Graph_Delete((Graph*)inNode);
+}
+
+// add a node after another one
+void Node_AddAfter(Node* s, Node* afterThisOne) {
+    if (!afterThisOne->mParent || s->mID == 0)
+        return; // failed
+
+    s->mParent = afterThisOne->mParent;
+    s->mPrev = afterThisOne;
+    s->mNext = afterThisOne->mNext;
+
+    if (afterThisOne->mNext)
+        afterThisOne->mNext->mPrev = s;
+    else
+        s->mParent->mTail = s;
+    afterThisOne->mNext = s;
+}
+
+// add a node before another one
+void Node_AddBefore(Node* s, Node* beforeThisOne) {
+    if (!beforeThisOne->mParent || s->mID == 0)
+        return; // failed
+
+    s->mParent = beforeThisOne->mParent;
+    s->mPrev = beforeThisOne->mPrev;
+    s->mNext = beforeThisOne;
+
+    if (beforeThisOne->mPrev)
+        beforeThisOne->mPrev->mNext = s;
+    else
+        s->mParent->mHead = s;
+    beforeThisOne->mPrev = s;
+}
+
+void Node_Replace(Node* s, Node* replaceThisOne) {
+    // clockwork_log("->Node_Replace\n");
+    Group* group = replaceThisOne->mParent;
+    if (!group)
+        return; // failed
+    if (s->mID == 0)
+        return;
+
+    s->mParent = group;
+    s->mPrev = replaceThisOne->mPrev;
+    s->mNext = replaceThisOne->mNext;
+
+    if (s->mPrev)
+        s->mPrev->mNext = s;
+    else
+        group->mHead = s;
+
+    if (s->mNext)
+        s->mNext->mPrev = s;
+    else
+        group->mTail = s;
+
+    replaceThisOne->mPrev = replaceThisOne->mNext = nullptr;
+    replaceThisOne->mParent = nullptr;
+
+    Node_Delete(replaceThisOne);
+    // clockwork_log("<-Node_Replace\n");
+}
+
+// set a node's control so that it reads from a control bus - index argument
+void Node_MapControl(Node* inNode, int inIndex, int inBus) {
+    if (inNode->mIsGroup) {
+        Group_MapControl((Group*)inNode, inIndex, inBus);
+    } else {
+        Graph_MapControl((Graph*)inNode, inIndex, inBus);
+    }
+}
+
+// set a node's control so that it reads from a control bus - name argument
+void Node_MapControl(Node* inNode, int32 inHash, int32* inName, int inIndex, int inBus) {
+    if (inNode->mIsGroup) {
+        Group_MapControl((Group*)inNode, inHash, inName, inIndex, inBus);
+    } else {
+        Graph_MapControl((Graph*)inNode, inHash, inName, inIndex, inBus);
+    }
+}
+
+// set a node's control so that it reads from a control bus - index argument
+void Node_MapAudioControl(Node* inNode, int inIndex, int inBus) {
+    if (inNode->mIsGroup) {
+        Group_MapAudioControl((Group*)inNode, inIndex, inBus);
+    } else {
+        Graph_MapAudioControl((Graph*)inNode, inIndex, inBus);
+    }
+}
+
+// set a node's control so that it reads from a control bus - name argument
+void Node_MapAudioControl(Node* inNode, int32 inHash, int32* inName, int inIndex, int inBus) {
+    if (inNode->mIsGroup) {
+        Group_MapAudioControl((Group*)inNode, inHash, inName, inIndex, inBus);
+    } else {
+        Graph_MapAudioControl((Graph*)inNode, inHash, inName, inIndex, inBus);
+    }
+}
+
+// set a node's control value - index argument
+void Node_SetControl(Node* inNode, int inIndex, float inValue) {
+    if (inNode->mIsGroup) {
+        Group_SetControl((Group*)inNode, inIndex, inValue);
+    } else {
+        Graph_SetControl((Graph*)inNode, inIndex, inValue);
+    }
+}
+
+// set a node's control value - name argument
+void Node_SetControl(Node* inNode, int32 inHash, int32* inName, int inIndex, float inValue) {
+    if (inNode->mIsGroup) {
+        Group_SetControl((Group*)inNode, inHash, inName, inIndex, inValue);
+    } else {
+        Graph_SetControl((Graph*)inNode, inHash, inName, inIndex, inValue);
+    }
+}
+
+// this function can be installed using Node_SetRun to cause a node to do nothing
+// during its execution time.
+void Node_NullCalc(struct Node* /*inNode*/) {}
+
+void Graph_FirstCalc(Graph* inGraph);
+void Graph_NullFirstCalc(Graph* inGraph);
+
+// if inRun is zero then the node's calc function is set to Node_NullCalc,
+// otherwise its normal calc function is installed.
+void Node_SetRun(Node* inNode, int inRun) {
+    if (inRun) {
+        if (inNode->mCalcFunc == &Node_NullCalc) {
+            if (inNode->mIsGroup) {
+                inNode->mCalcFunc = (NodeCalcFunc)&Group_Calc;
+            } else {
+                inNode->mCalcFunc = (NodeCalcFunc)&Graph_Calc;
+            }
+            Node_StateMsg(inNode, kNode_On);
+        }
+    } else {
+        if (inNode->mCalcFunc != &Node_NullCalc) {
+            if (!inNode->mIsGroup && inNode->mCalcFunc == (NodeCalcFunc)&Graph_FirstCalc) {
+                inNode->mCalcFunc = (NodeCalcFunc)&Graph_NullFirstCalc;
+            } else {
+                inNode->mCalcFunc = (NodeCalcFunc)&Node_NullCalc;
+            }
+            Node_StateMsg(inNode, kNode_Off);
+        }
+    }
+}
+
+
+void Node_Trace(Node* inNode) {
+    if (inNode->mIsGroup) {
+        Group_Trace((Group*)inNode);
+    } else {
+        Graph_Trace((Graph*)inNode);
+    }
+}
+
+void Node_End(Node* inNode) { inNode->mCalcFunc = (NodeCalcFunc)&Node_Delete; }
+
+
+// send a trigger from a node to a client program.
+// this function puts the trigger on a FIFO which is harvested by another thread that
+// actually does the sending.
+void Node_SendTrigger(Node* inNode, int triggerID, float value) {
+    World* world = inNode->mWorld;
+    // =========================================================================
+    // TAU MODIFICATION - Removed NRT check for WebAudio/WASM mode
+    // Original code:
+    //     if (!world->mRealTime)
+    //         return;
+    // SuperSonic runs in NRT mode (externally driven), but still needs
+    // trigger messages routed through the FIFO to the OUT ring buffer.
+    // =========================================================================
+
+    TriggerMsg msg;
+    msg.mWorld = world;
+    msg.mNodeID = inNode->mID;
+    msg.mTriggerID = triggerID;
+    msg.mValue = value;
+    world->hw->mTriggers.Write(msg);
+}
+
+// Send a reply from a node to a client program.
+//
+// This function puts the reply on a FIFO which is harvested by another thread that
+// actually does the sending.
+//
+// NOTE: Only to be called from the realtime thread.
+void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs, const float* values) {
+    World* world = inNode->mWorld;
+    // =========================================================================
+    // TAU MODIFICATION - Removed NRT check for WebAudio/WASM mode
+    // Original code:
+    //     if (!world->mRealTime)
+    //         return;
+    // SuperSonic runs in NRT mode (externally driven), but still needs
+    // SendReply UGen messages routed through the FIFO to the OUT ring buffer.
+    // This is required for Sonic Pi's sonic-pi-server-info synth and /tr replies.
+    // =========================================================================
+
+    const int cmdNameSize = strlen(cmdName);
+    // Floats follow cmdName in the same allocation; pad the string region
+    // so the float region lands on alignof(float).
+    const size_t cmdNamePadded = sc_align_up(cmdNameSize, alignof(float));
+    const size_t replySize = cmdNamePadded + numArgs * sizeof(float);
+    void* mem = World_Alloc(world, replySize);
+    if (mem == nullptr) {
+        // A dropped reply is invisible to the client, which just waits on a
+        // message that was never sent (Sonic Pi's Studio blocks its whole
+        // cold-swap reinit on one). Rate limited — a SendReply UGen fires
+        // every control block, so an unguarded log would flood the ring.
+        static std::atomic<uint32_t> allocFailCount{0};
+        if (allocFailCount.fetch_add(1, std::memory_order_relaxed) < 5)
+            clockwork_log("[Node_SendReply] ERROR: World_Alloc(%zu) failed — dropped %s"
+                   " for node %d (RT pool exhausted)",
+                   replySize, cmdName, inNode->mID);
+        return;
+    }
+
+    NodeReplyMsg msg;
+    msg.mWorld = world;
+    msg.mNodeID = inNode->mID;
+    msg.mID = replyID;
+    msg.mValues = (float*)((char*)mem + cmdNamePadded);
+    memcpy(msg.mValues, values, numArgs * sizeof(float));
+    msg.mNumArgs = numArgs;
+    msg.mCmdName = (char*)mem;
+    memcpy(msg.mCmdName, cmdName, cmdNameSize);
+    msg.mCmdNameSize = cmdNameSize;
+    msg.mRTMemory = mem;
+    if (!world->hw->mNodeMsgs.Write(msg)) {
+        // The FIFO is drained once per block by EngineCore_FlushNotifications;
+        // a full one means replies are being produced faster than they drain.
+        // The block is freed here because only Perform() would have freed it —
+        // holding the reply's memory hostage to a queue that already rejected
+        // it exhausts the RT pool, and then World_Alloc above starts failing
+        // for every reply the World will ever send.
+        static std::atomic<uint32_t> fifoFullCount{0};
+        if (fifoFullCount.fetch_add(1, std::memory_order_relaxed) < 5)
+            clockwork_log("[Node_SendReply] ERROR: mNodeMsgs FIFO full — dropped %s"
+                   " for node %d", cmdName, inNode->mID);
+        World_Free(world, mem);
+    }
+}
+
+void Node_SendReply(Node* inNode, int replyID, const char* cmdName, float value) {
+    Node_SendReply(inNode, replyID, cmdName, 1, &value);
+}
+
+// notify a client program of a node's state change.
+// this function puts the message on a FIFO which is harvested by another thread that
+// actually does the sending.
+void Node_StateMsg(Node* inNode, int inState) {
+    // =========================================================================
+    // TAU MODIFICATION START - Update SharedArrayBuffer node tree
+    // This enables JavaScript to poll the node tree without OSC round-trips.
+    // When merging upstream changes, preserve this block.
+    //
+    // IMPORTANT: This runs BEFORE the negative ID check below because:
+    // - SuperCollider's standard behavior skips OSC notifications for auto-assigned
+    //   (negative) node IDs to reduce network traffic
+    // - But we want ALL nodes in the SAB tree for real-time visualization
+    // - The SAB tree is polled locally, so there's no network overhead concern
+    // =========================================================================
+    if (shared_memory) {
+        NodeTreeHeader* tree_header  = supersonic_node_tree_header();
+        NodeEntry*      tree_entries = supersonic_node_tree_entries();
+
+        switch (inState) {
+            case kNode_Go:
+                NodeTree_Add(inNode, tree_header, tree_entries);
+                break;
+            case kNode_End:
+                NodeTree_Remove(inNode->mID, tree_header, tree_entries);
+                break;
+            case kNode_Move:
+                NodeTree_Update(inNode, tree_header, tree_entries);
+                break;
+            // kNode_On, kNode_Off, kNode_Info don't affect tree structure
+        }
+    }
+    // =========================================================================
+    // TAU MODIFICATION END
+    // =========================================================================
+
+    if (inNode->mID < 0 && inState != kNode_Info)
+        return; // no notification for negative IDs
+
+    World* world = inNode->mWorld;
+    // =========================================================================
+    // TAU MODIFICATION - Removed NRT check for WebAudio/WASM mode
+    // Original code:
+    //     if (!world->mRealTime)
+    //         return;
+    // =========================================================================
+
+    NodeEndMsg msg;
+    msg.mWorld = world;
+    msg.mNodeID = inNode->mID;
+    msg.mGroupID = inNode->mParent ? inNode->mParent->mNode.mID : -1;
+    msg.mPrevNodeID = inNode->mPrev ? inNode->mPrev->mID : -1;
+    msg.mNextNodeID = inNode->mNext ? inNode->mNext->mID : -1;
+    if (inNode->mIsGroup) {
+        Group* group = (Group*)inNode;
+        msg.mIsGroup = 1;
+        msg.mHeadID = group->mHead ? group->mHead->mID : -1;
+        msg.mTailID = group->mTail ? group->mTail->mID : -1;
+    } else {
+        msg.mIsGroup = 0;
+        msg.mHeadID = -1;
+        msg.mTailID = -1;
+    }
+    msg.mState = inState;
+    world->hw->mNodeEnds.Write(msg);
+}
+
+#include "SC_Unit.h"
+
+void Unit_DoneAction(int doneAction, Unit* unit) {
+    switch (doneAction) {
+    case 1:
+        Node_SetRun(&unit->mParent->mNode, 0);
+        break;
+    case 2:
+        Node_End(&unit->mParent->mNode);
+        break;
+    case 3: {
+        Node_End(&unit->mParent->mNode);
+        Node* prev = unit->mParent->mNode.mPrev;
+        if (prev)
+            Node_End(prev);
+    } break;
+    case 4: {
+        Node_End(&unit->mParent->mNode);
+        Node* next = unit->mParent->mNode.mNext;
+        if (next)
+            Node_End(next);
+    } break;
+    case 5: {
+        Node_End(&unit->mParent->mNode);
+        Node* prev = unit->mParent->mNode.mPrev;
+        if (!prev)
+            break;
+        if (prev && prev->mIsGroup)
+            Group_DeleteAll((Group*)prev);
+        else
+            Node_End(prev);
+    } break;
+    case 6: {
+        Node_End(&unit->mParent->mNode);
+        Node* next = unit->mParent->mNode.mNext;
+        if (!next)
+            break;
+        if (next->mIsGroup)
+            Group_DeleteAll((Group*)next);
+        else
+            Node_End(next);
+    } break;
+    case 7: {
+        Node* node = &unit->mParent->mNode;
+        while (node) {
+            Node* prev = node->mPrev;
+            Node_End(node);
+            node = prev;
+        }
+    } break;
+    case 8: {
+        Node* node = &unit->mParent->mNode;
+        while (node) {
+            Node* next = node->mNext;
+            Node_End(node);
+            node = next;
+        }
+    } break;
+    case 9: {
+        Node_End(&unit->mParent->mNode);
+        Node* prev = unit->mParent->mNode.mPrev;
+        if (prev)
+            Node_SetRun(prev, 0);
+    } break;
+    case 10: {
+        Node_End(&unit->mParent->mNode);
+        Node* next = unit->mParent->mNode.mNext;
+        if (next)
+            Node_SetRun(next, 0);
+    } break;
+    case 11: {
+        Node_End(&unit->mParent->mNode);
+        Node* prev = unit->mParent->mNode.mPrev;
+        if (!prev)
+            break;
+        if (prev->mIsGroup)
+            Group_DeepFreeGraphs((Group*)prev);
+        else
+            Node_End(prev);
+    } break;
+    case 12: {
+        Node_End(&unit->mParent->mNode);
+        Node* next = unit->mParent->mNode.mNext;
+        if (!next)
+            break;
+        if (next->mIsGroup)
+            Group_DeepFreeGraphs((Group*)next);
+        else
+            Node_End(next);
+    } break;
+    case 13: {
+        Node* node = unit->mParent->mNode.mParent->mHead;
+        while (node) {
+            Node* next = node->mNext;
+            Node_End(node);
+            node = next;
+        }
+    } break;
+    case 14:
+        Node_End(&unit->mParent->mNode.mParent->mNode);
+        break;
+    case 15: {
+        Node_End(&unit->mParent->mNode);
+        Node* next = unit->mParent->mNode.mNext;
+        if (next)
+            Node_SetRun(next, 1);
+    } break;
+    }
+}

@@ -2,11 +2,11 @@
  * test_metrics_shm.cpp — Native metrics observable via the public POSIX shm
  * segment.
  *
- * Verifies the redirect added in src/native/SupersonicEngine.cpp:
+ * Verifies the redirect added in src/native/ClockworkEngine.cpp:
  *  - When the engine creates a SuperSonic_<port> public shm segment, the
  *    metrics struct lives inside that segment instead of in the in-band
  *    slot inside ring_buffer_storage.
- *  - An external observer can mmap the segment via server_shared_memory_client
+ *  - An external observer can mmap the segment via shm_segment_client
  *    and read the same metrics struct that engine writers update.
  *
  * EngineFixture defaults to udpPort = 0 which skips shm creation; this
@@ -16,14 +16,14 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
-#include "src/synth/common/server_shm.hpp"
-#include "src/shared_memory.h"
+#include "shm_segment.hpp"
+#include "shared_memory.h"
 
 extern "C" uint8_t ring_buffer_storage[];
 
 namespace {
-SupersonicEngine::Config metricsShmConfig(unsigned port) {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config metricsShmConfig(unsigned port) {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate    = 48000;
     cfg.bufferSize    = 128;
     cfg.udpPort       = port;  // non-zero enables the public shm segment
@@ -62,12 +62,11 @@ TEST_CASE("metrics-shm: external client sees the same metrics struct",
     OscReply r;
     REQUIRE(fx.waitForReply("/synced", r));
 
-    // Open the public segment as a separate client (same process, same
-    // /SuperSonic_<port> segment name). Note: POSIX shm mmap returns a fresh
-    // virtual address per mapping even within one process, so the client
-    // pointer differs from the engine pointer numerically — they refer to the
-    // same physical pages.
-    server_shared_memory_client client(kPort);
+    // Open the public segment as a separate client: a duplicate of the
+    // engine's handle, mapped again. A second mapping gets a fresh virtual
+    // address even within one process, so the client pointer differs from the
+    // engine pointer numerically — they refer to the same physical pages.
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmNativeHandle()));
     PerformanceMetrics* externalMetrics = client.get_metrics();
     REQUIRE(externalMetrics != nullptr);
 
@@ -80,7 +79,7 @@ TEST_CASE("metrics-shm: increments via engine writes are visible through client"
           "[metrics][shm]") {
     constexpr unsigned kPort = 57213;
     EngineFixture fx(metricsShmConfig(kPort));
-    server_shared_memory_client client(kPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmNativeHandle()));
     PerformanceMetrics* externalMetrics = client.get_metrics();
     REQUIRE(externalMetrics != nullptr);
 

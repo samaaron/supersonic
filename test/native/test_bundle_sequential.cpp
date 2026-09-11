@@ -42,7 +42,7 @@
 #include <cstring>
 
 #include "JuceAudioCallback.h"  // get_audio_output_bus / get_audio_buffer_samples
-#include "src/shared_memory.h"  // PerformanceMetrics, SCHEDULER_SLOT_COUNT
+#include "shared_memory.h"  // PerformanceMetrics, SCHEDULER_SLOT_COUNT
 
 // ──────────────────────────────────────────────────────────────────────────
 // OSC helpers — two-level: individual messages via osc_test::Builder, and
@@ -171,7 +171,7 @@ static uint32_t blocksForMs(int ms) {
 // Config for every test that probes the output bus. capturePeak() reads the
 // shared bus directly, so no audio thread may be writing it while we look:
 // manualAudioPump starts no audio source at all (see
-// SupersonicEngine::startAudioSource), leaving this thread the only caller of
+// ClockworkEngine::startAudioSource), leaving this thread the only caller of
 // process_audio. Reading the bus under the HeadlessDriver is a data race, which
 // is what TSan reports once it can see the C++ side (clang's runtime).
 //
@@ -185,7 +185,7 @@ static uint32_t blocksForMs(int ms) {
 // exactly one block. Without it, pumping a 1400 ms ramp in a few milliseconds
 // would let the IIR drag engine time back toward the wall clock and future
 // bundles would never come due.
-static SupersonicEngine::Config probeConfig() {
+static ClockworkEngine::Config probeConfig() {
     auto cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     cfg.freewheelClock  = true;
@@ -218,7 +218,7 @@ static void probeSlide(EngineFixture& fx, float& earlyPeak, float& latePeak) {
 
 // ──────────────────────────────────────────────────────────────────────────
 // NTP timetag helpers for bundle scheduling. Epoch = 1900-01-01 UTC.
-// (clock_math.h already defines supersonic::kNtpEpochOffset as a double — we redefine
+// (clock_math.h already defines clockwork::kNtpEpochOffset as a double — we redefine
 // the same value with a distinct name to avoid the clash.)
 // ──────────────────────────────────────────────────────────────────────────
 

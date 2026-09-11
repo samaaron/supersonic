@@ -15,7 +15,7 @@
  * Linux-only: reads /proc/self. Test cases are compiled out on other
  * platforms.
  */
-#include "SupersonicEngine.h"
+#include "ClockworkEngine.h"
 #include <catch2/catch_test_macros.hpp>
 
 #if defined(__linux__)
@@ -96,7 +96,7 @@ int settleThreadCount(std::chrono::milliseconds timeout = std::chrono::milliseco
 TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][stress]") {
     constexpr int kCycles = 20;
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
 
@@ -104,7 +104,7 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
     // list, sndfile lookup tables, etc.) that persist until process exit and
     // would otherwise be misread as a leak. Measure baseline AFTER warm-up.
     {
-        SupersonicEngine engine;
+        ClockworkEngine engine;
         engine.init(cfg);
         REQUIRE(engine.isRunning());
         engine.shutdown();
@@ -122,7 +122,7 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
                           << " threads=" << baselineThreads);
 
     for (int i = 0; i < kCycles; ++i) {
-        SupersonicEngine engine;
+        ClockworkEngine engine;
         engine.init(cfg);
         REQUIRE(engine.isRunning());
         engine.shutdown();
@@ -149,7 +149,7 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
 TEST_CASE("Shutdown without init is safe", "[lifecycle]") {
     // Easy case: shutdown on a never-touched engine. Catches regressions
     // that assume init() has run.
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.shutdown();
     CHECK_FALSE(engine.isRunning());
 
@@ -161,16 +161,16 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
           "[lifecycle]") {
     // Drives init() to throw after the scsynth World has been
     // created, worker threads have started, and the audio callback is
-    // wired to the SampleLoader, but before mRunning is set. shutdown()
+    // wired, but before mRunning is set. shutdown()
     // (explicit and via the destructor) must release everything.
     // Headless mode means no AudioDeviceManager / property listener is
     // exercised here; that path needs a non-headless test environment.
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
 
     {
-        SupersonicEngine engine;
+        ClockworkEngine engine;
         engine.init(cfg);
         engine.shutdown();
     }
@@ -180,7 +180,7 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
     const int  baselineThreads = settleThreadCount();
 
     {
-        SupersonicEngine engine;
+        ClockworkEngine engine;
         engine.testInitFailure = []() { return std::string("injected"); };
         REQUIRE_THROWS_AS(engine.init(cfg), std::runtime_error);
         CHECK_FALSE(engine.isRunning());

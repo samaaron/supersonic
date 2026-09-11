@@ -10,8 +10,12 @@
     <script type="module">
       import { SuperSonic } from "../dist/supersonic.js";
 
-      // Expose SuperSonic to window for Playwright
+      // The class comes from clockwork under its own name; the PRODUCT is
+      // SuperSonic, and that is what the suite and any client look for. The
+      // alias is the whole of the difference between the substrate and the
+      // thing built on it, expressed in one line.
       window.SuperSonic = SuperSonic;
+      window.Clockwork = SuperSonic;
 
       // Signal that the module has loaded
       window.supersonicReady = true;

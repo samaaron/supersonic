@@ -23,7 +23,7 @@
 
 namespace {
 
-SupersonicEngine::Config watchdogConfig() {
+ClockworkEngine::Config watchdogConfig() {
     auto cfg = EngineFixture::defaultConfig();
     cfg.callbackWatchdog = true;
     cfg.watchdogStallMs  = 250;  // fast for tests; production default is much larger
@@ -75,7 +75,7 @@ TEST_CASE("Watchdog: restarts a stalled audio source and the engine answers agai
     if (!answeredEarly)
         REQUIRE(fix.waitForReply("/status.reply", r, 2000));
     REQUIRE(fix.engine().audioSource()
-            == SupersonicEngine::AudioSource::Headless);
+            == ClockworkEngine::AudioSource::Headless);
 }
 
 TEST_CASE("Watchdog: holds fire while a device swap is in flight", "[Watchdog]") {

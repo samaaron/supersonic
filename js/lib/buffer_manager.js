@@ -15,7 +15,7 @@
  * - 'postMessage': Buffer loading via worklet postMessage transfers
  */
 
-import { GrowableBufferPool } from './growable_buffer_pool.js';
+import { GrowableBufferPool } from '../../clockwork/js/lib/growable_buffer_pool.js';
 import { isAiff, aiffToWav } from './aiff_converter.js';
 
 export class BufferManager {
@@ -27,6 +27,7 @@ export class BufferManager {
     // Private implementation
     #audioContext;
     #sharedBuffer;
+    #clockwork;
     #wasmMemory;
     #bufferPool;
     #allocatedBuffers;
@@ -34,7 +35,6 @@ export class BufferManager {
     #bufferLocks;
 
     // postMessage mode: worklet port for sending sample data
-    #workletPort;
 
     constructor(options) {
         const {
@@ -45,7 +45,7 @@ export class BufferManager {
             sampleBaseURL,
             maxBuffers = 1024,
             assetLoader = null,
-            workletPort = null,
+            clockwork = null,
             wasmMemory = null,
             maxBufferMemory = null,
             bufferGrowIncrement = 32 * 1024 * 1024,
@@ -76,7 +76,7 @@ export class BufferManager {
             }
         }
 
-        // postMessage mode requires bufferPoolConfig (workletPort set later via setWorkletPort)
+        // postMessage mode requires bufferPoolConfig
         if (mode === 'postMessage') {
             if (!bufferPoolConfig || typeof bufferPoolConfig !== 'object') {
                 throw new Error('BufferManager requires bufferPoolConfig in postMessage mode');
@@ -90,10 +90,10 @@ export class BufferManager {
 
         this.#audioContext = audioContext;
         this.#sharedBuffer = sharedBuffer;
+        this.#clockwork = clockwork;
         this.#wasmMemory = wasmMemory;
         this.#sampleBaseURL = sampleBaseURL;
         this.#assetLoader = assetLoader;
-        this.#workletPort = workletPort;
 
         // Determine max pool size (user config → memory layout default → initial size)
         const effectiveMaxSize = maxBufferMemory || bufferPoolConfig.maxSize || bufferPoolConfig.size;
@@ -109,7 +109,12 @@ export class BufferManager {
             wasmMemory: (mode === 'sab') ? wasmMemory : null,
             maxSize: effectiveMaxSize,
             growIncrement: bufferGrowIncrement,
-            growFn: (mode === 'postMessage') ? growFn : null,
+            // In SAB mode GrowableBufferPool grows the shared memory itself.
+            // In postMessage mode only the worklet has a heap to grow, and
+            // asking it is `growInbox` — the same call, whatever the mode.
+            growFn: (mode === 'postMessage')
+                ? (growFn || ((pages) => clockwork.growInbox(pages * 65536)))
+                : null,
             onGrowth: onBufferPoolGrowth,
         });
 
@@ -254,16 +259,12 @@ export class BufferManager {
      * Must be called after AudioWorklet is initialized
      * @param {MessagePort} port - The worklet node's port
      */
-    setWorkletPort(port) {
-        if (this.#mode !== 'postMessage') {
-            return; // Only needed for postMessage mode
-        }
-        if (!port) {
-            throw new Error('BufferManager.setWorkletPort() requires a valid port');
-        }
-        this.#workletPort = port;
-        if (__DEV__) console.log('[Dbg-BufferManager] Worklet port set for buffer operations');
-    }
+    /*
+     * setWorkletPort is gone. It existed so this class could post buffer
+     * copies to the worklet itself; `clockwork.writeInbox` does that now and
+     * owns the port. Callers that used to wire it up should delete the
+     * call rather than replace it.
+     */
 
     #resolveAudioPath(scPath) {
         // Validate path to prevent directory traversal attacks
@@ -352,6 +353,11 @@ export class BufferManager {
 
             return {
                 ptr: allocatedPtr,
+                // What /b_allocPtr carries: the position as an OFFSET from the
+                // inbox base, never an address (dsp_api.h). The base is known
+                // here and nowhere else, so this is the one place it is
+                // subtracted; every sender reads this field.
+                laneOffset: allocatedPtr - this.#clockwork.inbox().offset,
                 uuid,
                 allocationComplete: managedCompletion,
                 numFrames,
@@ -469,56 +475,33 @@ export class BufferManager {
     }
 
     /**
-     * Write buffer data to memory
-     * SAB mode: writes directly to SharedArrayBuffer
-     * postMessage mode: sends to worklet and waits for copy confirmation
+     * Write frames into the guest's memory.
+     *
+     * TAU DOES THIS. It used to be forty lines here: a direct
+     * SharedArrayBuffer write in SAB mode, and in postMessage mode a
+     * transferable over the worklet port with its own copyId, handler and
+     * ten-second timeout. That is not scsynth knowledge — it is "get bytes
+     * into the guest's heap whichever way this browser allows" — and
+     * clockwork owns it now, identically, for every guest.
+     *
+     * What stays here is everything about WHAT the bytes are: decoding,
+     * interleaving, guard frames, the bufnum table. `ptr` came from this
+     * class's own allocator over its slice of the INBOX — the lane the client
+     * writes and the guest reads. The guest reads these frames IN PLACE for as
+     * long as the buffer lives, which the lane's contract allows and which is
+     * why nothing copies them anywhere.
+     *
+     * THE POINTER IS ABSOLUTE AND THIS CALL IS RELATIVE, so it is converted
+     * here. The allocator hands out addresses into the whole SharedArrayBuffer
+     * because that is what /b_allocPtr sends the guest — the guest
+     * dereferences it. writeInbox takes an offset from the base of the region
+     * instead, so that a caller cannot name memory outside it. Passing the
+     * absolute address straight through made every buffer write fail its
+     * range check with a number 58MB too large.
      */
     async #writeBufferData(ptr, data) {
-        if (this.#mode === 'sab') {
-            // SAB mode: direct write — use wasmMemory.buffer (may have grown since init)
-            const buf = this.#wasmMemory?.buffer || this.#sharedBuffer;
-            const heap = new Float32Array(buf, ptr, data.length);
-            heap.set(data);
-        } else {
-            // postMessage mode: send data to worklet for copying to WASM memory
-            const copyId = crypto.randomUUID();
-
-            const copyComplete = new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Buffer copy to WASM memory timed out'));
-                }, 10000);
-
-                const handler = (event) => {
-                    const msg = event.data;
-                    if (msg.type === 'bufferCopied' && msg.copyId === copyId) {
-                        this.#workletPort.removeEventListener('message', handler);
-                        clearTimeout(timeout);
-                        if (msg.success) {
-                            resolve();
-                        } else {
-                            reject(new Error(msg.error || 'Buffer copy failed'));
-                        }
-                    }
-                };
-
-                this.#workletPort.addEventListener('message', handler);
-            });
-
-            // Send data to worklet - use transferable for efficiency
-            const dataBuffer = data.buffer.slice(
-                data.byteOffset,
-                data.byteOffset + data.byteLength
-            );
-
-            this.#workletPort.postMessage({
-                type: 'copyBufferData',
-                copyId,
-                ptr,
-                data: dataBuffer
-            }, [dataBuffer]);
-
-            await copyComplete;
-        }
+        const base = this.#clockwork.inbox().offset;
+        await this.#clockwork.writeInbox(ptr - base, data);
     }
 
     #createPendingOperation(uuid, bufnum, timeoutMs) {
@@ -786,6 +769,7 @@ export class BufferManager {
             buffers.push({
                 bufnum,
                 ptr: entry.ptr,
+                laneOffset: entry.ptr - this.#clockwork.inbox().offset,
                 numFrames: entry.numFrames,
                 numChannels: entry.numChannels,
                 sampleRate: entry.sampleRate,

@@ -2,7 +2,7 @@
  * test_metrics.cpp — Coverage for PerformanceMetrics.
  *
  * For each field one or more tests verify:
- *   (a) the field is readable via SupersonicEngine::getMetrics()
+ *   (a) the field is readable via ClockworkEngine::getMetrics()
  *   (b) the field has a sensible value at boot
  *   (c) the field increments on its native write path
  *
@@ -12,8 +12,7 @@
  */
 #include "EngineFixture.h"
 #include "OscBuilder.h"
-#include "WallClock.h"
-#include "src/shared_memory.h"
+#include "shared_memory.h"
 
 #include <thread>
 #include <chrono>

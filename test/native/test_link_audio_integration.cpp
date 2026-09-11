@@ -9,8 +9,16 @@
 // 1024-frame buffers but the renderer caps storage at 512 and reports
 // a numFrames mismatch to Link, breaking beat-time continuity →
 // receive() returns 0 forever.
+//
+// PEER AUDIO IS AN INPUT CHANNEL NOW, and the addressing changed with it.
+// A subscription used to name a bus in the DSP's private pool — 64, 66, well
+// above the hardware I/O — and the bridge wrote there directly. It arrives
+// through a source port bound to an input channel instead, so the index a
+// subscription names is an INPUT CHANNEL index, and the engine has to have
+// been opened with enough of them. These fixtures ask for six: two that a
+// device would fill, and four for Link streams to land in.
 
-#ifdef SUPERSONIC_LINK
+#if defined(CLOCKWORK_LINK) && defined(CLOCKWORK_LINK_AUDIO)
 
 #include "EngineFixture.h"
 #include "FakeLinkPeerProcess.h"
@@ -44,7 +52,7 @@ constexpr int kTimeoutScale = 1;
 constexpr int kTimeoutScale = 1;
 #endif
 
-// Connection-state enum mirrors SuperClock::LinkAudioConnectionState.
+// Connection-state enum mirrors ClockworkClock::LinkAudioConnectionState.
 constexpr int kStateNotSubscribed = 0;
 constexpr int kStateConnecting    = 1;
 constexpr int kStateConnected     = 2;
@@ -61,9 +69,9 @@ bool waitForChannelVisible(EngineFixture& fx,
     const auto deadline = clock::now() + timeout;
     while (clock::now() < deadline) {
         fx.clearReplies();
-        fx.send(osc_test::message("/clock/audio/channels/get"));
+        fx.send(osc_test::message("/clockwork/clock/audio/channels/get"));
         OscReply reply;
-        if (fx.waitForReply("/clock/audio/channels.reply", reply, 200)) {
+        if (fx.waitForReply("/clockwork/clock/audio/channels.reply", reply, 200)) {
             const auto p = reply.parsed();
             const int count = p.argInt(0);
             // Per entry: [channelId:s channelName:s peerId:s peerName:s]
@@ -94,9 +102,9 @@ InputSnapshot snapshotInput(EngineFixture& fx,
                             const std::string& channelName) {
     InputSnapshot snap;
     fx.clearReplies();
-    fx.send(osc_test::message("/clock/audio/inputs/get"));
+    fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
     OscReply reply;
-    if (!fx.waitForReply("/clock/audio/inputs.reply", reply, 500)) return snap;
+    if (!fx.waitForReply("/clockwork/clock/audio/inputs.reply", reply, 500)) return snap;
     const auto p = reply.parsed();
     const int count = p.argInt(0);
     // Per entry: [peerName:s channelName:s busIdx:i sampleRate:i
@@ -117,6 +125,16 @@ InputSnapshot snapshotInput(EngineFixture& fx,
     return snap;
 }
 
+// Six input channels: two a device would fill, four for Link streams. The
+// index a subscription names is an input channel, and pull_port_sources skips
+// a port bound past the end of them — a subscription that looked accepted and
+// delivered nothing.
+ClockworkEngine::Config linkInputConfig() {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.numInputChannels = 6;
+    return cfg;
+}
+
 }  // namespace
 
 TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
@@ -129,24 +147,24 @@ TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
+    EngineFixture fx{linkInputConfig()};
     // NetworkWide + publish=1 so LinkAudio is on and the engine can
     // see other peers' channels via link.channels().
-    fx.send(osc_test::message("/clock/visibility",         int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set",  int32_t{1}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",         int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set",  int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
 
     // Evolution diagnostics — print state every second for 10s.
@@ -170,9 +188,9 @@ namespace {
 // Count the entries reported by /clock/audio/inputs/get. -1 on parse error.
 int countInputs(EngineFixture& fx) {
     fx.clearReplies();
-    fx.send(osc_test::message("/clock/audio/inputs/get"));
+    fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
     OscReply reply;
-    if (!fx.waitForReply("/clock/audio/inputs.reply", reply, 500)) return -1;
+    if (!fx.waitForReply("/clockwork/clock/audio/inputs.reply", reply, 500)) return -1;
     return reply.parsed().argInt(0);
 }
 
@@ -186,26 +204,26 @@ TEST_CASE("LinkAudio: /clock/reset clears active input subscriptions",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(countInputs(fx) == 1);
 
-    fx.send(osc_test::message("/clock/reset"));
+    fx.send(osc_test::message("/clockwork/clock/reset"));
     // Poll until the async reset has cleared the subscription, rather than
     // guessing a fixed delay a loaded runner may overrun.
     CHECK(fx.pollUntil([&] { return countInputs(fx) == 0; }));
@@ -219,35 +237,51 @@ TEST_CASE("LinkAudio: addLinkAudioInput rejects busIdx in output/input range",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    // EngineFixture defaults to 2 outputs + 2 inputs. Buses 0-1 are
-    // hardware outputs, 2-3 hardware inputs, 4+ private. Writing Link
-    // input audio into 0-3 would clobber the engine's I/O.
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    // Six input channels. 0-1 are what a device would fill; a Link stream
+    // landing there would overwrite the hardware input the engine is already
+    // reading, so they are refused. 2-5 are free for streams.
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
 
     auto sendAdd = [&](int32_t busIdx) {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
         s << "FakeLive" << "Main" << busIdx;
         fx.clearReplies();
         fx.send(b.end());
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", r, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", r, 1000));
         return r.parsed().argInt(0);
     };
 
-    // Reject when the bus pair would land in outputs / inputs.
-    CHECK(sendAdd(0) == 0);  // overlaps output bus 0/1
-    CHECK(sendAdd(1) == 0);  // overlaps output bus 1 + input 2
-    CHECK(sendAdd(2) == 0);  // overlaps input 2/3
-    CHECK(sendAdd(3) == 0);  // overlaps input 3 + private 4 (input overlap)
+    // NOTHING RESERVES THE DEVICE'S OWN CHANNELS, and that is deliberate.
+    // A source port binds the range its host asks for, and a WAV file bound at
+    // channel 0 would overwrite the microphone exactly as a Link stream would.
+    // Routing is the host's decision; the substrate does not second-guess it.
+    // Asserted here so the day it changes, it changes on purpose.
+    CHECK(sendAdd(0) == 1);
+    CHECK(sendAdd(2) == 1);
 
-    // First private bus pair: accepted.
-    CHECK(sendAdd(4) == 1);
+    /*
+     * AND THE CEILING IS REAL, because Link streams come and go.
+     *
+     * A peer joining is a new subscription wanting a channel pair, and the
+     * input channel count is fixed when the engine is built — so there is a
+     * point past which the next stream has nowhere to land. It has to be
+     * refused, not accepted: pull_port_sources skips a port bound past the end
+     * of the input channels, which would look exactly like a working
+     * subscription that is silent forever.
+     *
+     * Streams leaving do NOT shift the ones that stay. The binding is a slot
+     * of its own (clockwork_port_bus.h) and is never compacted, so a peer dropping
+     * out from the middle leaves every other stream on the channels it had.
+     */
+    CHECK(sendAdd(6) == 0);   // past the last input channel
+    CHECK(sendAdd(5) == 0);   // last channel, but the pair would run past it
 }
 
 TEST_CASE("LinkAudio: addLinkAudioInput rejects bus pair collisions",
@@ -259,9 +293,9 @@ TEST_CASE("LinkAudio: addLinkAudioInput rejects bus pair collisions",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
@@ -270,27 +304,27 @@ TEST_CASE("LinkAudio: addLinkAudioInput rejects bus pair collisions",
 
     auto sendAdd = [&](const char* channel, int32_t busIdx) {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
         s << "FakeLive" << channel << busIdx;
         fx.clearReplies();
         fx.send(b.end());
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", r, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", r, 1000));
         return r.parsed().argInt(0);
     };
 
-    // First subscription claims buses 64 and 65 (always pair).
-    CHECK(sendAdd("Main", 64) == 1);
+    // First subscription claims buses 2 and 3 (always pair).
+    CHECK(sendAdd("Main", 2) == 1);
 
-    // Different (peer, channel) at busIdx=65 would overlap bus 65 (R of
+    // Different (peer, channel) at busIdx=3 would overlap bus 3 (R of
     // Main). Reject — silent stomp is worse than failing the request.
-    CHECK(sendAdd("Aux", 65) == 0);
+    CHECK(sendAdd("Aux", 3) == 0);
 
-    // busIdx=64 same as Main — collision on the L bus. Reject.
-    CHECK(sendAdd("Aux", 64) == 0);
+    // busIdx=2 same as Main — collision on the L bus. Reject.
+    CHECK(sendAdd("Aux", 2) == 0);
 
-    // busIdx=66 is past Main's pair → accepted.
-    CHECK(sendAdd("Aux", 66) == 1);
+    // busIdx=4 is past Main's pair → accepted.
+    CHECK(sendAdd("Aux", 4) == 1);
 }
 
 // Replacement path: re-adding an existing (peer, channel) must STILL
@@ -306,9 +340,9 @@ TEST_CASE("LinkAudio: re-adding a subscription rejects overlap with others",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
@@ -317,23 +351,23 @@ TEST_CASE("LinkAudio: re-adding a subscription rejects overlap with others",
 
     auto sendAdd = [&](const char* channel, int32_t busIdx) {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
         s << "FakeLive" << channel << busIdx;
         fx.clearReplies();
         fx.send(b.end());
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", r, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", r, 1000));
         return r.parsed().argInt(0);
     };
 
-    // Initial layout: Main on bus 64/65, Aux on bus 66/67.
-    REQUIRE(sendAdd("Main", 64) == 1);
-    REQUIRE(sendAdd("Aux",  66) == 1);
+    // Initial layout: Main on bus 2/3, Aux on bus 4/5.
+    REQUIRE(sendAdd("Main", 2) == 1);
+    REQUIRE(sendAdd("Aux",  4) == 1);
 
     // Re-add Main onto Aux's pair must be rejected even though
     // (FakeLive, Main) is itself a known sub.
-    CHECK(sendAdd("Main", 66) == 0);  // overlaps Aux's L
-    CHECK(sendAdd("Main", 67) == 0);  // overlaps Aux's R
+    CHECK(sendAdd("Main", 4) == 0);  // overlaps Aux's L
+    CHECK(sendAdd("Main", 5) == 0);  // overlaps Aux's R
 
     // Main stays at its original bus and Aux is intact.
     {
@@ -354,41 +388,44 @@ TEST_CASE("LinkAudio: setLinkVisibility(Off) clears active input subscriptions",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(countInputs(fx) == 1);
 
-    fx.send(osc_test::message("/clock/visibility", int32_t{0}));  // Off
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{0}));  // Off
     CHECK(fx.pollUntil([&] { return countInputs(fx) == 0; }));
 }
 
 namespace {
 
-// Read `blockSize` samples from a single bus into `out`. Reads
-// directly from the audio-thread's bus pool — there's no snapshot
-// so a torn-mid-write read is possible, but for amplitude / L≠R
-// assertions the race doesn't change the outcome.
-bool snapshotBus(uint32_t busIdx, uint32_t blockSize, std::vector<float>& out) {
-    const auto* pool = reinterpret_cast<const float*>(get_audio_bus_pool());
-    if (!pool) return false;
-    const int busCount = get_audio_bus_count();
-    if (busIdx >= static_cast<uint32_t>(busCount)) return false;
-    out.assign(pool + busIdx * blockSize, pool + (busIdx + 1) * blockSize);
+// Read `blockSize` samples from one INPUT CHANNEL into `out`.
+//
+// It used to read the DSP's private bus pool through get_audio_bus_pool(), an
+// accessor the seam narrowing removed — clockwork does not hand out the
+// guest's signal storage. Peer audio arrives as ordinary input channels now
+// (a source port bound through clockwork_port_bus.h), so this reads the input bus
+// clockwork does expose. No snapshot, so a torn-mid-write read is possible;
+// for amplitude and L!=R assertions the race does not change the outcome.
+bool snapshotBus(uint32_t chIdx, uint32_t blockSize, std::vector<float>& out) {
+    const auto* in = reinterpret_cast<const float*>(get_audio_input_bus());
+    if (!in) return false;
+    if (chIdx >= static_cast<uint32_t>(get_audio_num_input_buses())) return false;
+    out.assign(in + chIdx * blockSize, in + (chIdx + 1) * blockSize);
     return true;
 }
 
@@ -426,7 +463,7 @@ InputSnapshot waitForConnected(EngineFixture& fx,
 // A. Verify scsynth's audio graph actually consumes Link-delivered
 // audio (via In.ar) — bus contents alone would only prove
 // drainLinkAudioInputsToBuses wrote bytes somewhere.
-// Path: FakeLive → bus 64/65 → stereo_passthrough (In.ar(64,2) →
+// Path: FakeLive → bus 2/3 → stereo_passthrough (In.ar(2,2) →
 // Out.ar(0,_)) → engine output bus 0/1.
 TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
           "[Link][LinkAudio][integration]") {
@@ -438,29 +475,39 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
 
     // Manual pump: this test reads the output bus, so the test thread must be the
     // sole audio-thread writer (no real-time driver) or the read races the drain.
-    auto cfg = EngineFixture::defaultConfig();
+    auto cfg = linkInputConfig();
     cfg.manualAudioPump = true;
     EngineFixture fx(cfg);
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
 
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
                               std::chrono::seconds(30)).state
             == kStateConnected);
 
+    // IN.AR TAKES A SCSYNTH BUS, NOT A TAU CHANNEL, and they are not the
+    // same number. scsynth lays its bus pool out as outputs first, then inputs
+    // (scsynth_dsp.cpp: mAudioBus + mNumOutputs * mBufLength), so clockwork's
+    // input channel N is bus mNumOutputs + N to a synth. With two outputs, the
+    // subscription on channel 2 is In.ar(4).
+    //
+    // The distinction did not exist before: a subscription named a private bus
+    // and the bridge wrote there directly, so the number the client passed and
+    // the number the synth read were the same. Peer audio is an input channel
+    // now, and inputs sit above the outputs.
     // stereo_passthrough reads In.ar(in_bus, 2) and writes both
     // channels unchanged to (out, out+1). That preserves the peer's
     // L/R distinction end-to-end so we can assert real stereo here.
@@ -470,7 +517,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
         auto& s = b.begin("/s_new");
         s << "stereo_passthrough" << static_cast<int32_t>(1000)
           << static_cast<int32_t>(0) << static_cast<int32_t>(1)
-          << "in_bus" << 64.0f << "out" << 0.0f;
+          << "in_bus" << 4.0f << "out" << 0.0f;
         fx.send(b.end());
     }
     {
@@ -481,7 +528,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
 
     // Poll the output bus — slow CI runners can take longer than a
     // fixed sleep to: (1) let the HeadlessDriver drain Link audio
-    // into bus 64, (2) let scsynth run the synth at least once with
+    // into bus 2, (2) let scsynth run the synth at least once with
     // non-zero In.ar input, (3) settle into a steady stream.
     // pollUntil() pumps a block on this thread before each check (manual mode),
     // so the read below sees freshly-rendered output and can't race the drain.
@@ -515,11 +562,11 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     REQUIRE(peer.ready());
 
     // Manual pump: bus snapshots below must not race a real-time driver.
-    auto cfg = EngineFixture::defaultConfig();
+    auto cfg = linkInputConfig();
     cfg.manualAudioPump = true;
     EngineFixture fx(cfg);
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "ChanA",
                                    std::chrono::seconds(30)));
@@ -528,16 +575,16 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
 
     auto sendAdd = [&](const char* channel, int32_t busIdx) {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
         s << "FakeLive" << channel << busIdx;
         fx.clearReplies();
         fx.send(b.end());
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", r, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", r, 1000));
         return r.parsed().argInt(0);
     };
-    REQUIRE(sendAdd("ChanA", 64) == 1);  // ChanA → bus 64/65
-    REQUIRE(sendAdd("ChanB", 66) == 1);  // ChanB → bus 66/67
+    REQUIRE(sendAdd("ChanA", 2) == 1);  // ChanA → bus 2/3
+    REQUIRE(sendAdd("ChanB", 4) == 1);  // ChanB → bus 4/5
 
     REQUIRE(waitForConnected(fx, "FakeLive", "ChanA",
                               std::chrono::seconds(30)).state == kStateConnected);
@@ -548,14 +595,14 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     // populate both bus pairs after Connected. ChanA carries sine440
     // (peak near 1.0), ChanB carries dc:0.5 (peak ~0.5).
     constexpr uint32_t kBlockSize = 128;
-    std::vector<float> bus64, bus66;
+    std::vector<float> chan2, chan4;
     float p64 = 0.0f, p66 = 0.0f, diff = 0.0f;
     fx.pollUntil([&] {
-        REQUIRE(snapshotBus(64, kBlockSize, bus64));
-        REQUIRE(snapshotBus(66, kBlockSize, bus66));
-        p64  = peakAbs(bus64);
-        p66  = peakAbs(bus66);
-        diff = maxAbsDiff(bus64, bus66);
+        REQUIRE(snapshotBus(2, kBlockSize, chan2));
+        REQUIRE(snapshotBus(4, kBlockSize, chan4));
+        p64  = peakAbs(chan2);
+        p66  = peakAbs(chan4);
+        diff = maxAbsDiff(chan2, chan4);
         return p64 > 0.1f && p66 > 0.3f && diff > 0.1f;
     }, 5000);
     INFO("peak64(sine)=" << p64 << " peak66(dc)=" << p66
@@ -577,10 +624,10 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     REQUIRE(peer.ready());
 
     // Manual pump: reads the output bus below; test thread is the sole writer.
-    auto cfg = EngineFixture::defaultConfig();
+    auto cfg = linkInputConfig();
     cfg.manualAudioPump = true;
     EngineFixture fx(cfg);
-    fx.send(osc_test::message("/clock/visibility", int32_t{2}));  // NetworkWide
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));  // NetworkWide
     // NB: no /clock/audio/publish/set — engine is receive-only.
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -588,26 +635,26 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
 
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
                               std::chrono::seconds(30)).state
             == kStateConnected);
 
-    // Stereo passthrough — bus 64/65 → output 0/1, preserving L/R.
+    // Stereo passthrough — bus 2/3 → output 0/1, preserving L/R.
     REQUIRE(fx.loadSynthDef("stereo_passthrough"));
     {
         osc_test::Builder b;
         auto& s = b.begin("/s_new");
         s << "stereo_passthrough" << static_cast<int32_t>(1000)
           << static_cast<int32_t>(0) << static_cast<int32_t>(1)
-          << "in_bus" << 64.0f << "out" << 0.0f;
+          << "in_bus" << 4.0f << "out" << 0.0f;
         fx.send(b.end());
     }
     OscReply r;
@@ -645,25 +692,25 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    // Manual pump: this test snapshots bus 64 (before and after removal), so the
+    // Manual pump: this test snapshots bus 2 (before and after removal), so the
     // test thread must own the audio thread — no real-time driver writing the bus.
-    auto cfg = EngineFixture::defaultConfig();
+    auto cfg = linkInputConfig();
     cfg.manualAudioPump = true;
     EngineFixture fx(cfg);
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
                               std::chrono::seconds(30)).state
@@ -674,14 +721,14 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> busL;
     REQUIRE(fx.pollUntil([&] {
-        REQUIRE(snapshotBus(64, kBlockSize, busL));
+        REQUIRE(snapshotBus(2, kBlockSize, busL));
         return peakAbs(busL) > 0.01f;
     }, 5000));
 
     // Explicit remove.
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/remove");
+        auto& s = b.begin("/clockwork/clock/audio/input/remove");
         s << "FakeLive" << "Main";
         fx.send(b.end());
     }
@@ -692,13 +739,13 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     // so the bus settles. (May still contain the last sample frozen
     // in time on the private region; we verify it stops *changing*.)
     // Pump the drain a few times with the sub now removed — it must not touch
-    // bus 64 — then confirm two snapshots are identical. All on this thread, so
+    // bus 2 — then confirm two snapshots are identical. All on this thread, so
     // the comparison is exact and race-free.
     std::vector<float> snap1, snap2;
     fx.pumpBlock(4);
-    REQUIRE(snapshotBus(64, kBlockSize, snap1));
+    REQUIRE(snapshotBus(2, kBlockSize, snap1));
     fx.pumpBlock(4);
-    REQUIRE(snapshotBus(64, kBlockSize, snap2));
+    REQUIRE(snapshotBus(2, kBlockSize, snap2));
     INFO("post-remove drift=" << maxAbsDiff(snap1, snap2));
     CHECK(maxAbsDiff(snap1, snap2) < 1e-6f);
 }
@@ -718,22 +765,22 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
         FakeLinkPeerProcess peer{peerOpts};
         REQUIRE(peer.ready());
 
-        EngineFixture fx;
-        fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-        fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
-        fx.send(osc_test::message("/clock/tempo/set", static_cast<float>(bpm)));
+        EngineFixture fx{linkInputConfig()};
+        fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+        fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
+        fx.send(osc_test::message("/clockwork/clock/tempo/set", static_cast<float>(bpm)));
 
         REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                        std::chrono::seconds(30)));
         {
             osc_test::Builder b;
-            auto& s = b.begin("/clock/audio/input/add");
-            s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+            auto& s = b.begin("/clockwork/clock/audio/input/add");
+            s << "FakeLive" << "Main" << static_cast<int32_t>(2);
             fx.clearReplies();
             fx.send(b.end());
         }
         OscReply addReply;
-        REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
         REQUIRE(addReply.parsed().argInt(0) == 1);
         REQUIRE(waitForConnected(fx, "FakeLive", "Main",
                                   std::chrono::seconds(30)).state
@@ -742,9 +789,9 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
         std::this_thread::sleep_for(duration);
 
         fx.clearReplies();
-        fx.send(osc_test::message("/clock/audio/inputs/get"));
+        fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
         OscReply reply;
-        REQUIRE(fx.waitForReply("/clock/audio/inputs.reply", reply, 500));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/inputs.reply", reply, 500));
         const auto p = reply.parsed();
         const int count = p.argInt(0);
         struct Stats {
@@ -788,7 +835,7 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
     // Block-size sweep at fixed BPM — chunk rate is set by Link's
     // per-chunk byte cap, not the peer's block size.
     std::fprintf(stderr, "\n--- block-size sweep at 120 BPM ---\n");
-    const auto b64   = probe(120.0, "block=64",   std::chrono::seconds(2), 64);
+    const auto b64   = probe(120.0, "block=2",   std::chrono::seconds(2), 2);
     const auto b256  = probe(120.0, "block=256",  std::chrono::seconds(2), 256);
     const auto b2048 = probe(120.0, "block=2048", std::chrono::seconds(2), 2048);
 
@@ -823,23 +870,23 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
 
     auto sendAdd = [&](int32_t busIdx) {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
         s << "FakeLive" << "Main" << busIdx;
         fx.clearReplies();
         fx.send(b.end());
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", r, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", r, 1000));
         return r.parsed().argInt(0);
     };
-    REQUIRE(sendAdd(64) == 1);
+    REQUIRE(sendAdd(2) == 1);
     // Wait for the renderer to be Connected, then accumulate calls.
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
                               std::chrono::seconds(30)).state
@@ -848,9 +895,9 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
 
     auto readTotalCalls = [&]() -> uint64_t {
         fx.clearReplies();
-        fx.send(osc_test::message("/clock/audio/inputs/get"));
+        fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/inputs.reply", r, 500));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/inputs.reply", r, 500));
         const auto p = r.parsed();
         REQUIRE(p.argInt(0) == 1);
         return static_cast<uint64_t>(p.argInt(1 + 9));  // totalSourceBufferCalls
@@ -860,7 +907,7 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
 
     // Re-add same (peer, channel, busIdx). Should be a no-op vs the
     // existing renderer — counters must NOT reset.
-    REQUIRE(sendAdd(64) == 1);
+    REQUIRE(sendAdd(2) == 1);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     const uint64_t after = readTotalCalls();
     INFO("before=" << before << " after=" << after);
@@ -878,30 +925,30 @@ TEST_CASE("LinkAudio: latency setter rejects values above the supported max",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
 
     auto setLatency = [&](float seconds) {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/latency/set");
+        auto& s = b.begin("/clockwork/clock/audio/input/latency/set");
         s << "FakeLive" << "Main" << seconds;
         fx.clearReplies();
         fx.send(b.end());
         OscReply r;
-        REQUIRE(fx.waitForReply("/clock/audio/input/latency/set.reply", r, 1000));
+        REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/latency/set.reply", r, 1000));
         return r.parsed().argInt(0);
     };
 
@@ -927,21 +974,21 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx;
-    fx.send(osc_test::message("/clock/visibility",        int32_t{2}));
-    fx.send(osc_test::message("/clock/audio/publish/set", int32_t{1}));
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/add");
-        s << "FakeLive" << "Main" << static_cast<int32_t>(64);
+        auto& s = b.begin("/clockwork/clock/audio/input/add");
+        s << "FakeLive" << "Main" << static_cast<int32_t>(2);
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply addReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/add.reply", addReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", addReply, 1000));
     REQUIRE(addReply.parsed().argInt(0) == 1);
     REQUIRE(waitForConnected(fx, "FakeLive", "Main",
                               std::chrono::seconds(30)).state
@@ -951,13 +998,13 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     // ~2.6 s at Link's wire rate, so 1.5 s should drop zero.
     {
         osc_test::Builder b;
-        auto& s = b.begin("/clock/audio/input/latency/set");
+        auto& s = b.begin("/clockwork/clock/audio/input/latency/set");
         s << "FakeLive" << "Main" << 1.5f;
         fx.clearReplies();
         fx.send(b.end());
     }
     OscReply setReply;
-    REQUIRE(fx.waitForReply("/clock/audio/input/latency/set.reply", setReply, 1000));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/latency/set.reply", setReply, 1000));
     CHECK(setReply.parsed().argInt(0) == 1);
 
     // Let the consumer build out the deeper retained set, then check
@@ -965,9 +1012,9 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
     fx.clearReplies();
-    fx.send(osc_test::message("/clock/audio/inputs/get"));
+    fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
     OscReply inputsReply;
-    REQUIRE(fx.waitForReply("/clock/audio/inputs.reply", inputsReply, 500));
+    REQUIRE(fx.waitForReply("/clockwork/clock/audio/inputs.reply", inputsReply, 500));
     const auto p = inputsReply.parsed();
     REQUIRE(p.argInt(0) >= 1);
     const int base = 1 + 0 * 12;  // first (only) entry
@@ -980,4 +1027,4 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     CHECK(p.argInt(base + 8) == 0);   // networkGapBuffers
 }
 
-#endif  // SUPERSONIC_LINK
+#endif  // CLOCKWORK_LINK

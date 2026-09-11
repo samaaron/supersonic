@@ -1,4 +1,5 @@
 import { test, expect, skipIfPostMessage, WAIT_FOR_TREE_HELPER } from "./fixtures.mjs";
+import { NODE_TREE_HEADER_SIZE, NODE_TREE_ENTRY_SIZE } from '../js/lib/node_tree_parser.js';
 
 // Helper to wait for tree updates (works in both SAB and postMessage modes)
 const WAIT_FOR_TREE = `
@@ -245,6 +246,23 @@ test.describe("SuperSonic", () => {
       expect(result.success).toBe(true);
       expect(result.threw).toBe(true);
       expect(result.message).toContain("must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob");
+    });
+
+    test("the boot banner is SuperSonic's, not the substrate's", async ({ page, sonicConfig }) => {
+      // The banner is the product's (dsp/supersonic_product.h); clockwork's
+      // default was printed for a while, and before that another product's.
+      const result = await page.evaluate(async (config) => {
+        const sonic = new window.SuperSonic(config);
+        const texts = [];
+        sonic.on('debug', (m) => texts.push(m.text));
+        await sonic.init();
+        await new Promise(r => setTimeout(r, 500));
+        return texts;
+      }, sonicConfig);
+
+      const all = result.join("\n");
+      expect(all).toContain("░█▀▀░█░█░█▀█░█▀▀░█▀▄░█▀▀░█▀█░█▀█░▀█▀░█▀▀");
+      expect(all).not.toContain("░█▀▀░█░░░█▀█░█▀▀░█░█░█░█░█▀█░█▀▄░█░█");
     });
 
     test("scsynth debug output reaches the 'debug' event", async ({ page, sonicConfig }) => {
@@ -1064,12 +1082,11 @@ test.describe("Node Tree Layout", () => {
         return {
           success: true,
           tree,
+          // Clockwork publishes the WINDOW — where it is and how big. What a
+          // node entry is, and so how many fit, is this guest's business.
           bufferConstants: {
-            NODE_TREE_START: bc.NODE_TREE_START,
-            NODE_TREE_SIZE: bc.NODE_TREE_SIZE,
-            NODE_TREE_HEADER_SIZE: bc.NODE_TREE_HEADER_SIZE,
-            NODE_TREE_ENTRY_SIZE: bc.NODE_TREE_ENTRY_SIZE,
-            NODE_TREE_MIRROR_MAX_NODES: bc.NODE_TREE_MIRROR_MAX_NODES,
+            SHM_WINDOW_START: bc.SHM_WINDOW_START,
+            SHM_WINDOW_SIZE: bc.SHM_WINDOW_SIZE,
           },
         };
       } catch (err) {
@@ -1079,12 +1096,15 @@ test.describe("Node Tree Layout", () => {
 
     expect(result.success).toBe(true);
 
-    // Buffer constants should be consistent
-    expect(result.bufferConstants.NODE_TREE_START).toBeGreaterThan(0);
-    expect(result.bufferConstants.NODE_TREE_SIZE).toBe(73744);
-    expect(result.bufferConstants.NODE_TREE_HEADER_SIZE).toBe(16);
-    expect(result.bufferConstants.NODE_TREE_ENTRY_SIZE).toBe(72);
-    expect(result.bufferConstants.NODE_TREE_MIRROR_MAX_NODES).toBe(1024);
+    // The window is where clockwork says it is.
+    expect(result.bufferConstants.SHM_WINDOW_START).toBeGreaterThan(0);
+    // Capacity is DERIVED from the window and the entry, with the parser's own
+    // constants rather than literals: the same sum node_tree.h does for
+    // NODE_TREE_MIRROR_MAX_NODES, so a change to either side moves both.
+    const capacity = Math.floor(
+      (result.bufferConstants.SHM_WINDOW_SIZE - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
+    expect(NODE_TREE_ENTRY_SIZE % 8).toBe(0);
+    expect(capacity).toBe(1024);
 
     // Initial tree should have just the root group
     expect(result.tree.nodes.length).toBe(1);
@@ -1126,10 +1146,11 @@ test.describe("SuperSonic (SAB-only)", () => {
 
         const tree = sonic.getRawTree();
 
-        // Direct memory access (SAB-only)
+        // Direct memory access (SAB-only). The node tree is what this guest
+        // publishes in clockwork's WINDOW, so it starts where the window does.
         const bc = sonic.bufferConstants;
         const ringBufferBase = sonic.ringBufferBase;
-        const treeBase = ringBufferBase + bc.NODE_TREE_START;
+        const treeBase = ringBufferBase + bc.SHM_WINDOW_START;
         const treeView = new Int32Array(sonic.sharedBuffer, treeBase, 20);
         const first20 = Array.from(treeView);
 

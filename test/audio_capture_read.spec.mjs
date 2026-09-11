@@ -8,7 +8,7 @@
 // a RangeError (or a read into neighbouring SAB memory). read() must clamp to
 // capacity_frames: the ring only physically holds that many frames.
 import { test, expect } from '@playwright/test';
-import { AudioCapture } from '../js/lib/audio_capture.js';
+import { AudioCapture } from '../clockwork/js/lib/audio_capture.js';
 
 // Header layout (matches shm_audio_buffer.hpp / audio_capture.js):
 //   [0] enabled  [1] sample_rate  [2] channels  [3] capacity_frames
@@ -39,7 +39,15 @@ function makeCapture({ capacity, channels, wpos, sampleRate = 48000 }) {
   const cap = new AudioCapture({
     sharedBuffer: sab,
     ringBufferBase: 0,
-    bufferConstants: { SHM_AUDIO_START: 0, SHM_AUDIO_HEADER_SIZE: HEADER_BYTES },
+    // SHM_AUDIO_SLOT_SIZE is required even at slot 0: #slotOffset() computes
+    // slot * SHM_AUDIO_SLOT_SIZE, and 0 * undefined is NaN, not 0. A NaN
+    // byteOffset does not throw — ToIndex(NaN) is 0 — so the view would
+    // silently start on the header and read it back as float samples.
+    bufferConstants: {
+      SHM_AUDIO_START: 0,
+      SHM_AUDIO_HEADER_SIZE: HEADER_BYTES,
+      SHM_AUDIO_SLOT_SIZE: HEADER_BYTES + dataFloats * 4,
+    },
   });
   return cap;
 }

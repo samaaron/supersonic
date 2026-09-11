@@ -27,7 +27,8 @@ set -e
 #  11. docs/INSTALLATION_WEB.md - pinned version example
 #
 # C++ version constants (1):
-#  12. src/supersonic_config.h - SUPERSONIC_VERSION_{MAJOR,MINOR,PATCH} macros
+#  12. CMakeLists.txt - project(SuperSonic VERSION x.y.z), which clockwork
+#      turns into the banner, the -v output and the Windows version resource
 #
 # Note: READMEs and error messages use @latest and don't need version updates
 
@@ -133,16 +134,12 @@ echo "------------------------------------------"
 # Parse new version into components
 IFS='.' read -r NEW_MAJOR NEW_MINOR NEW_PATCH <<< "$NEW_VERSION"
 
-# Get current C++ version components from supersonic_config.h
-CURRENT_CPP_MAJOR=$(grep "SUPERSONIC_VERSION_MAJOR" "$PROJECT_ROOT/src/supersonic_config.h" | head -1 | grep -o '[0-9]\+')
-CURRENT_CPP_MINOR=$(grep "SUPERSONIC_VERSION_MINOR" "$PROJECT_ROOT/src/supersonic_config.h" | head -1 | grep -o '[0-9]\+')
-CURRENT_CPP_PATCH=$(grep "SUPERSONIC_VERSION_PATCH" "$PROJECT_ROOT/src/supersonic_config.h" | head -1 | grep -o '[0-9]\+')
-
-# Update C++ version macros (all three components)
-sed -i "s/#define SUPERSONIC_VERSION_MAJOR $CURRENT_CPP_MAJOR/#define SUPERSONIC_VERSION_MAJOR $NEW_MAJOR/" "$PROJECT_ROOT/src/supersonic_config.h"
-sed -i "s/#define SUPERSONIC_VERSION_MINOR $CURRENT_CPP_MINOR/#define SUPERSONIC_VERSION_MINOR $NEW_MINOR/" "$PROJECT_ROOT/src/supersonic_config.h"
-sed -i "s/#define SUPERSONIC_VERSION_PATCH $CURRENT_CPP_PATCH/#define SUPERSONIC_VERSION_PATCH $NEW_PATCH/" "$PROJECT_ROOT/src/supersonic_config.h"
-echo "✓ Updated src/supersonic_config.h ($CURRENT_CPP_MAJOR.$CURRENT_CPP_MINOR.$CURRENT_CPP_PATCH → $NEW_VERSION)"
+# The C++ side takes its version from CMake: project(SuperSonic VERSION x.y.z)
+# in CMakeLists.txt, which clockwork turns into the boot banner, `-v`, and the
+# Windows version resource.
+sed -i "s/^\(    VERSION \)$CURRENT_VERSION\$/\1$NEW_VERSION/" "$PROJECT_ROOT/CMakeLists.txt"
+grep -q "VERSION $NEW_VERSION" "$PROJECT_ROOT/CMakeLists.txt" || { echo "ERROR: CMakeLists.txt VERSION was not $CURRENT_VERSION" >&2; exit 1; }
+echo "✓ Updated CMakeLists.txt ($CURRENT_VERSION → $NEW_VERSION)"
 
 echo ""
 echo "Step 5: Regenerating manifests..."

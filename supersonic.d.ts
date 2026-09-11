@@ -359,7 +359,7 @@ export interface SuperSonicMetrics {
   /** Number of input bus channels. */
   audioInputChannels: number;
 
-  // SuperClock readouts (cross-platform; written per audio block)
+  // ClockworkClock readouts (cross-platform; written per audio block)
   /** Tempo in milli-BPM (bpm * 1000). Divide by 1000 for BPM. */
   clockTempoMbpm: number;
   /** Beat position * 100. Divide by 100 for the beat. */
@@ -750,18 +750,18 @@ export interface BootStats {
 }
 
 // ============================================================================
-// SuperClock — session-timeline service
+// ClockworkClock — session-timeline service (clockwork's clock)
 // ============================================================================
 
 /**
  * Engine session-timeline service. Tempo, beat origin, transport, and
- * NTP-derived "now." Accessed via {@link SuperSonic.superClock}.
+ * NTP-derived "now." Accessed via {@link SuperSonic.clock}.
  *
  * Each field is read/written independently — no multi-field coherence
  * guarantee. Link-specific methods are no-ops on builds without a Link
  * backing (see individual method docs).
  */
-export interface SuperClock {
+export interface ClockworkClock {
   // ── Time / drift ─────────────────────────────────────────────────────
 
   initialize(): Promise<void>;
@@ -799,7 +799,7 @@ export interface SuperClock {
 
   /**
    * Current NTP time as seen by the audio thread. Use this for scheduling:
-   * `sonic.superClock.now() + 0.05` gives a timestamp 50ms in audio-clock
+   * `sonic.clock.now() + 0.05` gives a timestamp 50ms in audio-clock
    * future, which the audio thread reaches in 50ms of audio time —
    * independent of any wall-clock-vs-audio-clock skew.
    */
@@ -1295,9 +1295,9 @@ export class SuperSonic {
 
   /**
    * Session-timeline service: tempo, beat origin, transport, NTP "now."
-   * See {@link SuperClock} for the full API surface.
+   * See {@link ClockworkClock} for the full API surface.
    */
-  get superClock(): SuperClock;
+  get clock(): ClockworkClock;
 
   /**
    * AudioWorkletNode wrapper for custom audio routing.

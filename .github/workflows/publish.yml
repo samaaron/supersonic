@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -32,15 +34,17 @@ jobs:
           version: '4.0.21'
           actions-cache-folder: 'emsdk-cache'
 
-      - name: Setup Rust (wasm32 target for the MIDI module)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Rust (nightly for the shared-memory std, wasm32 for the MIDI and gamepad modules)
+        uses: dtolnay/rust-toolchain@master
         with:
-          targets: wasm32-unknown-unknown
+          toolchain: nightly-2026-07-02
+          targets: wasm32-unknown-unknown,wasm32-unknown-emscripten
+          components: rust-src
 
       - name: Install wasm-bindgen-cli
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen-cli@0.2.122
+          tool: wasm-bindgen-cli@0.2.127
 
       - name: Build (release mode)
         run: ./scripts/build-web.sh --release

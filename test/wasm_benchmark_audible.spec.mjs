@@ -96,8 +96,8 @@ test.describe('WASM Audible Benchmark', () => {
           type: 'beep',
           count,
           ...health,
-          processCount: metrics.scsynthProcessCount,
-          schedulerLates: metrics.scsynthSchedulerLates,
+          processCount: metrics.engineProcessCount,
+          schedulerLates: metrics.engineSchedulerLates,
           glitchCount: metrics.glitchCount ?? -1,
         });
 
@@ -125,8 +125,8 @@ test.describe('WASM Audible Benchmark', () => {
           type: 'prophet',
           count,
           ...health,
-          processCount: metrics.scsynthProcessCount,
-          schedulerLates: metrics.scsynthSchedulerLates,
+          processCount: metrics.engineProcessCount,
+          schedulerLates: metrics.engineSchedulerLates,
           glitchCount: metrics.glitchCount ?? -1,
         });
 

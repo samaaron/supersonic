@@ -1414,7 +1414,7 @@ test.describe("Memory Stability", () => {
 
       // Get initial metrics
       const initialMetrics = sonic.getMetrics();
-      const initialProcessCount = initialMetrics.scsynthProcessCount;
+      const initialProcessCount = initialMetrics.engineProcessCount;
 
       // Heavy operations
       for (let round = 0; round < 10; round++) {
@@ -1441,11 +1441,11 @@ test.describe("Memory Stability", () => {
 
       return {
         success: true,
-        processCountIncreased: finalMetrics.scsynthProcessCount > initialProcessCount,
+        processCountIncreased: finalMetrics.engineProcessCount > initialProcessCount,
         inBufferSize,
         messageMagic,
         treeValid,
-        finalProcessCount: finalMetrics.scsynthProcessCount,
+        finalProcessCount: finalMetrics.engineProcessCount,
       };
     }, sonicConfig);
 

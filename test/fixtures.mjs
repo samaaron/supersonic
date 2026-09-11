@@ -1,5 +1,5 @@
 /**
- * Playwright Test Fixtures for SuperSonic
+ * Playwright Test Fixtures for Clockwork
  *
  * Provides custom fixtures that automatically handle mode-based configuration.
  * Tests import from this file instead of '@playwright/test'.
@@ -9,7 +9,7 @@
  *
  *   test("my test", async ({ page, sonicConfig }) => {
  *     const result = await page.evaluate(async (config) => {
- *       const sonic = new window.SuperSonic(config);
+ *       const sonic = new window.Clockwork(config);
  *       await sonic.init();
  *       // ...
  *     }, sonicConfig);
@@ -20,7 +20,7 @@ import { test as base } from '@playwright/test';
 
 export const test = base.extend({
   /**
-   * Fixture: SuperSonic configuration based on current project mode.
+   * Fixture: Clockwork configuration based on current project mode.
    * Automatically uses 'sab' or 'postMessage' based on which project is running.
    */
   sonicConfig: async ({}, use, testInfo) => {
@@ -28,6 +28,10 @@ export const test = base.extend({
     await use({
       workerBaseURL: "/dist/workers/",
       wasmBaseURL: "/dist/wasm/",
+      // clockwork's default artifact name is guest-agnostic; SuperSonic's is
+      // scsynth-nrt.wasm, which is what its build emits and what upstream's
+      // client has always asked for.
+      wasmUrl: "/dist/wasm/scsynth-nrt.wasm",
       sampleBaseURL: "/dist/samples/",
       synthdefBaseURL: "/dist/synthdefs/",
       snapshotIntervalMs: 25,  // Fast metrics updates for test reliability
@@ -45,7 +49,7 @@ export const test = base.extend({
   },
 
   /**
-   * Fixture: Page pre-navigated to test harness and ready for SuperSonic.
+   * Fixture: Page pre-navigated to test harness and ready for Clockwork.
    * Includes console error logging.
    */
   sonicPage: async ({ page, sonicConfig }, use) => {
@@ -60,7 +64,7 @@ export const test = base.extend({
       console.error("Page error:", err.message);
     });
 
-    // Navigate and wait for SuperSonic to be ready
+    // Navigate and wait for Clockwork to be ready
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, {
       timeout: 10000,

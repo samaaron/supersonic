@@ -1,0 +1,11 @@
+[package]
+name = "supersonic-limiter"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Look-ahead brickwall limiter with latency equal to the look-ahead."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]

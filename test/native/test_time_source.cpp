@@ -14,7 +14,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
-#include "native/TimeSource.h"
+#include "clock/TimeSource.h"
 
 #include <cmath>
 
@@ -144,15 +144,15 @@ TEST_CASE("TimeSource: freewheel ignores the wall clock entirely",
 // window's peak and hit count so one line tells the minute's story.
 
 TEST_CASE("DriftLogGate: quiet clock never logs", "[DriftLog]") {
-    supersonic::DriftLogGate gate;
-    supersonic::DriftLogGate::Line line;
+    clockwork::DriftLogGate gate;
+    clockwork::DriftLogGate::Line line;
     for (int i = 0; i < 1000; ++i)
         REQUIRE_FALSE(gate.offer(0.004, 1000.0 + i * 0.02, line));
 }
 
 TEST_CASE("DriftLogGate: first excursion logs immediately", "[DriftLog]") {
-    supersonic::DriftLogGate gate;
-    supersonic::DriftLogGate::Line line;
+    clockwork::DriftLogGate gate;
+    clockwork::DriftLogGate::Line line;
     REQUIRE(gate.offer(0.0062, 5000.0, line));
     REQUIRE(line.hits == 1);
     REQUIRE(line.total == 1);
@@ -161,8 +161,8 @@ TEST_CASE("DriftLogGate: first excursion logs immediately", "[DriftLog]") {
 
 TEST_CASE("DriftLogGate: sustained jitter summarises once a minute",
           "[DriftLog]") {
-    supersonic::DriftLogGate gate;
-    supersonic::DriftLogGate::Line line;
+    clockwork::DriftLogGate gate;
+    clockwork::DriftLogGate::Line line;
     int lines = 0;
     // Two full minutes of 50Hz callbacks all hovering over threshold
     // (6001 ticks spans t=1000..1120 inclusive, crossing both minute marks).
@@ -180,8 +180,8 @@ TEST_CASE("DriftLogGate: sustained jitter summarises once a minute",
 
 TEST_CASE("DriftLogGate: a step long after the last report logs immediately",
           "[DriftLog]") {
-    supersonic::DriftLogGate gate;
-    supersonic::DriftLogGate::Line line;
+    clockwork::DriftLogGate gate;
+    clockwork::DriftLogGate::Line line;
     REQUIRE(gate.offer(0.010, 1000.0, line));
     // Quiet hour.
     for (int i = 0; i < 100; ++i)

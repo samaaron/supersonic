@@ -25,7 +25,7 @@
 
 static double resolveRate(double requested, int preWireless, double current,
                           bool curIsWireless, bool targetIsWireless) {
-    return sonicpi::device::resolveWirelessExitRate(
+    return clockwork::device::resolveWirelessExitRate(
         requested, preWireless, current, curIsWireless, targetIsWireless);
 }
 
@@ -68,14 +68,14 @@ TEST_CASE("WirelessExit: AirPlay 44.1 → MBP Speakers restores 48k",
 // decideHotplugAction
 // =============================================================================
 
-using HD = sonicpi::device::HotplugDecision;
+using HD = clockwork::device::HotplugDecision;
 
 static HD decide(const std::string& prefOut,
                  const std::string& prefIn,
                  const std::string& currentOut,
                  int inChan,
                  std::vector<std::string> visible) {
-    return sonicpi::device::decideHotplugAction(
+    return clockwork::device::decideHotplugAction(
         prefOut, prefIn, currentOut, inChan, visible);
 }
 
@@ -193,7 +193,7 @@ TEST_CASE("Hotplug: preferred input visible but preferred output NOT visible "
 
 static std::string resolveName(const std::string& raw,
                                std::vector<std::string> visible) {
-    return sonicpi::device::resolveJuceDeviceName(raw, visible);
+    return clockwork::device::resolveJuceDeviceName(raw, visible);
 }
 
 TEST_CASE("JuceName: empty input returned unchanged", "[JuceName]") {
@@ -269,7 +269,7 @@ TEST_CASE("JuceName: multi-digit suffix recognised",
 static std::string selectBoot(const std::string& defName, bool defWireless,
                               std::vector<std::string> visible,
                               std::vector<bool> wireless) {
-    return sonicpi::device::selectBootOutputDevice(defName, defWireless,
+    return clockwork::device::selectBootOutputDevice(defName, defWireless,
                                                     visible, wireless);
 }
 
@@ -342,7 +342,7 @@ TEST_CASE("BootFallback: skip the default itself when it's in the list",
 // =============================================================================
 
 static int chooseBlock(int hw, int def = 128, int lo = 32, int hi = 1024) {
-    return sonicpi::device::chooseBlockSize(hw, def, lo, hi);
+    return clockwork::device::chooseBlockSize(hw, def, lo, hi);
 }
 
 TEST_CASE("ChooseBlockSize: in-range HW matches 1:1", "[ChooseBlockSize]") {
@@ -392,7 +392,7 @@ TEST_CASE("ChooseBlockSize: respects custom default", "[ChooseBlockSize]") {
 
 static std::string validate(const std::string& out, const std::string& in,
                             std::vector<std::string> visible) {
-    return sonicpi::device::validateSwapDeviceNames(out, in, visible);
+    return clockwork::device::validateSwapDeviceNames(out, in, visible);
 }
 
 TEST_CASE("ValidateSwap: empty names accepted (means leave unchanged)",
@@ -466,8 +466,8 @@ TEST_CASE("ValidateSwap: 'USB Audio' doesn't false-positive 'USB Audio Pro'",
 // call setCurrentAudioDeviceType before opening — the input to
 // switchDevice's cross-driver branch.
 
-using sonicpi::device::locateDevice;
-using sonicpi::device::planDeviceSwitch;
+using clockwork::device::locateDevice;
+using clockwork::device::planDeviceSwitch;
 using DevTable = std::vector<std::pair<std::string, std::string>>;
 
 TEST_CASE("LocateDevice: empty name returns not-found",
@@ -672,7 +672,7 @@ TEST_CASE("PlanDeviceSwitch: tolerates JUCE '<base> (N)' suffix under current dr
 // =============================================================================
 
 static double aggRate(double desired, double in, double out) {
-    return sonicpi::device::resolveAggregateRate(desired, in, out);
+    return clockwork::device::resolveAggregateRate(desired, in, out);
 }
 
 TEST_CASE("AggregateRate: output accepted the desired rate → use it",
@@ -721,7 +721,7 @@ TEST_CASE("AggregateRate: nothing readable → fall back to desired",
 
 static bool follow(const std::string& nd, const std::string& cur, bool virt,
                    const std::string& selfPrefix = "SuperSonic") {
-    return sonicpi::device::shouldFollowDefaultOutputChange(nd, cur, virt,
+    return clockwork::device::shouldFollowDefaultOutputChange(nd, cur, virt,
                                                             selfPrefix);
 }
 
@@ -792,7 +792,7 @@ TEST_CASE("FollowDefault: empty self-prefix never matches",
 // =============================================================================
 
 static int width(int requested, int boot, int probed) {
-    return sonicpi::device::resolveInputWidth(requested, boot, probed);
+    return clockwork::device::resolveInputWidth(requested, boot, probed);
 }
 
 TEST_CASE("InputWidth: auto sentinel + boot auto-max clamps to probed count",
@@ -807,8 +807,8 @@ TEST_CASE("InputWidth: auto sentinel + boot auto-max + probe failed → request 
           "[InputWidth]") {
     // Unknown capacity: keep the over-request (CoreAudio clamps; nothing
     // better is knowable).
-    REQUIRE(width(-1, -1, -1) == sonicpi::device::kRequestMaxChannels);
-    REQUIRE(width(-1, -1, 0) == sonicpi::device::kRequestMaxChannels);
+    REQUIRE(width(-1, -1, -1) == clockwork::device::kRequestMaxChannels);
+    REQUIRE(width(-1, -1, 0) == clockwork::device::kRequestMaxChannels);
 }
 
 TEST_CASE("InputWidth: auto sentinel honours an explicit boot count",
@@ -818,10 +818,22 @@ TEST_CASE("InputWidth: auto sentinel honours an explicit boot count",
     REQUIRE(width(-1, 4, 2) == 2);
 }
 
-TEST_CASE("InputWidth: auto sentinel + boot disabled inputs → stereo default",
+TEST_CASE("InputWidth: auto sentinel + boot disabled inputs → device width",
           "[InputWidth]") {
-    REQUIRE(width(-1, 0, -1) == 2);
+    // Sonic Pi boots -i 0 by default and enables inputs live; the boot
+    // count says nothing about the user's interface, so ask for all of
+    // it. A stereo cap here left an 8-in interface at 2 inputs.
+    REQUIRE(width(-1, 0, 8) == 8);
+    REQUIRE(width(-1, 0, 2) == 2);
     REQUIRE(width(-1, 0, 1) == 1);
+}
+
+TEST_CASE("InputWidth: auto sentinel + boot disabled inputs + probe failed → stereo",
+          "[InputWidth]") {
+    // Nothing known about the device and no boot count to lean on: WASAPI
+    // rejects an over-request outright, so request the width every device has.
+    REQUIRE(width(-1, 0, -1) == 2);
+    REQUIRE(width(-1, 0, 0) == 2);
 }
 
 TEST_CASE("InputWidth: explicit request clamps to probed capacity",
@@ -847,7 +859,7 @@ TEST_CASE("InputWidth: explicit zero (disable) is never touched",
 // =============================================================================
 
 static bool visible(const std::string& n, std::vector<std::string> names) {
-    return sonicpi::device::deviceNameVisible(n, names);
+    return clockwork::device::deviceNameVisible(n, names);
 }
 
 TEST_CASE("DeviceVisible: exact match present → visible (safe to open)",
@@ -888,7 +900,7 @@ TEST_CASE("DeviceVisible: does not false-match a longer base name",
 // =============================================================================
 
 static std::vector<int> aggRates(std::vector<int> out, std::vector<int> in) {
-    return sonicpi::device::usableAggregateRates(out, in);
+    return clockwork::device::usableAggregateRates(out, in);
 }
 
 TEST_CASE("UsableAggRates: both support the same set → that set",
@@ -937,7 +949,7 @@ TEST_CASE("UsableAggRates: output list empty → fall back to input",
 // and the user's next device pick is refused against the wrong driver.
 // =============================================================================
 
-using SS = sonicpi::device::SwapScopeDecision;
+using SS = clockwork::device::SwapScopeDecision;
 
 namespace {
 // Each pick resolves under exactly one driver: the MOTU only under ASIO,
@@ -952,7 +964,7 @@ const std::vector<std::pair<std::string, std::string>> kScopeTable = {
 static SS scope(bool user, const std::string& intended,
                 const std::string& current,
                 const std::string& out, const std::string& in) {
-    return sonicpi::device::resolveSwapScope(
+    return clockwork::device::resolveSwapScope(
         user, intended, current, out, in, kScopeTable);
 }
 
@@ -1036,9 +1048,9 @@ TEST_CASE("SwapScope: input name participates in the resolution",
 // pass amputated the input).
 
 namespace {
-sonicpi::device::ExclusivePair xpair(const std::string& reqOut, const std::string& reqIn,
+clockwork::device::ExclusivePair xpair(const std::string& reqOut, const std::string& reqIn,
                                      const std::string& curOut, const std::string& curIn) {
-    return sonicpi::device::resolveExclusiveDuplexPair(
+    return clockwork::device::resolveExclusiveDuplexPair(
         reqOut, reqIn, curOut, curIn, "Patchbay (16 ch)", "System Default");
 }
 } // namespace
@@ -1112,7 +1124,7 @@ TEST_CASE("ExclusivePair: staying on the exclusive device passes through",
 
 TEST_CASE("ExclusivePair: empty exclusive name disables the policy",
           "[ExclusivePair]") {
-    auto p = sonicpi::device::resolveExclusiveDuplexPair(
+    auto p = clockwork::device::resolveExclusiveDuplexPair(
         "System Default", "", "Patchbay (16 ch)", "Patchbay (16 ch)", "", "System Default");
     REQUIRE(p.output == "System Default");
     REQUIRE(p.input == "");
@@ -1139,9 +1151,9 @@ TEST_CASE("ExclusivePair: exclusive output with inputs disabled is legal, "
 // flagged row contributed by the engine, so the GUI never invents rows.
 
 namespace {
-sonicpi::device::DriverTableAnnotation annotate(const std::string& driver,
+clockwork::device::DriverTableAnnotation annotate(const std::string& driver,
                                                 const std::vector<std::string>& outputs) {
-    return sonicpi::device::annotateDriverOutputs(
+    return clockwork::device::annotateDriverOutputs(
         driver, outputs, "PipeWire", "System Default", "Patchbay (16 ch)");
 }
 } // namespace
@@ -1193,7 +1205,7 @@ TEST_CASE("TableAnnotation: patchbay name in a foreign driver is not special",
 static std::string chooseInput(const std::string& requested,
                                const std::string& fallback,
                                const std::vector<std::string>& visible) {
-    return sonicpi::device::chooseBootInputDevice(requested, fallback, visible);
+    return clockwork::device::chooseBootInputDevice(requested, fallback, visible);
 }
 
 TEST_CASE("BootInput: no request = system default", "[BootInput]") {
@@ -1249,7 +1261,7 @@ static std::string chooseInput(const std::string& requested,
                                const std::string& fallback,
                                const std::vector<std::string>& visible,
                                const std::vector<bool>& suitable) {
-    return sonicpi::device::chooseBootInputDevice(requested, fallback,
+    return clockwork::device::chooseBootInputDevice(requested, fallback,
                                                   visible, suitable);
 }
 
@@ -1369,7 +1381,7 @@ TEST_CASE("BootInput: default resolves via JUCE suffix and is judged by its "
 // -H <in> (input-only pref), -H <out> (output-only pref). The second argv
 // token only counts as a name when it's non-empty and not flag-shaped.
 
-using sonicpi::device::parseHardwareFlag;
+using clockwork::device::parseHardwareFlag;
 
 TEST_CASE("HFlag: single name serves both directions", "[HFlag]") {
     // daemon.rb sends `-H <input>` when only an input pref is saved —
@@ -1434,8 +1446,8 @@ TEST_CASE("HFlag: two-name form passes sentinels through", "[HFlag]") {
 // latches cross-driver state first-wins into a SwapScope.
 // =============================================================================
 
-using sonicpi::device::SwapScope;
-using sonicpi::device::resolveSwapTarget;
+using clockwork::device::SwapScope;
+using clockwork::device::resolveSwapTarget;
 
 static const std::vector<std::pair<std::string, std::string>> kTwoDriverTable = {
     {"CoreAudio", "MacBook Pro Speakers"},
@@ -1519,7 +1531,7 @@ TEST_CASE("SwapTarget: cross-driver latch is first-wins", "[SwapTarget]") {
 // one. One rule, one implementation, everywhere.
 // =============================================================================
 
-using sonicpi::device::sameDeviceName;
+using clockwork::device::sameDeviceName;
 
 TEST_CASE("SameDevice: exact names match", "[SameDevice]") {
     REQUIRE(sameDeviceName("MacBook Pro Speakers", "MacBook Pro Speakers"));
@@ -1606,7 +1618,7 @@ TEST_CASE("Aggregate suitability: plain hardware is suitable",
 // active-driver preference → transient-enumeration suppression.
 // =============================================================================
 
-using sonicpi::device::selectReportedDevices;
+using clockwork::device::selectReportedDevices;
 
 namespace {
 DeviceInfo dev(const std::string& name, const std::string& driver,
@@ -1717,7 +1729,7 @@ TEST_CASE("ReportSelect: PipeWire detected via native driver or ALSA compat",
 // their divergence explicitly.
 // =============================================================================
 
-using sonicpi::device::resolveTargetRate;
+using clockwork::device::resolveTargetRate;
 
 TEST_CASE("TargetRate: supported current rate is kept (returns 0)",
           "[TargetRate]") {
@@ -1750,9 +1762,9 @@ TEST_CASE("TargetRate: integer comparison tolerates 44100.0001-style reports",
 // planner didn't decide.
 // =============================================================================
 
-using sonicpi::device::planSwap;
-using sonicpi::device::SwapPlanRequest;
-using sonicpi::device::SwapSnapshot;
+using clockwork::device::planSwap;
+using clockwork::device::SwapPlanRequest;
+using clockwork::device::SwapSnapshot;
 
 namespace {
 SwapSnapshot snapTwoDevices() {
@@ -1895,8 +1907,8 @@ TEST_CASE("PlanSwap: user pick under the still-active driver abandons the "
 // resolveBootDriver
 // =============================================================================
 
-using sonicpi::device::resolveBootDriver;
-using sonicpi::device::resolveBootHardwareMatch;
+using clockwork::device::resolveBootDriver;
+using clockwork::device::resolveBootHardwareMatch;
 
 static const std::vector<std::string> kWinTypes = {
     "Windows Audio", "Windows Audio (Exclusive Mode)",
@@ -2023,7 +2035,7 @@ TEST_CASE("BootHardwareMatch: unknown device matches nothing",
 // looks pairable -- and only fails at the open, after the output device is
 // already up.
 
-using sonicpi::device::scopeInputsToDriver;
+using clockwork::device::scopeInputsToDriver;
 
 // One interface as Windows really enumerates it: an ASIO entry named for the
 // box itself, and Windows Audio entries named for the endpoints.
@@ -2123,8 +2135,8 @@ TEST_CASE("DeviceInfo: aggregate-class devices are not aggregable",
 // system-default input (BT HFP mic) entered the aggregate, dragged the
 // engine to 16 kHz and corrupted the heap via the rate/buffer churn.
 
-using sonicpi::device::planBootInputPairing;
-using sonicpi::device::BootInputPairing;
+using clockwork::device::planBootInputPairing;
+using clockwork::device::BootInputPairing;
 
 namespace {
 DeviceInfo dev(const std::string& name, int outs, int ins,
@@ -2243,7 +2255,7 @@ TEST_CASE("BootPairing: wireless output pairs nothing", "[BootPairing]") {
 // handler must simply never fire while one is set.
 
 TEST_CASE("FollowDefault: pinned output vetoes following", "[FollowDefault]") {
-    using sonicpi::device::shouldFollowDefaultOutputChange;
+    using clockwork::device::shouldFollowDefaultOutputChange;
     REQUIRE_FALSE(shouldFollowDefaultOutputChange(
         "WH-1000XM5", "Testy", false, "SuperSonic", "Testy"));
     // Pin vetoes even when the new default is the pin itself gone missing
@@ -2254,7 +2266,7 @@ TEST_CASE("FollowDefault: pinned output vetoes following", "[FollowDefault]") {
 }
 
 TEST_CASE("FollowDefault: no pin keeps existing behaviour", "[FollowDefault]") {
-    using sonicpi::device::shouldFollowDefaultOutputChange;
+    using clockwork::device::shouldFollowDefaultOutputChange;
     REQUIRE(shouldFollowDefaultOutputChange(
         "External Headphones", "MacBook Pro Speakers", false, "SuperSonic",
         ""));
@@ -2269,7 +2281,7 @@ TEST_CASE("FollowDefault: no pin keeps existing behaviour", "[FollowDefault]") {
 // Testy wedged at 16 kHz, recovery reopened the wireless system default and
 // stayed there). Empty = no pin or pin gone = the system default.
 
-using sonicpi::device::selectRecoveryTarget;
+using clockwork::device::selectRecoveryTarget;
 
 TEST_CASE("RecoveryTarget: attached pin wins", "[RecoveryTarget]") {
     REQUIRE(selectRecoveryTarget("Testy",

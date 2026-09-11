@@ -38,6 +38,9 @@ export default defineConfig({
     },
   ],
 
+  // The exported demo (build/site) is booted by the suite; produce it first.
+  globalSetup: "./test/global-setup.mjs",
+
   // Start the test server before running tests
   webServer: {
     command: "node test/server.mjs",

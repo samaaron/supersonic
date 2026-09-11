@@ -2,71 +2,57 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: supersonic
 Upstream-Contact: Sam Aaron <sam@sonic-pi.net>
 Source: https://github.com/samaaron/supersonic
-Files-Excluded: external_libs/ASIOSDK2.3.4
+Files-Excluded: clockwork/external/ASIOSDK2.3.4
 Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
- GPL-3) is excluded from the Debian source tarball because the directory also
- carries non-free documentation PDFs and trademark-encumbered logo artwork.
- It is not used on Linux.
+ GPL-3) is excluded from the Debian source tarball. It is not used on Linux.
+ .
+ SuperSonic is scsynth (dsp/scsynth, GPL-3+) running on clockwork
+ (clockwork/, AGPL-3+ or a commercial licence). The combined program is
+ AGPL-3+. clockwork is a git submodule of the upstream repository; the orig
+ tarball carries its sources under clockwork/ (git archive of the pinned
+ submodule commit), so the source package is the whole program.
  .
  The source package is assembled from three upstream tarballs:
- the main tarball (this repository), the "link" component (pristine Ableton
- Link 4.0 with its asio-standalone submodule; upstream patches under
- debian/patches apply to it), and the "rust-vendor" component (the output of
- `cargo vendor` for the committed rust/Cargo.lock). See debian/README.source.
+ the main tarball (this repository with clockwork/ filled in), the "link"
+ component (pristine Ableton Link 4.0 with its asio-standalone submodule;
+ clockwork's patches under debian/patches apply to it), and the
+ "rust-vendor" component (the output of `cargo vendor` for the committed
+ rust/Cargo.lock, which resolves clockwork's crates by path). See
+ debian/README.source.
 
 Files: *
 Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
-License: GPL-3+
+License: AGPL-3+
+Comment: The effective licence of the combined program. Individual first-party
+ files carry SPDX headers naming their own terms: the scsynth glue and the
+ host are GPL-3+, the JavaScript client files that predate clockwork are
+ Expat or GPL-3+, and build scripts are Expat. All are compatible with, and
+ subsumed by, AGPL-3+ in the built program.
 
-Files: js/*
- rust/*
- src/nif/supersonic.erl
- test/freestanding/freestanding_main.cpp
- esp32s3/main/main.cpp
+Files: clockwork/*
 Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
-License: Expat or GPL-3+
-Comment: The client libraries are dual-licensed so non-GPL hosts can embed
- them; the audio engine itself (src/) is GPL-3+ only.
+License: AGPL-3+
+Comment: clockwork is dual-licensed upstream (AGPL-3.0-or-later OR a
+ commercial licence). This package takes it under the AGPL.
 
-Files: js/workers/scsynth_audio_worklet.js
-Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
-License: GPL-3+
-Comment: The AudioWorklet that executes the GPL engine WASM is not part of
- the dual-licensed client-library set (see its SPDX header).
-
-Files: src/synth/*
+Files: dsp/scsynth/synth/*
 Copyright: 2002-2023 James McCartney and SuperCollider contributors
 License: GPL-2+
 Comment: SuperSonic's audio engine is a heavily modified fork of
- SuperCollider's scsynth server. Combined with the GPL-3+ first-party code
- the effective licence of the built binary is GPL-3+.
+ SuperCollider's scsynth server. Combined with the AGPL-3+ substrate the
+ effective licence of the built binary is AGPL-3+.
 
-Files: supersmoothy/*
-Copyright: 2022 Raw Material Software Limited
-           2026 Sam Aaron and the Sonic Pi Core Team
-License: ISC
-Comment: SuperSonic's audio-device layer — a vendored fork of the four
- ISC-licensed modules of JUCE 7.0.12 (juce_core, juce_events,
- juce_audio_basics, juce_audio_devices), maintained in-tree. Never synced
- from JUCE >= 8, whose modules are AGPL-3.0/commercial (see
- docs/UPSTREAM_SYNC_GUIDE.md). Divergences from pristine 7.0.12 are logged
- in supersmoothy/SUPERSONIC-CHANGES.md.
-
-Files: supersmoothy/modules/juce_core/zip/zlib/*
-Copyright: 1995-2005 Jean-loup Gailly and Mark Adler
-License: Zlib
-
-Files: src/synth/external_libraries/nova-simd/*
+Files: dsp/scsynth/synth/external_libraries/nova-simd/*
 Copyright: 2008-2012 Tim Blechmann
 License: GPL-2+
 
-Files: src/synth/external_libraries/TLSF-2.4.6/*
+Files: dsp/scsynth/synth/external_libraries/TLSF-2.4.6/*
 Copyright: 2005-2008 Miguel Masmano Tello
 License: GPL-2 or LGPL-2.1
 Comment: The TLSF real-time allocator is dual-licensed; this package uses it
  under the GPL-2 option, compatible with the engine's GPL licence.
 
-Files: src/synth/common/fftlib.c
+Files: dsp/scsynth/synth/common/fftlib.c
 Copyright: 1995-1996 John Green (Naval Undersea Warfare Center, USA)
 License: public-domain
  This FFT implementation was written by John Green, an employee of the US
@@ -75,23 +61,52 @@ License: public-domain
  duties are not subject to domestic copyright protection (17 U.S.C. 105).
  The same file ships in Debian's existing supercollider package.
 
-Files: src/vendor/oscpack/*
+Files: clockwork/smoothie/*
+Copyright: 2022 Raw Material Software Limited
+           2026 Sam Aaron and the Sonic Pi Core Team
+License: ISC
+Comment: clockwork's audio-device layer — a vendored fork of the four
+ ISC-licensed modules of JUCE 7.0.12 (juce_core, juce_events,
+ juce_audio_basics, juce_audio_devices), maintained in the clockwork
+ repository. Never synced from JUCE >= 8, whose modules are AGPL-3.0/commercial.
+
+Files: clockwork/smoothie/modules/juce_core/zip/zlib/*
+Copyright: 1995-2005 Jean-loup Gailly and Mark Adler
+License: Zlib
+Comment: Not compiled in this package: the build selects the system zlib
+ (-DCLOCKWORK_SYSTEM_ZLIB=ON).
+
+Files: clockwork/src/vendor/oscpack/*
 Copyright: 2004-2013 Ross Bencina <rossb@audiomulch.com>
 License: Expat
 Comment: The licence text includes non-binding requests regarding use.
 
-Files: external/midir/*
+Files: clockwork/src/vendor/stb/*
+Copyright: 2017 Sean Barrett
+License: Expat or public-domain
+ stb_vorbis is dual-licensed by its author under the MIT licence or as
+ public domain (Unlicense); this package takes it under the Expat terms.
+Comment: Not compiled in this package: the build selects the system stb
+ (-DCLOCKWORK_SYSTEM_STB=ON, libstb-dev).
+
+Files: clockwork/src/vendor/dr_libs/*
+Copyright: 2025 David Reid
+License: Expat or public-domain
+ dr_libs is dual-licensed by its author under the MIT-0 licence or as
+ public domain; this package takes it under the Expat terms.
+
+Files: clockwork/external/midir/*
 Copyright: 2015-2024 Patrick Reisert and RtMidi contributors
 License: Expat
-Comment: Vendored fork of the midir Rust crate (0.11.0) carrying local
- patches (timestamped send for WebMIDI/CoreMIDI). Consumed as a cargo path
+Comment: Vendored fork of the midir Rust crate carrying local patches
+ (timestamped send for WebMIDI/CoreMIDI). Consumed as a cargo path
  dependency; not replaceable by a crates.io copy without losing the patches.
 
-Files: external_libs/erlang_headers/*
+Files: clockwork/external/erlang_headers/*
 Copyright: 2009-2025 Ericsson AB
 License: Apache-2.0
 Comment: Bundled Erlang/OTP NIF headers, used only when the BEAM NIF is
- built (-DBUILD_NIF=ON). This package does not build the NIF.
+ built (-DCLOCKWORK_NIF=ON). This package does not build the NIF.
 
 Files: packages/supersonic-scsynth-samples/*
 Copyright: none (dedicated to the public domain by their authors)
@@ -116,7 +131,7 @@ Copyright: 2016-2024 Ableton AG
 License: GPL-2+
 Comment: Pristine Ableton Link 4.0 ("link" component tarball). Debian ships
  ableton-link-dev 3.x, which is too old for this package and lacks the four
- upstream-carried patches applied under debian/patches (loopback-only
+ clockwork-carried patches applied under debian/patches (loopback-only
  discovery, peer enumeration, monotonic commit timestamps, a LinkAudio
  teardown race fix).
 
@@ -129,7 +144,7 @@ Copyright: various Rust crate authors; see the LICENSE files inside each
  crate directory and rust/Cargo.lock for the exact crate set
 License: Expat or Apache-2.0
 Comment: Output of `cargo vendor` for the committed rust/Cargo.lock. The
- licence allow-list is machine-enforced by upstream's rust/deny.toml (MIT,
+ licence allow-list is machine-enforced by clockwork's rust/deny.toml (MIT,
  Apache-2.0 with or without LLVM-exception, BSD-2-Clause, BSD-3-Clause, ISC,
  Zlib, Unicode-3.0, Unicode-DFS-2016, CC0-1.0, MPL-2.0); every vendored
  crate is available under at least one of Expat or Apache-2.0 except a small
@@ -139,6 +154,20 @@ Comment: Output of `cargo vendor` for the committed rust/Cargo.lock. The
 Files: debian/*
 Copyright: 2026 Sam Aaron <sam@sonic-pi.net>
 License: GPL-3+
+
+License: AGPL-3+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU Affero General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or (at your
+ option) any later version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+ for more details.
+ .
+ On Debian systems, the complete text of the GNU Affero General Public
+ License version 3 can be found in /usr/share/common-licenses/AGPL-3.
 
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify it

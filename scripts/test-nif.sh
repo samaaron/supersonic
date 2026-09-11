@@ -38,11 +38,11 @@ fi
 
 echo "Building NIF shared library..."
 cmake -B "$BUILD_DIR" \
-    -DBUILD_NIF=ON \
+    -DCLOCKWORK_NIF=ON \
     -DCMAKE_BUILD_TYPE=Release \
     "$PROJECT_ROOT"
 
-cmake --build "$BUILD_DIR" --target supersonic_nif --config Release --parallel
+cmake --build "$BUILD_DIR" --target clockwork_nif --config Release --parallel
 
 # Verify NIF binary exists
 NIF_EXT="so"
@@ -50,7 +50,7 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; t
     NIF_EXT="dll"
 fi
 
-NIF_PATH="$BUILD_DIR/supersonic.$NIF_EXT"
+NIF_PATH="$BUILD_DIR/clockwork.$NIF_EXT"
 if [ ! -f "$NIF_PATH" ]; then
     echo "Error: NIF binary not found at $NIF_PATH"
     exit 1
@@ -68,4 +68,4 @@ if [ ! -d "_build" ]; then
     mix local.rebar --force --if-missing
 fi
 
-SUPERSONIC_NIF_PATH="$BUILD_DIR" SUPERSONIC_HEADLESS=1 mix test
+CLOCKWORK_NIF_PATH="$BUILD_DIR" SUPERSONIC_HEADLESS=1 mix test

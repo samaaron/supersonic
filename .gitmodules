@@ -1,0 +1,3 @@
+[submodule "clockwork"]
+	path = clockwork
+	url = ../clockwork

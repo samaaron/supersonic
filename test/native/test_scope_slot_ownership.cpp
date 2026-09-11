@@ -20,18 +20,18 @@
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
 
-#include "src/synth/common/server_shm.hpp"
+#include "shm_segment.hpp"
 
 #include <chrono>
 #include <filesystem>
 #include <thread>
 
-using detail_server_shm::server_shared_memory_client;
+using detail_shm_segment::shm_segment_client;
 
 namespace {
 
-SupersonicEngine::Config scopeOwnershipConfig() {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config scopeOwnershipConfig() {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 57210;  // non-zero enables shared memory
@@ -57,7 +57,7 @@ void spawnScopeSynth(EngineFixture& fix, int32_t nodeId, float scopeNum) {
 
 TEST_CASE("scope-ownership: late dtor of a superseded unit leaves the slot active",
           "[scope][shm][security]") {
-    std::string defPath = std::string(SUPERSONIC_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
+    std::string defPath = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
     if (!std::filesystem::exists(defPath)) {
         SKIP("sonic-pi-scope synthdef not available");
     }
@@ -87,7 +87,7 @@ TEST_CASE("scope-ownership: late dtor of a superseded unit leaves the slot activ
 
     // The surviving writer's slot must still be live for readers: state == 1
     // and the stream cursor still advancing as blocks render.
-    server_shared_memory_client client(scopeOwnershipConfig().udpPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmNativeHandle()));
     auto reader = client.get_scope_stream_reader((unsigned)kSlot);
     REQUIRE(fix.waitForBlocks(40, 3000));
     CHECK(reader.valid());

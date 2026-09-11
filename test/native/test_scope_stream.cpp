@@ -10,8 +10,8 @@
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
 
-#include "src/synth/common/shm_scope_stream.hpp"
-#include "src/synth/common/server_shm.hpp"
+#include "shm_scope_stream.hpp"
+#include "shm_segment.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,8 +24,8 @@
 #  define M_PI 3.14159265358979323846
 #endif
 
-using detail_server_shm::server_shared_memory_client;
-using detail_server_shm::sample_clock_view;
+using detail_shm_segment::shm_segment_client;
+using detail_shm_segment::sample_clock_view;
 
 namespace {
 
@@ -207,7 +207,7 @@ TEST_CASE("scope-stream: audible_end windows streams on the sample clock",
 
 TEST_CASE("scope-stream: headless engine publishes an advancing sample clock",
           "[scope][stream][sampleclock]") {
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 57317;  // non-zero enables shared memory
@@ -221,7 +221,7 @@ TEST_CASE("scope-stream: headless engine publishes an advancing sample clock",
     REQUIRE(fix.waitForReply("/status.reply", reply));
     REQUIRE(fix.waitForBlocks(20, 3000));
 
-    server_shared_memory_client client(cfg.udpPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmNativeHandle()));
     const sample_clock_view a = client.get_sample_clock();
     REQUIRE(a.valid);
     CHECK(a.sample_rate == 48000);

@@ -11,7 +11,7 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-BIN="${1:-$REPO/build/native/SuperSonic_artefacts/Release/SuperSonic}"
+BIN="${1:-$REPO/build/native/SuperSonic}"
 WORK="$(mktemp -d /tmp/ss-harness-XXXXXX)"
 trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null; rm -rf "$WORK"' EXIT
 
@@ -21,8 +21,8 @@ if [ ! -x "$BIN" ]; then
 fi
 
 echo "harness: building transport_probe…"
-(cd "$REPO/rust" && cargo build -q --example transport_probe -p supersonic-osc-net) || exit 2
-PROBE="$REPO/rust/target/debug/examples/transport_probe"
+(cd "$REPO/rust" && cargo build -q -p supersonic-transport-probe) || exit 2
+PROBE="$REPO/rust/target/debug/transport_probe"
 
 SERVER_PID=""
 FAILURES=0

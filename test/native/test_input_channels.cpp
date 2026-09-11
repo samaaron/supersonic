@@ -42,7 +42,7 @@ TEST_CASE("InputChannels: disable inputs triggers cold swap", "[InputChannels]")
 
 TEST_CASE("InputChannels: enable inputs triggers cold swap", "[InputChannels]") {
     // Boot with 0 inputs
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.sampleRate       = 48000;
     cfg.bufferSize       = 128;
     cfg.udpPort          = 0;
@@ -226,20 +226,20 @@ TEST_CASE("InputChannels: callback World widths track cold-swap rebuilds",
     auto& cb = fix.engine().audioCallback();
 
     // Boot: fixture world is 2-in / 2-out
-    CHECK(cb.worldInputBusChannels() == 2);
-    CHECK(cb.worldOutputBusChannels() == 2);
+    CHECK(cb.dspInputChannels() == 2);
+    CHECK(cb.dspOutputChannels() == 2);
 
     // Narrow: 2 -> 0 inputs
     auto r0 = fix.engine().enableInputChannels(0);
     REQUIRE(r0.success);
     REQUIRE(r0.type == SwapType::Cold);
-    CHECK(cb.worldInputBusChannels() == 0);
-    CHECK(cb.worldOutputBusChannels() == 2);
+    CHECK(cb.dspInputChannels() == 0);
+    CHECK(cb.dspOutputChannels() == 2);
 
     // Widen past the boot width: 0 -> 4 inputs
     auto r4 = fix.engine().enableInputChannels(4);
     REQUIRE(r4.success);
     REQUIRE(r4.type == SwapType::Cold);
-    CHECK(cb.worldInputBusChannels() == 4);
-    CHECK(cb.worldOutputBusChannels() == 2);
+    CHECK(cb.dspInputChannels() == 4);
+    CHECK(cb.dspOutputChannels() == 2);
 }

@@ -10,8 +10,8 @@
 #include <atomic>
 #include <cstring>
 #include "EngineFixture.h"
-#include "src/engine_state.h"
-#include "synth/common/server_shm.hpp"
+#include "engine_state.h"
+#include "shm_segment.hpp"
 #include "audio_processor.h"   // control / shared_memory arena globals
 #include "shared_memory.h"     // IN ring layout
 #include "ring/ring.h"         // Message wire header
@@ -25,14 +25,14 @@
 // ── State transitions ──────────────────────────────────────────────────────
 
 TEST_CASE("EngineState: starts Stopped before init", "[EngineState]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     CHECK(engine.engineState() == EngineState::Stopped);
 }
 
 TEST_CASE("EngineState: Running after init", "[EngineState]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);
@@ -41,9 +41,9 @@ TEST_CASE("EngineState: Running after init", "[EngineState]") {
 }
 
 TEST_CASE("EngineState: Stopped after shutdown", "[EngineState]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);
@@ -86,46 +86,9 @@ TEST_CASE("EngineState: switchDevice in headless doesn't change state", "[Engine
     CHECK(fix.engine().engineState() == EngineState::Running);
 }
 
-// ── Recording survives pause/resume (hot swap) ──────────────────────────────
-
-TEST_CASE("EngineState: recording survives pause/resume cycle", "[EngineState][recording]") {
-    SupersonicEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
-
-    SupersonicEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
-    cfg.numOutputChannels = 2;
-    engine.init(cfg);
-    REQUIRE(engine.isRunning());
-
-    auto tempDir = std::filesystem::temp_directory_path() / "supersonic_test_hotswap";
-    std::filesystem::create_directories(tempDir);
-    auto wavPath = (tempDir / "hotswap_recording.wav").string();
-
-    // Start recording
-    auto result = engine.startRecording(wavPath, "wav", 16);
-    REQUIRE(result.success);
-    REQUIRE(engine.isRecording());
-
-    // Simulate hot swap: pause → resume (what switchDevice does for hot swaps)
-    engine.audioCallback().pause();
-    CHECK(engine.isRecording());  // recording state should persist
-
-    engine.audioCallback().resume();
-    CHECK(engine.isRecording());  // still recording after resume
-
-    // Stop and verify file exists
-    auto stopResult = engine.stopRecording();
-    CHECK(stopResult.success);
-    CHECK(std::filesystem::exists(wavPath));
-
-    std::filesystem::remove_all(tempDir);
-    engine.shutdown();
-}
-
-// ── Cold swap atomicity ─────────────────────────────────────────────────────
-
+// (The recording-across-hot-swap case moved with recording itself: the
+// front's recorder reads the master tap, which a hot swap does not touch —
+// test_front_recording.cpp.)
 TEST_CASE("EngineState: purge clears stale messages after cold swap",
           "[EngineState][atomicity]") {
     // Verify that purge() clears the ring buffer so stale messages
@@ -150,7 +113,7 @@ TEST_CASE("EngineState: purge clears stale messages after cold swap",
     CHECK(p.argCount() >= 5);
 }
 
-// A producer preempted inside ss_ingress_write holds in_write_lock with the
+// A producer preempted inside clockwork_ingress_write holds in_write_lock with the
 // old head already loaded. If purge() moves the IN-ring cursors underneath
 // it, the producer's completed write re-publishes head past the reset point,
 // re-exposing every already-consumed frame between offset 0 and the old head
@@ -239,60 +202,39 @@ TEST_CASE("EngineState: sequential swaps in headless both succeed cleanly",
 
 // ── Shared memory ownership ─────────────────────────────────────────────────
 
-#ifndef _WIN32
-static bool posix_shm_exists(const std::string& name) {
-    int fd = ::shm_open(("/" + name).c_str(), O_RDONLY, 0);
-    if (fd >= 0) { ::close(fd); return true; }
-    return false;
-}
-#endif
+TEST_CASE("SharedMemory: engine creates an anonymous segment on boot", "[EngineState][SharedMemory]") {
+    using detail_shm_segment::shm_handle_valid;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
+    cfg.headless = true;
+    cfg.udpPort  = 59100;   // non-zero is what creates the segment
+    engine.init(cfg);
+    REQUIRE(engine.isRunning());
 
-TEST_CASE("SharedMemory: engine creates POSIX segment on boot", "[EngineState][SharedMemory]") {
-#ifdef _WIN32
-    SKIP("POSIX shm test, skipped on Windows");
-#else
-    // Use a unique port to avoid collisions with other tests
-    const int testPort = 59100;
-    std::string shmName = "SuperSonic_" + std::to_string(testPort);
-
-    // Ensure clean state
-    detail_server_shm::shm_remove(shmName);
-    REQUIRE_FALSE(posix_shm_exists(shmName));
-
+    // The segment exists and is what a reader would be handed: a duplicate of
+    // the handle maps to a published, layout-checked segment.
+    REQUIRE(shm_handle_valid(engine.shmNativeHandle()));
     {
-        SupersonicEngine engine;
-        SupersonicEngine::Config cfg;
-        cfg.headless = true;
-        cfg.udpPort  = testPort;
-        engine.init(cfg);
-        REQUIRE(engine.isRunning());
-
-        // Shared memory segment should exist
-        CHECK(posix_shm_exists(shmName));
-
-        engine.shutdown();
+        detail_shm_segment::shm_segment_client client(
+            detail_shm_segment::shm_dup_handle(engine.shmNativeHandle()));
+        CHECK(client.get_metrics() != nullptr);
     }
 
-    // After shutdown, engine cleans up its shared memory
-    CHECK_FALSE(posix_shm_exists(shmName));
-#endif
+    // After shutdown there is nothing to hand out. The pages themselves go
+    // with the last mapping; there is no name left behind to check for.
+    engine.shutdown();
+    CHECK_FALSE(shm_handle_valid(engine.shmNativeHandle()));
 }
 
 TEST_CASE("SharedMemory: segment survives cold swap (destroy_world + rebuild_world)",
           "[EngineState][SharedMemory]") {
-#ifdef _WIN32
-    SKIP("POSIX shm test, skipped on Windows");
-#else
-    const int testPort = 59101;
-    std::string shmName = "SuperSonic_" + std::to_string(testPort);
-    detail_server_shm::shm_remove(shmName);
-
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
-    cfg.udpPort  = testPort;
+    cfg.udpPort  = 59101;
     engine.init(cfg);
-    REQUIRE(posix_shm_exists(shmName));
+    const auto handle = engine.shmNativeHandle();
+    REQUIRE(detail_shm_segment::shm_handle_valid(handle));
 
     // Verify the ownership contract: World_Cleanup should NOT remove the
     // segment because mOwnsShmem is false.  Verify indirectly: after
@@ -300,11 +242,10 @@ TEST_CASE("SharedMemory: segment survives cold swap (destroy_world + rebuild_wor
     auto pkt = osc_test::message("/status");
     engine.sendOSC(pkt.ptr(), pkt.size());
 
-    CHECK(posix_shm_exists(shmName));
+    // Same object, not a re-created one: a reader that attached before the
+    // swap is still looking at live memory.
+    CHECK(engine.shmNativeHandle() == handle);
 
     engine.shutdown();
-    CHECK_FALSE(posix_shm_exists(shmName));
-
-    detail_server_shm::shm_remove(shmName);
-#endif
+    CHECK_FALSE(detail_shm_segment::shm_handle_valid(engine.shmNativeHandle()));
 }

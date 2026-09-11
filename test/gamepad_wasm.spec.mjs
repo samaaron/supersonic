@@ -44,7 +44,7 @@ test.describe("WASM gamepad", () => {
       const inAddr = new TextDecoder().decode(inOsc.subarray(0, inOsc.indexOf(0)));
 
       // outbound: /gamepad/out/rumble decodes to a flat command
-      const rumbleOsc = w.encodeOsc("/gamepad/out/rumble", [
+      const rumbleOsc = w.encodeOsc("/clockwork/gamepad/out/rumble", [
         { t: "s", v: "*" }, { t: "f", v: 1.0 }, { t: "f", v: 0.5 }, { t: "i", v: 200 },
       ]);
       const rumble = w.gamepad_out_decode(rumbleOsc);
@@ -71,7 +71,7 @@ test.describe("WASM gamepad", () => {
     expect(r.extra.length).toBe(4);
     expect(r.extra[0]).toBe("axis");
     expect(r.extra[1]).toBe("axis_4");
-    expect(r.inAddr).toBe("/gamepad/in/button");
+    expect(r.inAddr).toBe("/clockwork/gamepad/in/button");
     expect(r.rumble).toEqual(["rumble", "*", 1, 0.5, 200]);
     expect(r.foreign).toBeNull();
   });
@@ -105,7 +105,9 @@ test.describe("WASM gamepad", () => {
       const messages = [];
       const devices = [];
       m.onEvent((osc) => events.push(new TextDecoder().decode(osc.subarray(0, osc.indexOf(0)))));
-      m.onDevices((d) => devices.push(d.pads));
+      // The devices push is an OSC packet (/clockwork-sys/gamepad/devices); keep
+      // its text, which carries the address and every pad name.
+      m.onDevices((osc) => devices.push(new TextDecoder().decode(osc)));
       await m.init();
       await tick(30);
 
@@ -119,17 +121,18 @@ test.describe("WASM gamepad", () => {
       await tick(30);
 
       // engine → device: /gamepad/out/rumble reaches the actuator
-      m.sendOut(window.wasmGamepad.encodeOsc("/gamepad/out/rumble", [
+      m.sendOut(window.wasmGamepad.encodeOsc("/clockwork/gamepad/out/rumble", [
         { t: "s", v: "test_pad" }, { t: "f", v: 1.0 }, { t: "f", v: 0.25 }, { t: "i", v: 150 },
       ]));
-      m.sendOut(window.wasmGamepad.encodeOsc("/gamepad/out/rumble_stop", [{ t: "s", v: "*" }]));
+      m.sendOut(window.wasmGamepad.encodeOsc("/clockwork/gamepad/out/rumble_stop", [{ t: "s", v: "*" }]));
 
       m.dispose();
       return { events, messages, devices, effects };
     });
 
-    expect(r.devices[0]).toEqual(["test_pad"]);
-    expect(r.events).toContain("/gamepad/in/button");
+    expect(r.devices[0]).toContain("gamepad/devices");
+    expect(r.devices[0]).toContain("test_pad");
+    expect(r.events).toContain("/clockwork/gamepad/in/button");
     expect(r.messages).toContainEqual(["axis", "test_pad", "left_y", 1]);
     expect(r.effects[0].type).toBe("dual-rumble");
     expect(r.effects[0].strongMagnitude).toBe(1);
@@ -168,7 +171,7 @@ test.describe("WASM gamepad", () => {
       await m.init(); // registers Pad A as "pad_a"
 
       current = makePad("Pad B"); // slot 0 reused by different hardware
-      m.sendOut(window.wasmGamepad.encodeOsc("/gamepad/out/rumble", [
+      m.sendOut(window.wasmGamepad.encodeOsc("/clockwork/gamepad/out/rumble", [
         { t: "s", v: "pad_a" }, { t: "f", v: 1.0 }, { t: "f", v: 1.0 }, { t: "i", v: 100 },
       ]));
 
@@ -247,13 +250,13 @@ test.describe("WASM gamepad", () => {
       const m = new window.GamepadManager({ pollIntervalMs: 2, rumbleRefreshMs: 20 });
       await m.init();
 
-      m.sendOut(window.wasmGamepad.encodeOsc("/gamepad/out/rumble", [
+      m.sendOut(window.wasmGamepad.encodeOsc("/clockwork/gamepad/out/rumble", [
         { t: "s", v: "test_pad" }, { t: "f", v: 0.8 }, { t: "f", v: 0.2 }, { t: "i", v: 0 },
       ]));
       await tick(100); // several refresh periods
 
       const playsBeforeStop = effects.filter((e) => e.type === "dual-rumble").length;
-      m.sendOut(window.wasmGamepad.encodeOsc("/gamepad/out/rumble_stop", [{ t: "s", v: "*" }]));
+      m.sendOut(window.wasmGamepad.encodeOsc("/clockwork/gamepad/out/rumble_stop", [{ t: "s", v: "*" }]));
       await tick(60);
       const playsAfterStop = effects.filter((e) => e.type === "dual-rumble").length;
 

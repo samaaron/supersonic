@@ -15,12 +15,12 @@
 #include <filesystem>
 #include <fstream>
 
-#ifndef SUPERSONIC_TEST_SYNTHDEFS_DIR
-#define SUPERSONIC_TEST_SYNTHDEFS_DIR ""
+#ifndef CLOCKWORK_TEST_SYNTHDEFS_DIR
+#define CLOCKWORK_TEST_SYNTHDEFS_DIR ""
 #endif
 
 static bool loadTestSynthDef(EngineFixture& fx, const std::string& name) {
-    std::string path = std::string(SUPERSONIC_TEST_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
+    std::string path = std::string(CLOCKWORK_TEST_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
     std::filesystem::path fsPath(path);
     if (!std::filesystem::exists(fsPath)) return false;
 
@@ -148,7 +148,11 @@ TEST_CASE("SendReply stops after /n_free", "[send_reply]") {
     EngineFixture fx;
     REQUIRE(loadTestSynthDef(fx, "sonic-pi-server-info"));
 
+    // /notify registers the client on the off-thread stage and completes with
+    // /done /notify; a SendReply fired before that lands on an audience this
+    // client is not yet in. Wait for it, as a client must.
     fx.send(osc_test::message("/notify", 1));
+    REQUIRE(fx.waitForDone("/notify"));
     fx.clearReplies();
 
     osc_test::Builder b;

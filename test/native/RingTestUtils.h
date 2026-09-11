@@ -9,7 +9,7 @@
  */
 #pragma once
 
-#include "scheduler/EngineScheduler.h"
+#include "scheduler/engine_schedule.h"
 
 #include <cstddef>
 #include <cstdint>

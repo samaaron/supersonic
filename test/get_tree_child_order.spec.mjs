@@ -90,7 +90,7 @@ test.describe("getTree() child order", () => {
     page,
     sonicConfig,
   }) => {
-    // The exact pattern tau-state's compile_with_fx emits:
+    // The exact pattern clockwork-state's compile_with_fx emits:
     //   /g_new container 1 root          ← container at TAIL of root
     //   /g_new synth_group 0 container   ← synth_group at HEAD of container
     //   /s_new fx_synth 1 container      ← fx_synth at TAIL of container

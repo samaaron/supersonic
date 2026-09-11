@@ -82,7 +82,7 @@ test.describe("Flush Scheduler", () => {
       await new Promise(r => setTimeout(r, 500));
 
       const metricsBefore = sonic.getMetrics();
-      const wasmDepthBefore = metricsBefore.scsynthSchedulerDepth || 0;
+      const wasmDepthBefore = metricsBefore.engineSchedulerDepth || 0;
 
       // Flush everything (awaits confirmation from both sides)
       await sonic.purge();
@@ -91,7 +91,7 @@ test.describe("Flush Scheduler", () => {
       await new Promise(r => setTimeout(r, 200));
 
       const metricsAfter = sonic.getMetrics();
-      const wasmDepthAfter = metricsAfter.scsynthSchedulerDepth || 0;
+      const wasmDepthAfter = metricsAfter.engineSchedulerDepth || 0;
 
       await sonic.shutdown();
       return { wasmDepthBefore, wasmDepthAfter };
@@ -148,16 +148,16 @@ test.describe("Flush Scheduler", () => {
       const metricsAfter = sonic.getMetrics();
 
       // Track lates - there should be none after resume
-      const latesBefore = metricsBefore.scsynthSchedulerLates || 0;
-      const latesAfter = metricsAfter.scsynthSchedulerLates || 0;
+      const latesBefore = metricsBefore.engineSchedulerLates || 0;
+      const latesAfter = metricsAfter.engineSchedulerLates || 0;
       const newLates = latesAfter - latesBefore;
 
       await sonic.shutdown();
       return {
         preschedulerBefore: metricsBefore.preschedulerPending || 0,
         preschedulerAfter: metricsAfter.preschedulerPending || 0,
-        wasmDepthBefore: metricsBefore.scsynthSchedulerDepth || 0,
-        wasmDepthAfter: metricsAfter.scsynthSchedulerDepth || 0,
+        wasmDepthBefore: metricsBefore.engineSchedulerDepth || 0,
+        wasmDepthAfter: metricsAfter.engineSchedulerDepth || 0,
         newLates,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
@@ -224,7 +224,7 @@ test.describe("Flush Scheduler", () => {
 
       await sonic.shutdown();
       return {
-        wasmDepth: metrics.scsynthSchedulerDepth || 0,
+        wasmDepth: metrics.engineSchedulerDepth || 0,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
@@ -285,8 +285,8 @@ test.describe("Flush Scheduler", () => {
 
       await sonic.shutdown();
       return {
-        run1WasmDepth: metricsRun1.scsynthSchedulerDepth || 0,
-        run2WasmDepth: metricsRun2.scsynthSchedulerDepth || 0,
+        run1WasmDepth: metricsRun1.engineSchedulerDepth || 0,
+        run2WasmDepth: metricsRun2.engineSchedulerDepth || 0,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
@@ -382,7 +382,7 @@ test.describe("Flush Scheduler", () => {
       await sonic.shutdown();
       return {
         timings,
-        finalWasmDepth: metrics.scsynthSchedulerDepth || 0,
+        finalWasmDepth: metrics.engineSchedulerDepth || 0,
         finalPrescheduler: metrics.preschedulerPending || 0,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
@@ -416,7 +416,7 @@ test.describe("Flush Scheduler", () => {
 
       // Record baseline metrics while engine is running
       const metricsBaseline = sonic.getMetrics();
-      const latesBaseline = metricsBaseline.scsynthSchedulerLates || 0;
+      const latesBaseline = metricsBaseline.engineSchedulerLates || 0;
 
       // Suspend AudioContext — process() stops, ring buffer won't be consumed
       await sonic.suspend();
@@ -440,7 +440,7 @@ test.describe("Flush Scheduler", () => {
       await new Promise(r => setTimeout(r, 500));
 
       const metricsAfter = sonic.getMetrics();
-      const latesAfter = metricsAfter.scsynthSchedulerLates || 0;
+      const latesAfter = metricsAfter.engineSchedulerLates || 0;
 
       await sonic.shutdown();
       return {
@@ -474,8 +474,8 @@ test.describe("Flush Scheduler", () => {
 
       // Record baseline
       const metricsBaseline = sonic.getMetrics();
-      const latesBaseline = metricsBaseline.scsynthSchedulerLates || 0;
-      const processedBaseline = metricsBaseline.scsynthMessagesProcessed || 0;
+      const latesBaseline = metricsBaseline.engineSchedulerLates || 0;
+      const processedBaseline = metricsBaseline.engineMessagesProcessed || 0;
 
       // Suspend AudioContext — process() stops
       await sonic.suspend();
@@ -504,8 +504,8 @@ test.describe("Flush Scheduler", () => {
       await new Promise(r => setTimeout(r, 500));
 
       const metricsAfter = sonic.getMetrics();
-      const latesAfter = metricsAfter.scsynthSchedulerLates || 0;
-      const processedAfter = metricsAfter.scsynthMessagesProcessed || 0;
+      const latesAfter = metricsAfter.engineSchedulerLates || 0;
+      const processedAfter = metricsAfter.engineMessagesProcessed || 0;
 
       await sonic.shutdown();
       return {

@@ -12,10 +12,10 @@
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
 #include "ShmTransport.h"
-#include "src/lanes/ring_drain.h"
-#include "src/shm_peer_plane.h"
-#include "src/synth/common/server_shm.hpp"
-#include "src/workers/RingBufferWriter.h"
+#include "lanes/ring_drain.h"
+#include "shm_peer_plane.h"
+#include "shm_segment.hpp"
+#include "workers/RingBufferWriter.h"
 
 #include <chrono>
 #include <string>
@@ -24,8 +24,8 @@
 
 namespace {
 
-SupersonicEngine::Config planeConfig(unsigned port) {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config planeConfig(unsigned port) {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate   = 48000;
     cfg.bufferSize   = 128;
     cfg.udpPort      = port;   // non-zero enables the public shm segment
@@ -48,14 +48,14 @@ bool peerWrite(ShmPeerPlaneHeader* plane, const osc_test::Packet& pkt) {
 }
 
 // Drain every complete frame currently in the reply ring into `out`.
-void drainReplies(ShmPeerPlaneHeader* plane, SsDrainState& st,
+void drainReplies(ShmPeerPlaneHeader* plane, ClockworkDrainState& st,
                   std::vector<std::vector<uint8_t>>& out) {
-    ss_drain_ring(
+    clockwork_drain_ring(
         shm_peer_rep_ring(plane), SHM_PEER_REP_RING_SIZE,
-        &plane->rep_head, &plane->rep_tail, st, SsDrainMetrics{}, 0,
+        &plane->rep_head, &plane->rep_tail, st, ClockworkDrainMetrics{}, 0,
         [&](uint32_t /*src*/, const uint8_t* d, uint32_t n, uint32_t) {
             out.emplace_back(d, d + n);
-            return SsDrainVerdict::Consume;
+            return ClockworkDrainVerdict::Consume;
         });
 }
 
@@ -75,7 +75,7 @@ TEST_CASE("shm-peer: segment publishes plane geometry and attach claims it",
     constexpr unsigned kPort = 57221;
     EngineFixture fx(planeConfig(kPort));
 
-    server_shared_memory_client client(kPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmNativeHandle()));
     ShmPeerPlaneHeader* plane = client.get_peer_plane();
     REQUIRE(plane != nullptr);
 
@@ -104,7 +104,7 @@ TEST_CASE("shm-peer: command ring commands reach the engine and reply",
     constexpr unsigned kPort = 57222;
     EngineFixture fx(planeConfig(kPort));
 
-    server_shared_memory_client client(kPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmNativeHandle()));
     ShmPeerPlaneHeader* plane = client.get_peer_plane();
     REQUIRE(plane != nullptr);
     shm_peer_attach(plane, 1);
@@ -125,7 +125,7 @@ TEST_CASE("shm-peer: ShmTransport routes replies into the reply ring",
     // Engine wired the way Main.cpp wires --shm-commands: ShmTransport bound
     // to the engine's plane slot, set before init.
     ShmTransport     transport;
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onDebug = [](const std::string&) {};
     engine.onReply = [](const uint8_t*, uint32_t) {};
     engine.setTransport(&transport);
@@ -133,12 +133,12 @@ TEST_CASE("shm-peer: ShmTransport routes replies into the reply ring",
     transport.bindPlaneSlot(engine.peerPlaneSlot());
     REQUIRE(transport.ready());
 
-    server_shared_memory_client client(kPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(engine.shmNativeHandle()));
     ShmPeerPlaneHeader* plane = client.get_peer_plane();
     REQUIRE(plane != nullptr);
     shm_peer_attach(plane, 1);
 
-    SsDrainState repState;
+    ClockworkDrainState repState;
     std::vector<std::vector<uint8_t>> replies;
 
     // /sync round trip through shared memory in both directions.
@@ -155,7 +155,7 @@ TEST_CASE("shm-peer: ShmTransport routes replies into the reply ring",
     // transport's audience flag and its .reply arrives on the reply ring.
     replies.clear();
     REQUIRE_FALSE(transport.hasNotifySubscribers());
-    REQUIRE(peerWrite(plane, osc_test::message("/supersonic/notify")));
+    REQUIRE(peerWrite(plane, osc_test::message("/clockwork/notify")));
     got = waitUntil([&] {
         drainReplies(plane, repState, replies);
         return !replies.empty() && transport.hasNotifySubscribers();
@@ -179,7 +179,7 @@ TEST_CASE("shm-peer load: high-volume commands round-trip losslessly through the
 
     // Same wiring as Main.cpp's --shm-commands, driven at volume.
     ShmTransport     transport;
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onDebug = [](const std::string&) {};
     engine.onReply = [](const uint8_t*, uint32_t) {};
     engine.setTransport(&transport);
@@ -187,7 +187,7 @@ TEST_CASE("shm-peer load: high-volume commands round-trip losslessly through the
     transport.bindPlaneSlot(engine.peerPlaneSlot());
     REQUIRE(transport.ready());
 
-    server_shared_memory_client client(kPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(engine.shmNativeHandle()));
     ShmPeerPlaneHeader* plane = client.get_peer_plane();
     REQUIRE(plane != nullptr);
     shm_peer_attach(plane, 1);
@@ -195,7 +195,7 @@ TEST_CASE("shm-peer load: high-volume commands round-trip losslessly through the
     const PerformanceMetrics& m = engine.getMetrics();
     constexpr int N = 20000;   // medium load; both rings wrap many times over
 
-    SsDrainState repState;
+    ClockworkDrainState repState;
     std::vector<std::vector<uint8_t>> replies;
 
     // Act as a real peer: keep the command ring full (the writer backpressures

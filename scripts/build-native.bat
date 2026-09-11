@@ -1,8 +1,8 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: Build script for SuperSonic native (JUCE) backend
-:: Uses CMake to build the SuperSonicJuce executable
+:: Build script for the SuperSonic native server (clockwork + scsynth)
+:: Uses CMake to build the SuperSonic executable
 
 set SCRIPT_DIR=%~dp0
 set PROJECT_ROOT=%SCRIPT_DIR%..

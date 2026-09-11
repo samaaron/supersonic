@@ -20,7 +20,7 @@
 
 // ── Control: re-registering /notify after a cold swap yields /n_go ────────────
 // Mirrors the engine's CURRENT expected flow (Spider re-registers post-swap).
-// Proves the harness/setup is sound, so a failure of the S5 test below is about
+// Proves the clockwork/setup is sound, so a failure of the S5 test below is about
 // preservation specifically, not test plumbing.
 TEST_CASE("RebuildContract: re-register /notify after cold swap yields /n_go",
           "[Rebuild]") {
@@ -44,6 +44,16 @@ TEST_CASE("RebuildContract: re-register /notify after cold swap yields /n_go",
 // The decisive test. Register BEFORE the swap; after the swap create a group
 // WITHOUT re-registering. If notify is preserved, /n_go must arrive. If it
 // times out, the rebuild dropped the registration — the lost-/n_go root cause.
+// S5, now implemented — see DspConfig::persistent (src/dsp_api.h).
+//
+// /notify registers a client inside scsynth's World, and a World does not
+// survive a cold swap; nor does anything get a chance to run when a browser
+// kills the worklet outright. So the guest records which origins registered in
+// a region clockwork guarantees to leave alone across a rebuild, and replays
+// the registrations in dsp_new.
+//
+// Clockwork learns nothing by this. /notify is scsynth's word, parsed in
+// scsynth's adapter, stored in bytes the host never reads.
 TEST_CASE("RebuildContract: /notify preserved across cold swap (no re-register)",
           "[Rebuild]") {
     EngineFixture fix;

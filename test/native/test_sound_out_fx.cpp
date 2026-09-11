@@ -37,7 +37,7 @@ constexpr float kInBus   = 16.0f;
 constexpr float kSilent  = 1e-6f;
 constexpr float kAudible = 0.05f;
 
-SupersonicEngine::Config quadConfig() {
+ClockworkEngine::Config quadConfig() {
     auto cfg = EngineFixture::defaultConfig();
     // Manual pump: assertions read the output bus directly on the test
     // thread, which must therefore be the sole process_audio() caller.

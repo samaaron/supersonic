@@ -12,15 +12,15 @@ param([string]$Bin = "")
 
 $ErrorActionPreference = "Stop"
 $Repo = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-if ($Bin -eq "") { $Bin = Join-Path $Repo "build\native\SuperSonic_artefacts\Release\SuperSonic.exe" }
+if ($Bin -eq "") { $Bin = Join-Path $Repo "build\native\Release\SuperSonic.exe" }
 if (-not (Test-Path $Bin)) { Write-Error "harness: binary not found: $Bin"; exit 2 }
 
 Write-Host "harness: building transport_probe..."
 Push-Location (Join-Path $Repo "rust")
-cargo build -q --example transport_probe -p supersonic-osc-net
+cargo build -q -p supersonic-transport-probe
 if ($LASTEXITCODE -ne 0) { Pop-Location; exit 2 }
 Pop-Location
-$Probe = Join-Path $Repo "rust\target\debug\examples\transport_probe.exe"
+$Probe = Join-Path $Repo "rust\target\debug\transport_probe.exe"
 
 $Failures = 0
 

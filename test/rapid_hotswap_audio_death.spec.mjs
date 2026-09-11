@@ -170,9 +170,9 @@ test("audio survives rapid FX chain rebuild with output mixer chain", async ({ p
       beepExists,
       mixerExists,
       nodeCount: tree.nodeCount,
-      processCount: metrics.scsynthProcessCount,
-      msgsDropped: metrics.scsynthMessagesDropped,
-      wasmErrors: metrics.scsynthWasmErrors,
+      processCount: metrics.engineProcessCount,
+      msgsDropped: metrics.engineMessagesDropped,
+      wasmErrors: metrics.engineWasmErrors,
       treeDump,
     };
   }, { sonic: sonicConfig, helpers: AUDIO_HELPERS });

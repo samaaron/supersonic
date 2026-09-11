@@ -1,6 +1,6 @@
 #include "FakeLinkPeerProcess.h"
 
-#ifdef SUPERSONIC_LINK
+#ifdef CLOCKWORK_LINK
 
 #include <algorithm>
 #include <chrono>
@@ -12,8 +12,8 @@
 #include <thread>
 #include <vector>
 
-#ifndef SUPERSONIC_TEST_LINK_PEER_BINARY
-#  error "SUPERSONIC_TEST_LINK_PEER_BINARY must be defined by CMake"
+#ifndef CLOCKWORK_TEST_LINK_PEER_BINARY
+#  error "CLOCKWORK_TEST_LINK_PEER_BINARY must be defined by CMake"
 #endif
 
 namespace {
@@ -24,7 +24,7 @@ namespace {
 // platform-native argv / command-line form.
 std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts) {
     std::vector<std::string> args;
-    args.emplace_back(SUPERSONIC_TEST_LINK_PEER_BINARY);
+    args.emplace_back(CLOCKWORK_TEST_LINK_PEER_BINARY);
     args.emplace_back("--name");        args.push_back(opts.name);
     if (opts.loopbackOnly) args.emplace_back("--loopback-only");
     args.emplace_back("--bpm");         args.push_back(std::to_string(opts.bpm));
@@ -230,7 +230,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
 
     PROCESS_INFORMATION pi = {};
     const BOOL ok = CreateProcessA(
-        SUPERSONIC_TEST_LINK_PEER_BINARY,
+        CLOCKWORK_TEST_LINK_PEER_BINARY,
         cmdBuf.data(),
         nullptr, nullptr,
         TRUE,    // inherit handles
@@ -241,7 +241,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
     if (!ok) {
         std::fprintf(stderr,
             "FakeLinkPeerProcess: CreateProcess(%s) failed: %lu\n",
-            SUPERSONIC_TEST_LINK_PEER_BINARY,
+            CLOCKWORK_TEST_LINK_PEER_BINARY,
             static_cast<unsigned long>(GetLastError()));
         CloseHandle(readEnd);
         return;
@@ -277,4 +277,4 @@ FakeLinkPeerProcess::~FakeLinkPeerProcess() {
 
 #endif  // _WIN32
 
-#endif  // SUPERSONIC_LINK
+#endif  // CLOCKWORK_LINK

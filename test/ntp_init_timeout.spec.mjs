@@ -7,7 +7,7 @@
 // Node-level: a mock AudioContext whose getOutputTimestamp() never advances makes
 // this deterministic (no browser, no real audio).
 import { test, expect } from '@playwright/test';
-import { NTPTiming } from '../js/lib/ntp_timing.js';
+import { NTPTiming } from '../clockwork/js/lib/ntp_timing.js';
 
 test('initialize() rejects (does not hang) when the AudioContext never starts', async () => {
   test.setTimeout(8000);

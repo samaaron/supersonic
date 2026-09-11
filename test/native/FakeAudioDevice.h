@@ -23,7 +23,7 @@
  */
 #pragma once
 
-#include "SupersonicEngine.h"
+#include "ClockworkEngine.h"
 #include <atomic>
 #include <memory>
 #include <string>
@@ -100,7 +100,7 @@ public:
                       const juce::BigInteger& outputChannels,
                       double sampleRate, int bufferSizeSamples) override {
         // Error strings mimic real JUCE drivers, which name the device.
-        // Wording is NOT load-bearing: the engine attributes input-side
+        // Nothing reads the wording: the engine attributes input-side
         // failures by retrying output-only, not by parsing these.
         if (primary()->failOpen)
             return "Failed to open device: " + juce::String(primary()->name);
@@ -309,10 +309,10 @@ makeFactory(std::shared_ptr<FakeSystem> system) {
 // The hermetic boot recipe (see header comment): a named -H open of a
 // fake device with inputs disabled, real device paths active, watchdog
 // off unless the test opts in.
-inline SupersonicEngine::Config fakeEngineConfig(
+inline ClockworkEngine::Config fakeEngineConfig(
         std::shared_ptr<FakeSystem> system,
         const std::string& bootOutput) {
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.sampleRate           = 48000;
     cfg.udpPort              = 0;
     cfg.numBuffers           = 1024;

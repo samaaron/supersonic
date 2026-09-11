@@ -19,13 +19,18 @@ test.describe("WASM MIDI", () => {
       const inAddr = new TextDecoder().decode(inOsc.subarray(0, inOsc.indexOf(0)));
 
       // outbound: /midi/out/note_on "out" ch1 note64 vel99 → raw MIDI bytes
-      const outMsg = w.encodeOsc("/midi/out/note_on", [
+      const outMsg = w.encodeOsc("/clockwork/midi/out/note_on", [
         { t: "s", v: "out" }, { t: "i", v: 1 }, { t: "i", v: 64 }, { t: "i", v: 99 },
       ]);
+      // Packed form is [when: 8 bytes LE][portLen: 1][port][raw midi bytes].
+      // The 8-byte timestamp prefix arrived with timestamped MIDI out — the
+      // send carries its own time so the browser can schedule it, rather than
+      // the worklet racing to deliver on the beat.
       const packed = w.midi_out_decode(outMsg);
-      const portLen = packed[0];
-      const port = new TextDecoder().decode(packed.subarray(1, 1 + portLen));
-      const raw = Array.from(packed.subarray(1 + portLen));
+      const WHEN = 8;
+      const portLen = packed[WHEN];
+      const port = new TextDecoder().decode(packed.subarray(WHEN + 1, WHEN + 1 + portLen));
+      const raw = Array.from(packed.subarray(WHEN + 1 + portLen));
 
       // clock-in estimator: feed 120 BPM pulses
       const est = new w.WasmClockEstimator();
@@ -36,7 +41,7 @@ test.describe("WASM MIDI", () => {
       return { inAddr, port, raw, bpm };
     });
 
-    expect(r.inAddr).toBe("/midi/in/note_on");
+    expect(r.inAddr).toBe("/clockwork/midi/in/note_on");
     expect(r.port).toBe("out");
     expect(r.raw).toEqual([0x90, 64, 99]); // channel 1 → status 0x90
     expect(Math.abs(r.bpm - 120)).toBeLessThan(1);
@@ -65,12 +70,18 @@ test.describe("WASM MIDI", () => {
       const events = [];
       m.onEvent((osc) => events.push(new TextDecoder().decode(osc.subarray(0, osc.indexOf(0)))));
       await m.init();
+      // Ports are closed until opened, in both directions: _inEnabled and
+      // _outEnabled both start empty, _onInput drops anything from a port
+      // nobody asked to hear, and _sendRaw drops anything aimed at one nobody
+      // opened. "*" opens every port the enumeration found.
+      m.enable("*", true, true);    // inputs
+      m.enable("*", false, true);   // outputs
 
       // device → engine: inbound note-on becomes a /midi/in/note_on event
       input.onmidimessage({ data: new Uint8Array([0x90, 60, 100]), timeStamp: performance.now() });
 
       // engine → device: /midi/out/note_on reaches the output as raw bytes
-      const outMsg = window.wasmMidi.encodeOsc("/midi/out/note_on", [
+      const outMsg = window.wasmMidi.encodeOsc("/clockwork/midi/out/note_on", [
         { t: "s", v: "out" }, { t: "i", v: 1 }, { t: "i", v: 64 }, { t: "i", v: 99 },
       ]);
       m.sendOut(outMsg);
@@ -78,7 +89,7 @@ test.describe("WASM MIDI", () => {
       return { events, sent };
     });
 
-    expect(r.events).toContain("/midi/in/note_on");
+    expect(r.events).toContain("/clockwork/midi/in/note_on");
     expect(r.sent).toContainEqual([0x90, 64, 99]);
   });
 });

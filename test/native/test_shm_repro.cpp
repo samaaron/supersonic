@@ -1,7 +1,7 @@
 #include "EngineFixture.h"
 
 TEST_CASE("Engine boots with udpPort > 0 (cross-process shm)", "[shm-repro]") {
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.sampleRate       = 48000;
     cfg.bufferSize       = 128;
     cfg.udpPort          = 30099;  // non-zero → creates POSIX shm

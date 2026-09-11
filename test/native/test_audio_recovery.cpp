@@ -11,14 +11,14 @@
 // notice is included.
 //++
 
-// Pure unit tests for sonicpi::audio::LivenessMonitor — no engine, no CoreAudio,
+// Pure unit tests for clockwork::audio::LivenessMonitor — no engine, no CoreAudio,
 // no real clock (times are plain integers in an arbitrary unit).
 
 #include <catch2/catch_test_macros.hpp>
 #include "AudioRecovery.h"
 
-using sonicpi::audio::LivenessMonitor;
-using sonicpi::audio::LivenessPhase;
+using clockwork::audio::LivenessMonitor;
+using clockwork::audio::LivenessPhase;
 
 // The core invariant: after a stall, a SINGLE resumed tick must NOT read as
 // Live. Liveness requires ticks sustained across the confirm window — otherwise
@@ -70,7 +70,7 @@ TEST_CASE("LivenessMonitor: sustained ticks after a stall restore Live",
 // Times in ms, rates in frames/ms (48 = 48kHz). Standard monitor: 1000ms
 // windows, 300ms max observation gap, 5% tolerance, 2 consecutive bad windows.
 
-using sonicpi::audio::RateSkewMonitor;
+using clockwork::audio::RateSkewMonitor;
 
 namespace {
 RateSkewMonitor standardMonitor() {

@@ -63,12 +63,12 @@ phase_deps() {
     apt-get install -y \
         build-essential cmake pkg-config \
         ca-certificates curl git \
-        libasound2-dev libudev-dev libjack-jackd2-dev \
+        libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
         libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
         libxinerama-dev libxcursor-dev libxcomposite-dev
 
-    # The Rust subsystems (MIDI/gamepad/OSC) are cargo-built staticlibs the
-    # native build links. i686-unknown-linux-gnu is a tier-1 target, but getting
+    # The Rust subsystems (clockwork's MIDI/gamepad/OSC and SuperSonic's own
+    # engine layer) are one cargo-built staticlib the native build links. i686-unknown-linux-gnu is a tier-1 target, but getting
     # it installed takes saying so: rustup-init infers the host triple from the
     # KERNEL, which is x86_64 even in a 32-bit userland, so left alone it
     # installs a 64-bit toolchain whose binaries cannot execute here. That
@@ -131,8 +131,7 @@ phase_transport() {
     setup_paths
     # run.sh defaults to build/native/...; pass the binary explicitly since this
     # job builds into a separate dir so it can't clash with a local x64 build.
-    "$PROJECT_ROOT/test/transport-harness/run.sh" \
-        "$BUILD_DIR/SuperSonic_artefacts/Release/SuperSonic"
+    "$PROJECT_ROOT/test/transport-harness/run.sh" "$BUILD_DIR/SuperSonic"
 }
 
 main() {

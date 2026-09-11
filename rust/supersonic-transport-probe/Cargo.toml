@@ -1,0 +1,15 @@
+[package]
+name = "supersonic-transport-probe"
+version = "0.80.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+description = "OSC client for the CI transport harness: one /status over each command transport, then a /sync load blast"
+publish = false
+
+[[bin]]
+name = "transport_probe"
+path = "src/main.rs"
+
+[dependencies]
+clockwork-osc   = { path = "../../clockwork/rust/clockwork-osc" }
+clockwork-comms = { path = "../../clockwork/rust/clockwork-comms" }

@@ -1,7 +1,7 @@
 // Contract test: js/lib/metrics_offsets.js must mirror the authoritative C++
 // PerformanceMetrics layout in src/shared_memory.h.
 //
-// shared_memory.h is the source of truth: its SS_ASSERT_METRIC(field, idx)
+// shared_memory.h is the source of truth: its CLOCKWORK_ASSERT_METRIC(field, idx)
 // static_asserts enforce, at compile time, that each struct field sits at its
 // declared index. This test enforces the other half of the contract — that the
 // JS offset constants the workers/readers use match those same indices — so a
@@ -18,15 +18,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // C++ PerformanceMetrics field  →  metrics_offsets.js constant.
 const CPP_TO_JS = {
-  process_count:                 'SCSYNTH_PROCESS_COUNT',
-  messages_processed:            'SCSYNTH_MESSAGES_PROCESSED',
-  messages_dropped:              'SCSYNTH_MESSAGES_DROPPED',
-  scheduler_queue_depth:         'SCSYNTH_SCHEDULER_DEPTH',
-  scheduler_queue_max:           'SCSYNTH_SCHEDULER_PEAK_DEPTH',
-  scheduler_queue_dropped:       'SCSYNTH_SCHEDULER_DROPPED',
-  messages_sequence_gaps:        'SCSYNTH_SEQUENCE_GAPS',
-  wasm_errors:                   'SCSYNTH_WASM_ERRORS',
-  scheduler_lates:               'SCSYNTH_SCHEDULER_LATES',
+  process_count:                 'ENGINE_PROCESS_COUNT',
+  messages_processed:            'ENGINE_MESSAGES_PROCESSED',
+  messages_dropped:              'ENGINE_MESSAGES_DROPPED',
+  scheduler_queue_depth:         'ENGINE_SCHEDULER_DEPTH',
+  scheduler_queue_max:           'ENGINE_SCHEDULER_PEAK_DEPTH',
+  scheduler_queue_dropped:       'ENGINE_SCHEDULER_DROPPED',
+  messages_sequence_gaps:        'ENGINE_SEQUENCE_GAPS',
+  wasm_errors:                   'ENGINE_WASM_ERRORS',
+  scheduler_lates:               'ENGINE_SCHEDULER_LATES',
+  clockwork_version_major:             'CLOCKWORK_VERSION_MAJOR',
+  clockwork_version_minor:             'CLOCKWORK_VERSION_MINOR',
+  clockwork_version_patch:             'CLOCKWORK_VERSION_PATCH',
   osc_out_messages_sent:         'OSC_OUT_MESSAGES_SENT',
   osc_out_bytes_sent:            'OSC_OUT_BYTES_SENT',
   osc_in_messages_received:      'OSC_IN_MESSAGES_RECEIVED',
@@ -41,9 +44,9 @@ const CPP_TO_JS = {
   in_buffer_peak_bytes:          'IN_BUFFER_PEAK_BYTES',
   out_buffer_peak_bytes:         'OUT_BUFFER_PEAK_BYTES',
   nrt_out_buffer_peak_bytes:       'NRT_OUT_BUFFER_PEAK_BYTES',
-  scheduler_max_late_ms:         'SCSYNTH_SCHEDULER_MAX_LATE_MS',
-  scheduler_last_late_ms:        'SCSYNTH_SCHEDULER_LAST_LATE_MS',
-  scheduler_last_late_tick:      'SCSYNTH_SCHEDULER_LAST_LATE_TICK',
+  scheduler_max_late_ms:         'ENGINE_SCHEDULER_MAX_LATE_MS',
+  scheduler_last_late_ms:        'ENGINE_SCHEDULER_LAST_LATE_MS',
+  scheduler_last_late_tick:      'ENGINE_SCHEDULER_LAST_LATE_TICK',
   ring_buffer_direct_write_fails:'RING_BUFFER_DIRECT_WRITE_FAILS',
   supersonic_version_major:      'SUPERSONIC_VERSION_MAJOR',
   supersonic_version_minor:      'SUPERSONIC_VERSION_MINOR',
@@ -62,18 +65,18 @@ const CPP_TO_JS = {
 const CPP_PADDING = new Set(['_metrics_reserved', '_metrics_reserved2']);
 
 test('metrics_offsets.js mirrors the authoritative C++ PerformanceMetrics layout', () => {
-  const hdr = readFileSync(join(ROOT, 'src/shared_memory.h'), 'utf8');
-  const js  = readFileSync(join(ROOT, 'js/lib/metrics_offsets.js'), 'utf8');
+  const hdr = readFileSync(join(ROOT, 'clockwork/src/shared_memory.h'), 'utf8');
+  const js  = readFileSync(join(ROOT, 'clockwork/js/lib/metrics_offsets.js'), 'utf8');
 
   const cpp = {};
-  for (const m of hdr.matchAll(/SS_ASSERT_METRIC\(\s*(\w+)\s*,\s*(\d+)\s*\)/g))
+  for (const m of hdr.matchAll(/CLOCKWORK_ASSERT_METRIC\(\s*(\w+)\s*,\s*(\d+)\s*\)/g))
     cpp[m[1]] = Number(m[2]);
 
   const jsOff = {};
   for (const m of js.matchAll(/export const (\w+)\s*=\s*(\d+)\s*;/g))
     jsOff[m[1]] = Number(m[2]);
 
-  expect(Object.keys(cpp).length, 'no SS_ASSERT_METRIC lines parsed').toBeGreaterThan(10);
+  expect(Object.keys(cpp).length, 'no CLOCKWORK_ASSERT_METRIC lines parsed').toBeGreaterThan(10);
 
   const unmapped = [];
   const mismatches = [];

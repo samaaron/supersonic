@@ -24,10 +24,10 @@ extern "C" {
 // ── Helper: boot engine with given channel config ────────────────────────────
 
 static void bootAndVerify(int outCh, int inCh) {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = outCh;
@@ -103,11 +103,11 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     int outCh = 4;
     int inCh  = 2;
 
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     bool gotReply = false;
     engine.onReply = [&](const uint8_t*, uint32_t) { gotReply = true; };
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
     // Manual pump: this test drives process_audio() directly on the test
@@ -156,10 +156,10 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     int outCh = 2;
     int inCh  = 4;
 
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
     // Manual pump: this test drives process_audio() directly on the test
@@ -222,10 +222,10 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
 
 TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     // Boot with 8 output channels — prefetch should be 8 * 128 = 1024 floats
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 8;
@@ -239,10 +239,10 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     // verify dynamic sizing works.
     engine.shutdown();
 
-    SupersonicEngine engine2;
+    ClockworkEngine engine2;
     engine2.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg2;
+    ClockworkEngine::Config cfg2;
     cfg2.headless          = true;
     cfg2.udpPort           = 0;
     cfg2.numOutputChannels = 16;
@@ -258,113 +258,5 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
 
 // ── 7. Recording start/stop API ─────────────────────────────────────────────
 
-TEST_CASE("Recording start and stop", "[recording]") {
-    SupersonicEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
-
-    SupersonicEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
-    cfg.numOutputChannels = 2;
-    engine.init(cfg);
-
-    REQUIRE(engine.isRunning());
-
-    // Use a temp file path
-    auto tempDir = std::filesystem::temp_directory_path() / "supersonic_test";
-    std::filesystem::create_directories(tempDir);
-    auto wavPath = (tempDir / "test_recording.wav").string();
-
-    // Start recording
-    auto startResult = engine.startRecording(wavPath, "wav", 16);
-    CHECK(startResult.success);
-    CHECK(engine.isRecording());
-
-    // Double-start should fail
-    auto startResult2 = engine.startRecording(wavPath, "wav", 16);
-    CHECK_FALSE(startResult2.success);
-    CHECK(startResult2.error == "already recording");
-
-    // Stop recording
-    auto stopResult = engine.stopRecording();
-    CHECK(stopResult.success);
-    CHECK_FALSE(engine.isRecording());
-
-    // Double-stop should fail
-    auto stopResult2 = engine.stopRecording();
-    CHECK_FALSE(stopResult2.success);
-    CHECK(stopResult2.error == "not recording");
-
-    // Verify file was created
-    CHECK(std::filesystem::exists(wavPath));
-
-    // Cleanup
-    std::filesystem::remove_all(tempDir);
-
-    engine.shutdown();
-}
-
-TEST_CASE("Recording creates valid WAV file", "[recording]") {
-    SupersonicEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
-
-    SupersonicEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
-    cfg.numOutputChannels = 2;
-    engine.init(cfg);
-
-    REQUIRE(engine.isRunning());
-
-    auto tempDir = std::filesystem::temp_directory_path() / "supersonic_test";
-    std::filesystem::create_directories(tempDir);
-    auto wavPath = (tempDir / "test_valid.wav").string();
-
-    auto result = engine.startRecording(wavPath, "wav", 24);
-    REQUIRE(result.success);
-
-    // The file should exist (header written on start)
-    CHECK(std::filesystem::exists(wavPath));
-
-    engine.stopRecording();
-
-    // File should be a finalised WAV: at least a complete header. A frameless
-    // headless recording is exactly 44 bytes with libsndfile's classic PCM
-    // header (JUCE's writer padded 24-bit files past 44 via WAVE_FORMAT_EXTENSIBLE).
-    auto fileSize = std::filesystem::file_size(wavPath);
-    CHECK(fileSize >= 44);
-
-    // Cleanup
-    std::filesystem::remove_all(tempDir);
-    engine.shutdown();
-}
-
-TEST_CASE("Recording stops on engine shutdown", "[recording]") {
-    auto tempDir = std::filesystem::temp_directory_path() / "supersonic_test";
-    std::filesystem::create_directories(tempDir);
-    auto wavPath = (tempDir / "test_shutdown.wav").string();
-
-    {
-        SupersonicEngine engine;
-        engine.onReply = [](const uint8_t*, uint32_t) {};
-
-        SupersonicEngine::Config cfg;
-        cfg.headless          = true;
-        cfg.udpPort           = 0;
-        cfg.numOutputChannels = 2;
-        engine.init(cfg);
-        REQUIRE(engine.isRunning());
-
-        auto result = engine.startRecording(wavPath, "wav", 16);
-        REQUIRE(result.success);
-
-        // Shutdown without explicit stopRecording — should not crash
-        engine.shutdown();
-    }
-
-    // File should exist (recording stopped cleanly during shutdown)
-    CHECK(std::filesystem::exists(wavPath));
-
-    // Cleanup
-    std::filesystem::remove_all(tempDir);
-}
+// The engine's recording API is gone: the engine opens no files. Session
+// recording is the front's (front/Recorder.h; test_front_recording.cpp).

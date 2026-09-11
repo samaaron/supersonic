@@ -36,11 +36,11 @@
 #include "shared_memory.h"             // ControlPointers layout, EgressRoute, PerformanceMetrics
 #include "ring/ring.h"                 // Message, MESSAGE_MAGIC
 #include "workers/RingBufferWriter.h"  // shared MPSC writer (ingress + NRT-egress)
-#include "lanes/ring_drain.h"          // ss_drain_ring consumer
+#include "lanes/ring_drain.h"          // clockwork_drain_ring consumer
 
 // Engine globals for the debug-egress routing test (audio_processor.cpp). Declared
 // directly rather than via audio_processor.h, which pulls in <emscripten/...>.
-extern "C" int ss_log(const char* fmt, ...);
+extern "C" int clockwork_log(const char* fmt, ...);
 extern "C" {
     extern uint8_t*            shared_memory;
     extern ControlPointers*    control;
@@ -87,16 +87,16 @@ TEST_CASE("MPSC ring: concurrent producers and a drainer lose no frames",
     uint32_t badPayload = 0;
 
     std::thread consumer([&] {
-        SsDrainState  st;
-        SsDrainMetrics m{};
+        ClockworkDrainState  st;
+        ClockworkDrainMetrics m{};
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (received.load(std::memory_order_relaxed) < kTotal
                && std::chrono::steady_clock::now() < deadline) {
-            ss_drain_ring(ring.data(), static_cast<uint32_t>(ring.size()),
+            clockwork_drain_ring(ring.data(), static_cast<uint32_t>(ring.size()),
                           &head, &tail, st, m, 0,
                 [&](uint32_t /*sourceId*/, const uint8_t* payload,
                     uint32_t n, uint32_t /*seq*/) {
-                    if (n != sizeof(Tag)) { ++badPayload; return SsDrainVerdict::Consume; }
+                    if (n != sizeof(Tag)) { ++badPayload; return ClockworkDrainVerdict::Consume; }
                     Tag t;
                     std::memcpy(&t, payload, sizeof(t));
                     if (t.producer < kProducers && t.seq < kPerProducer) {
@@ -106,7 +106,7 @@ TEST_CASE("MPSC ring: concurrent producers and a drainer lose no frames",
                         ++badPayload;
                     }
                     received.fetch_add(1, std::memory_order_relaxed);
-                    return SsDrainVerdict::Consume;
+                    return ClockworkDrainVerdict::Consume;
                 });
             std::this_thread::yield();
         }
@@ -154,12 +154,12 @@ TEST_CASE("MPSC ring: concurrent producers and a drainer lose no frames",
 // Defect #1 fix guard (RUNS, GREEN): off-audio-thread debug routes to NRT-out.
 // RT-out (ring_buffer_write) is lock-free — safe ONLY with the audio thread as its
 // sole writer. Off the audio thread, emit_debug_osc must route to the locked
-// NRT-out ring instead, so RT-out never gets a second writer. This drives ss_log
+// NRT-out ring instead, so RT-out never gets a second writer. This drives clockwork_log
 // from the (non-audio) test thread and asserts the frame lands in NRT-out and
 // leaves RT-out untouched; and that with no drainer (worklet target) it falls back
-// to RT-out. Deterministic, no gateway — before the fix ss_log always hit RT-out.
+// to RT-out. Deterministic, no gateway — before the fix clockwork_log always hit RT-out.
 // ─────────────────────────────────────────────────────────────────────────────
-TEST_CASE("off-audio-thread ss_log routes to NRT-out, not the RT-out ring",
+TEST_CASE("off-audio-thread clockwork_log routes to NRT-out, not the RT-out ring",
           "[RingConcurrency]") {
     // Self-contained arena + save/restore, so the test neither depends on engine
     // init nor disturbs global state for other tests.
@@ -181,13 +181,13 @@ TEST_CASE("off-audio-thread ss_log routes to NRT-out, not the RT-out ring",
     // Drainer present (native NRT gateway): off-thread debug goes to NRT-out and
     // leaves the single-writer RT-out ring untouched.
     g_nrt_egress_drained.store(true, std::memory_order_relaxed);
-    ss_log("ring-route-test off-audio-thread line");
+    clockwork_log("ring-route-test off-audio-thread line");
     CHECK(c->out_head.load()     == 0);   // RT-out untouched
     CHECK(c->nrt_out_head.load() != 0);   // NRT-out advanced
 
     // No drainer (worklet target): falls back to the always-safe RT-out ring.
     g_nrt_egress_drained.store(false, std::memory_order_relaxed);
-    ss_log("ring-route-test worklet-fallback line");
+    clockwork_log("ring-route-test worklet-fallback line");
     CHECK(c->out_head.load() != 0);       // RT-out advanced
 
     shared_memory = savedSM; control = savedC; metrics = savedM;

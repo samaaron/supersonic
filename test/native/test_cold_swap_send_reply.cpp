@@ -9,19 +9,19 @@
  *
  * These tests replay Spider's exact post-swap sequence: re-register /notify,
  * reload the synthdefs into the fresh World, then query. The pre-swap query is
- * the control — it isolates a failure to the rebuild rather than the harness.
+ * the control — it isolates a failure to the rebuild rather than clockwork.
  */
 #include "EngineFixture.h"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 
-#ifndef SUPERSONIC_TEST_SYNTHDEFS_DIR
-#define SUPERSONIC_TEST_SYNTHDEFS_DIR ""
+#ifndef CLOCKWORK_TEST_SYNTHDEFS_DIR
+#define CLOCKWORK_TEST_SYNTHDEFS_DIR ""
 #endif
 
 static bool loadTestSynthDef(EngineFixture& fx, const std::string& name) {
-    std::string path = std::string(SUPERSONIC_TEST_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
+    std::string path = std::string(CLOCKWORK_TEST_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
     std::filesystem::path fsPath(path);
     if (!std::filesystem::exists(fsPath)) return false;
 

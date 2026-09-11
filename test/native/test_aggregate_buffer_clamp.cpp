@@ -20,7 +20,7 @@
 
 // Shorthand
 static int clamp(int buf, bool active) {
-    return sonicpi::device::clampBufferForDriftComp(buf, active);
+    return clockwork::device::clampBufferForDriftComp(buf, active);
 }
 
 TEST_CASE("AggregateClamp: no-op when drift-comp not active",
@@ -36,12 +36,12 @@ TEST_CASE("AggregateClamp: no-op when drift-comp not active",
 
 TEST_CASE("AggregateClamp: clamps small buffers up to 256 when drift-comp active",
           "[AggregateClamp]") {
-    REQUIRE(clamp(1, true)   == sonicpi::device::kMinAggregateBufferSize);
-    REQUIRE(clamp(16, true)  == sonicpi::device::kMinAggregateBufferSize);
-    REQUIRE(clamp(32, true)  == sonicpi::device::kMinAggregateBufferSize);
-    REQUIRE(clamp(64, true)  == sonicpi::device::kMinAggregateBufferSize);
-    REQUIRE(clamp(128, true) == sonicpi::device::kMinAggregateBufferSize);
-    REQUIRE(clamp(255, true) == sonicpi::device::kMinAggregateBufferSize);
+    REQUIRE(clamp(1, true)   == clockwork::device::kMinAggregateBufferSize);
+    REQUIRE(clamp(16, true)  == clockwork::device::kMinAggregateBufferSize);
+    REQUIRE(clamp(32, true)  == clockwork::device::kMinAggregateBufferSize);
+    REQUIRE(clamp(64, true)  == clockwork::device::kMinAggregateBufferSize);
+    REQUIRE(clamp(128, true) == clockwork::device::kMinAggregateBufferSize);
+    REQUIRE(clamp(255, true) == clockwork::device::kMinAggregateBufferSize);
 }
 
 TEST_CASE("AggregateClamp: leaves buffers ≥256 alone when drift-comp active",

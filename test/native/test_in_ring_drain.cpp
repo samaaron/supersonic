@@ -20,7 +20,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
-#include "src/shared_memory.h"
+#include "shared_memory.h"
 
 #include <cstdint>
 #include <cstring>
@@ -31,7 +31,7 @@ extern "C" bool process_audio(double current_time, uint32_t active_output_channe
 
 namespace {
 
-SupersonicEngine::Config drainConfig() {
+ClockworkEngine::Config drainConfig() {
     auto cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;  // test thread owns process_audio()
     return cfg;

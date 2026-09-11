@@ -22,8 +22,8 @@
 namespace {
 
 // The ESP32 firmware's original (tight) WorldOptions.
-SupersonicEngine::Config embeddedConfig() {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config embeddedConfig() {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate            = 48000;
     cfg.bufferSize            = 64;
     cfg.maxNodes              = 256;

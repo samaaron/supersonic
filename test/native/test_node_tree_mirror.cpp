@@ -6,15 +6,16 @@
  * and structural fields (parent_id, head_id, is_group, def_name).
  */
 #include "EngineFixture.h"
-#include "src/shared_memory.h"
+#include "shared_memory.h"
+#include "node_tree.h"   // the record is SuperSonic's, not the host's
 
 extern "C" uint8_t ring_buffer_storage[];
 
 // ── Helper: find a node by ID in the mirror ─────────────────────────────────
 
 static const NodeEntry* findNode(int32_t id) {
-    auto* header = reinterpret_cast<NodeTreeHeader*>(ring_buffer_storage + NODE_TREE_START);
-    auto* entries = reinterpret_cast<NodeEntry*>(ring_buffer_storage + NODE_TREE_START + NODE_TREE_HEADER_SIZE);
+    auto* header = supersonic_node_tree_header();
+    auto* entries = supersonic_node_tree_entries();
     uint32_t count = header->node_count.load(std::memory_order_acquire);
     for (uint32_t i = 0; i < count && i < NODE_TREE_MIRROR_MAX_NODES; i++) {
         if (entries[i].id == id) return &entries[i];
@@ -23,7 +24,7 @@ static const NodeEntry* findNode(int32_t id) {
 }
 
 static NodeTreeHeader* getHeader() {
-    return reinterpret_cast<NodeTreeHeader*>(ring_buffer_storage + NODE_TREE_START);
+    return supersonic_node_tree_header();
 }
 
 // ── Helper: create a synth via /s_new ────────────────────────────────────────

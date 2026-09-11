@@ -1,5 +1,5 @@
 /*
- * EngineFixture.h — Boots a SupersonicEngine for in-process testing.
+ * EngineFixture.h — Boots a ClockworkEngine for in-process testing.
  *
  * Each test constructs an EngineFixture, which initialises the engine in
  * headless mode with manual audio pumping via the HeadlessDriver.
@@ -7,7 +7,7 @@
  */
 #pragma once
 
-#include "SupersonicEngine.h"
+#include "ClockworkEngine.h"
 #include "OscTestUtils.h"
 #include <catch2/catch_test_macros.hpp>
 #include <vector>
@@ -31,7 +31,7 @@ struct OscReply {
 class EngineFixture {
 public:
     EngineFixture();
-    explicit EngineFixture(const SupersonicEngine::Config& cfg);
+    explicit EngineFixture(const ClockworkEngine::Config& cfg);
     ~EngineFixture();
 
     // ── OSC send (in-process, no UDP) ──────────────────────────────────
@@ -92,19 +92,27 @@ public:
     // Load a .scsyndef file by name (e.g. "sonic-pi-beep")
     bool loadSynthDef(const std::string& name);
 
+    // Wait for `/done <cmd>` — the completion of THAT command, not any /done.
+    bool waitForDone(const std::string& cmd, int timeoutMs = 2000);
+
+    // A number no other fixture in this process has had: a helper that keeps
+    // state per engine (SampleLane.h's pool) keys on it, since a fresh engine
+    // may well land on the addresses the last one freed.
+    uint64_t generation() const { return mGeneration; }
+
     // ── Engine access ──────────────────────────────────────────────────
-    SupersonicEngine& engine() { return mEngine; }
+    ClockworkEngine& engine() { return mEngine; }
 
     // The headless config the default constructor uses. Exposed so tests
     // can tweak one field (e.g. freewheelClock) and pass it to the
     // Config-taking constructor without replicating the whole struct.
-    static SupersonicEngine::Config defaultConfig();
+    static ClockworkEngine::Config defaultConfig();
 
     // Stop the HeadlessDriver so callers can own process_audio exclusively
     void stopHeadlessDriver();
 
     // Render `n` audio blocks on the calling (test) thread via
-    // SupersonicEngine::pumpAudioBlock(). In manualAudioPump mode (no driver
+    // ClockworkEngine::pumpAudioBlock(). In manualAudioPump mode (no driver
     // thread) the test thread is the sole audio-thread writer, so a bus snapshot
     // taken between pumps can't race a real-time driver. waitForReply()/pollUntil()
     // pump automatically in this mode, so most tests never call this directly.
@@ -115,9 +123,10 @@ public:
     bool manualPump() const { return mManualPump; }
 
 private:
-    void init(const SupersonicEngine::Config& cfg);
-    SupersonicEngine mEngine;
+    void init(const ClockworkEngine::Config& cfg);
+    ClockworkEngine mEngine;
     bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
+    uint64_t         mGeneration = 0;      // unique per fixture (see generation())
 
     mutable std::mutex       mReplyMutex;
     std::condition_variable  mReplyCv;

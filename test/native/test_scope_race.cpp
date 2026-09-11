@@ -43,8 +43,8 @@
 // whole diagnostics header for a single counter.
 extern std::atomic<int> gScopeOut2DefenseTripCount;
 
-static SupersonicEngine::Config scopeStressConfig() {
-    SupersonicEngine::Config cfg;
+static ClockworkEngine::Config scopeStressConfig() {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 57200;  // non-zero enables shared memory
@@ -68,7 +68,7 @@ static void spawnScopeSynth(EngineFixture& fix, int32_t nodeId) {
 }
 
 TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace]") {
-    std::string defPath = std::string(SUPERSONIC_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
+    std::string defPath = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
     if (!std::filesystem::exists(defPath)) {
         SKIP("sonic-pi-scope synthdef not available");
     }
@@ -137,7 +137,7 @@ TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace]") 
 
 TEST_CASE("ScopeRace: aggressive stress — 100 swaps with 8 scope synths",
           "[ScopeRace][Stress][.slow]") {
-    std::string defPath = std::string(SUPERSONIC_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
+    std::string defPath = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
     if (!std::filesystem::exists(defPath)) {
         SKIP("sonic-pi-scope synthdef not available");
     }

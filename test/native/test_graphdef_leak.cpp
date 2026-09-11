@@ -1,10 +1,18 @@
 /*
  * test_graphdef_leak.cpp — /d_free must actually free the synthdef
  *
- * A /d_recv (build) followed by /d_free (destroy, no live instances) must leave
- * global-heap allocations and frees balanced. The destroy path used to write to
- * a never-drained fifo and free nothing, leaking the whole GraphDef; this guards
- * that regression. Uses the operator new/delete counters from test_rt_alloc.cpp.
+ * A /d_recv (build) followed by /d_free (destroy, no live instances) must
+ * release everything the build took. The destroy path used to write to a
+ * never-drained fifo and free nothing, leaking the whole GraphDef; this guards
+ * that regression.
+ *
+ * Measured by repetition rather than by counting allocations. The counters in
+ * test_rt_alloc.cpp hook operator new and delete, which sees only what the C++
+ * side allocates; an engine that holds its definitions in memory obtained any
+ * other way would report zero allocations and pass a balance check without
+ * having been tested at all. Loading and freeing the same definition many
+ * times leaks visibly whatever the allocator underneath, which is the property
+ * this file is actually about.
  */
 
 #include "EngineFixture.h"
@@ -13,6 +21,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <unistd.h>
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#endif
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -28,9 +40,37 @@ namespace {
 
 std::vector<uint8_t> readSynthDef(const char* name) {
     std::filesystem::path p =
-        std::filesystem::path(SUPERSONIC_SYNTHDEFS_DIR) / (std::string(name) + ".scsyndef");
+        std::filesystem::path(CLOCKWORK_SYNTHDEFS_DIR) / (std::string(name) + ".scsyndef");
     std::ifstream f(p, std::ios::binary);
     return { std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>() };
+}
+
+/// Resident set size in kilobytes, or 0 where it cannot be read.
+///
+/// A coarse instrument, deliberately: it is immune to which allocator the
+/// engine uses, and a leak of a whole synthdef repeated hundreds of times is
+/// not a subtle signal.
+///
+/// Two implementations because /proc is Linux's. This read /proc/self/statm
+/// unconditionally and returned 0 everywhere else — and the caller's
+/// REQUIRE(before > 0) then turned "this platform cannot be measured" into a
+/// test failure, which is the wrong verdict: the engine was never exercised.
+long resident_kb() {
+#if defined(__APPLE__)
+    // mach's task_basic_info is the platform's own answer to the same
+    // question. resident_size is bytes.
+    mach_task_basic_info_data_t info{};
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                  reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
+        return 0;
+    return static_cast<long>(info.resident_size / 1024);
+#else
+    std::ifstream f("/proc/self/statm");
+    long total = 0, resident = 0;
+    if (!(f >> total >> resident)) return 0;
+    return resident * (sysconf(_SC_PAGESIZE) / 1024);
+#endif
 }
 
 void pump(int blocks, double& ntp) {
@@ -44,10 +84,6 @@ void pump(int blocks, double& ntp) {
 } // namespace
 
 TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
-#if defined(RT_ALLOC_HOOKS_UNAVAILABLE)
-    SKIP("needs the operator new/delete counters from test_rt_alloc.cpp, "
-         "which cannot link under TSan (see rt_alloc.h)");
-#else
     EngineFixture fx;
     auto bytes = readSynthDef("sonic-pi-beep");
     REQUIRE(!bytes.empty());
@@ -56,20 +92,32 @@ TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
     double ntp = 3'000'000'000.0;
     pump(200, ntp); // settle lazy init
 
-    // Build then destroy the def with no live instances, both drained inside the
-    // guard: the destroy must return every allocation the build made.
-    fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
-    fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
-
-    rt_alloc::reset();
-    {
-        rt_alloc::Guard g;
-        pump(200, ntp);
+    // Warm up: the first few rounds touch pages that stay touched, so the
+    // baseline is taken after the allocator has reached a steady state rather
+    // than before it.
+    for (int i = 0; i < 20; ++i) {
+        fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
+        fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
+        pump(4, ntp);
     }
-    int64_t allocs = rt_alloc::g_allocs.load(std::memory_order_relaxed);
-    int64_t frees = rt_alloc::g_frees.load(std::memory_order_relaxed);
-    INFO("allocs=" << allocs << " frees=" << frees);
-    CHECK(allocs > 0);        // the def actually built under the guard
-    CHECK(allocs == frees);   // and every build allocation was freed by the destroy
-#endif  // !RT_ALLOC_HOOKS_UNAVAILABLE
+
+    const long before = resident_kb();
+    REQUIRE(before > 0);
+
+    constexpr int kRounds = 400;
+    for (int i = 0; i < kRounds; ++i) {
+        fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
+        fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
+        pump(4, ntp);
+    }
+    const long after = resident_kb();
+
+    // sonic-pi-beep is tens of kilobytes built out; leaking it 400 times would
+    // add megabytes. A few hundred kilobytes of ordinary allocator drift is
+    // not a leak, and this is set to tell the two apart rather than to be
+    // tight.
+    const long growth = after - before;
+    INFO("resident before=" << before << "kB after=" << after << "kB growth=" << growth << "kB");
+    CHECK(growth < 2048);
+
 }

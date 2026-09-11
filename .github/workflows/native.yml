@@ -12,13 +12,22 @@ concurrency:
   group: "native-${{ github.ref }}"
   cancel-in-progress: true
 
+# SuperSonic is clockwork (a submodule) plus the scsynth guest (dsp/scsynth).
+# Every job checks the submodule out; without it there is nothing to build.
+#
+# What is NOT here, and why: the BEAM NIF runtime tests, the freestanding
+# no-synth engine, the MIT scheduler host, the ESP32-S3 build and the Rust
+# transport crate's own tests all covered code that now lives in clockwork.
+# clockwork's CI runs them. This workflow covers what is SuperSonic's: the
+# guest, the host process, the native test suite and the command transports.
+
 jobs:
   # ── Core logging guard ──────────────────────────────────────────────────────
   # The scsynth core logs through the egress funnel — ss_log / scprintf / the
   # interface table's Print — never raw stdio. Raw stdio output vanishes in
   # the WASM AudioWorklet (no usable stdout), bypasses the /supersonic/debug
   # channel the hosts surface, and takes the stdio stream lock on the audio
-  # thread. This guard fails on any live printf-family call in src/synth.
+  # thread. This guard fails on any live printf-family call in the core.
   # Exemptions are narrow and deliberate:
   #   external_libraries/  vendored code (TLSF, boost)
   #   SC_Win32Utils.cpp    native-only Win32 helpers, never compiled to WASM
@@ -41,7 +50,7 @@ jobs:
       - name: Forbid raw stdio logging in the scsynth core
         run: |
           set -uo pipefail
-          hits=$(grep -RnE '^[^/]*\b(printf|fprintf|vprintf|vfprintf|puts|fputs)[[:space:]]*\(' src/synth \
+          hits=$(grep -RnE '^[^/]*\b(printf|fprintf|vprintf|vfprintf|puts|fputs)[[:space:]]*\(' dsp/scsynth/synth \
             --include='*.c' --include='*.cpp' --include='*.h' --include='*.hpp' \
             --exclude-dir=external_libraries \
             --exclude=SC_Win32Utils.cpp \
@@ -57,54 +66,59 @@ jobs:
           fi
           echo "scsynth core is clean: all logging flows through the egress funnel."
 
-  # ── JUCE native executable ──────────────────────────────────────────────────
-  juce:
+  # ── Native executable + test suite ──────────────────────────────────────────
+  native:
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             name: linux-x64
-            deps: |
-              sudo apt-get update
-              sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
-                libjack-dev \
-                libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-                libxinerama-dev libxcursor-dev libxcomposite-dev
           - os: ubuntu-24.04-arm
             name: linux-arm64
-            deps: |
-              sudo apt-get update
-              sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
-                libjack-dev \
-                libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-                libxinerama-dev libxcursor-dev libxcomposite-dev
           - os: macos-latest
             name: macos-arm64
-            deps: ""
           - os: macos-15-intel
             name: macos-x64
-            deps: ""
           - os: windows-latest
             name: windows-x64
-            deps: ""
           # - os: windows-arm64        # temporarily disabled — runner queue too slow
           #   name: windows-arm64
-          #   deps: ""
 
     runs-on: ${{ matrix.os }}
     name: native-${{ matrix.name }}
     # A healthy build+test run is ~20 min; cap it so a teardown/test hang fails
     # fast instead of holding a runner to GitHub's 6-hour default.
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
-      - name: Install dependencies
-        if: matrix.deps != ''
-        run: ${{ matrix.deps }}
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ matrix.name }}-${{ hashFiles('rust/Cargo.lock', 'clockwork/rust/Cargo.lock') }}
+
+      # smoothie, clockwork's device layer (a fork of four JUCE 7 modules,
+      # in-tree, not a dependency), needs the X11/freetype set to
+      # configure on Linux even for a headless build; ALSA, JACK and PipeWire
+      # are the audio backends it compiles in.
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
+            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxcomposite-dev
 
       - name: Configure
         run: cmake -B build/native -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
@@ -114,9 +128,8 @@ jobs:
 
       - name: Build tests
         # Capped at 2 parallel jobs to avoid OOM on the 16 GB GitHub runners:
-        # the test target recompiles JUCE alongside Catch2 and the test sources,
-        # and unbounded parallelism can exhaust memory on heavy modules like
-        # juce_audio_devices on Linux.
+        # the test target compiles Catch2 and 100-odd test sources alongside
+        # the engine.
         run: cmake --build build/native --config Release --parallel 2 --target SuperSonicNativeTests
 
       - name: Run tests
@@ -131,8 +144,8 @@ jobs:
         shell: bash
 
       # End-to-end command transports: boot the real binary headless once per
-      # transport (UDP/TCP/UDS on unix; UDP/TCP/named pipe on Windows) and
-      # require a /status reply over that transport (test/transport-harness/).
+      # transport (UDP/TCP/UDS/SHM on unix; UDP/TCP/named pipe/SHM on Windows)
+      # and require a /status reply over that transport (test/transport-harness/).
       - name: Transport harness
         shell: bash
         run: |
@@ -147,10 +160,10 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            echo "path=build/native/SuperSonic_artefacts/Release/SuperSonic.exe" >> "$GITHUB_OUTPUT"
+            echo "path=build/native/Release/SuperSonic.exe" >> "$GITHUB_OUTPUT"
             echo "artifact=supersonic-${{ matrix.name }}.exe" >> "$GITHUB_OUTPUT"
           else
-            echo "path=build/native/SuperSonic_artefacts/Release/SuperSonic" >> "$GITHUB_OUTPUT"
+            echo "path=build/native/SuperSonic" >> "$GITHUB_OUTPUT"
             echo "artifact=supersonic-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
           fi
 
@@ -166,30 +179,29 @@ jobs:
           name: ${{ steps.binary.outputs.artifact }}
           path: ${{ steps.binary.outputs.artifact }}
 
-  # ── JUCE native executable, 32-bit x86 ──────────────────────────────────────
+  # ── Native executable, 32-bit x86 ───────────────────────────────────────────
   # i686 is the one desktop target where the engine's lock-free assumptions can
   # actually break: 8-byte atomics lower to cmpxchg8b and may need libatomic,
-  # where every 64-bit target gets them for free. The bit-packed
-  # atomic<uint64_t> in TimeSource.h / LinkAudioInputRenderer.hpp exists for
-  # exactly this reason; this job is what proves it holds.
+  # where every 64-bit target gets them for free. This job is what proves the
+  # guest and the host hold on it; clockwork's own CI proves the substrate.
   #
-  # Not folded into the juce matrix above because it can't use a plain runner:
-  # Ubuntu dropped i386 as a full architecture in 19.10, so most of JUCE's -dev
-  # dependencies have no i386 build there. Debian still carries a complete i386
-  # archive, so the build runs in a Debian i386 container on an x86_64 host.
-  # Nothing is emulated — x86_64 runs 32-bit code natively — and the container
-  # can't be a job-level `container:` because the runner injects an x86_64 Node
-  # to execute JS actions, which an i386 rootfs cannot load.
-  juce-x86:
+  # Not folded into the native matrix above because it can't use a plain
+  # runner: Ubuntu dropped i386 as a full architecture in 19.10, so most of
+  # smoothie's -dev dependencies have no i386 build there. Debian still carries a
+  # complete i386 archive, so the build runs in a Debian i386 container on an
+  # x86_64 host. Nothing is emulated — x86_64 runs 32-bit code natively — and
+  # the container can't be a job-level `container:` because the runner injects
+  # an x86_64 Node to execute JS actions, which an i386 rootfs cannot load.
+  native-x86:
     runs-on: ubuntu-latest
     name: native-linux-x86
-    # Slower than the x64 job: no ccache and JUCE compiles twice (binary +
-    # tests). Still well inside this cap.
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       # One long-lived container so the apt install is shared while each phase
       # still gets its own step, making a failure point at the stage that broke.
@@ -220,175 +232,43 @@ jobs:
         if: ${{ always() }}
         run: docker rm -f ss32 || true
 
-  # ── Freestanding engine (no JUCE, no Emscripten) ────────────────────────────
-  # Compiles the shared engine (core + lanes ABI + scsynth + oscpack) against the
-  # compile-shim stubs only and drives it purely through ss_init/ss_tick. Checks
-  # the "one C ABI for all build targets" invariant: it fails if a JUCE/Emscripten
-  # dependency is pulled into the shared engine, the ABI breaks, or a shared
-  # symbol stops resolving without a full host — regressions that would otherwise
-  # only surface on the embedded build, which CI can't compile.
-  #
-  # The supersonic_freestanding BINARY links no JUCE — that's the whole point —
-  # but the monolithic CMakeLists configures every target, so `cmake -B` still
-  # pulls JUCE and needs its Linux configure deps. They're installed only to let
-  # the project configure; nothing here links them into the freestanding engine.
-  # Rust transport suite — load + unit tests for the leaf that owns every
-  # socket/pipe transport (supersonic-osc-net). The native build only *links*
-  # this crate, so its own tests never ran in CI; this job runs them on every
-  # OS x CPU. tests/load.rs hammers TCP / UDS stream / UDS datagram (+ the
-  # Windows named pipe) through the public C ABI at medium volume (100k msgs
-  # over 4 concurrent connections, mixed small/large/split frames) and asserts
-  # completeness, per-source ordering, and zero corruption under load. Rust ships
-  # on every GitHub runner, so no toolchain/JUCE setup is needed.
-  # (windows-arm64 mirrors the native matrix — disabled while its runner queue is
-  # slow; re-add the line below to cover it.)
-  rust-transports:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-latest,    name: linux-x64 }
-          - { os: ubuntu-24.04-arm, name: linux-arm64 }
-          - { os: macos-latest,     name: macos-arm64 }
-          - { os: macos-15-intel,   name: macos-x64 }
-          - { os: windows-latest,   name: windows-x64 }
-          # 32-bit x86 needs no container, unlike the native-linux-x86 job: the
-          # crate's only dependency is the Rust toolchain, so cross-compiling to
-          # i686 and running the (32-bit) test binaries natively on the x86_64
-          # runner is enough. Worth covering because the transports do pointer-
-          # and usize-width arithmetic when framing messages.
-          - { os: ubuntu-latest,    name: linux-x86, target: i686-unknown-linux-gnu }
-          # - { os: windows-arm64,  name: windows-arm64 }
-    runs-on: ${{ matrix.os }}
-    name: rust-transports-${{ matrix.name }}
-    timeout-minutes: 20
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      # gcc-multilib supplies the 32-bit libc and the -m32 linker support cargo
-      # needs to link an i686 target on an x86_64 host.
-      - name: Setup 32-bit target
-        if: matrix.target != ''
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-multilib
-          rustup target add ${{ matrix.target }}
-      - name: Transport load + unit tests (release)
-        working-directory: rust
-        run: cargo test --release -p supersonic-osc-net ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-
-  freestanding:
-    runs-on: ubuntu-latest
-    name: freestanding-engine
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
-            libjack-dev \
-            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxcomposite-dev
-
-      - name: Configure
-        run: cmake -B build/freestanding -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build freestanding engine
-        run: cmake --build build/freestanding --config Release --parallel --target supersonic_freestanding
-
-      - name: Run freestanding smoke test
-        run: ./build/freestanding/supersonic_freestanding
-
   # ── Embedded-consumer guard (add_subdirectory from a foreign tree) ──────────
-  # SuperSonic supports being consumed as a subproject (the BEAM NIF host, any
-  # external embedder) via add_subdirectory() from a tree whose CMAKE_SOURCE_DIR
-  # is NOT the SuperSonic root. Every other job here configures SuperSonic as
-  # the top-level project, where CMAKE_SOURCE_DIR == CMAKE_CURRENT_SOURCE_DIR,
-  # so a CMAKE_SOURCE_DIR/CMAKE_CURRENT_SOURCE_DIR mix-up in a source path can
-  # never be caught — it only breaks the embedded build. This job is the guard.
+  # Sonic Pi builds SuperSonic this way: add_subdirectory() from a tree whose
+  # CMAKE_SOURCE_DIR is NOT the SuperSonic root. Every other job configures
+  # SuperSonic as the top-level project, where CMAKE_SOURCE_DIR ==
+  # CMAKE_CURRENT_SOURCE_DIR, so a mix-up between the two in a source path can
+  # never be caught there — it only breaks the embedded build. This is the guard.
   #
   # Configure-only: a misanchored source path fails the generate step ("Cannot
   # find source file"), so reaching "Generating done" is the whole assertion.
-  # test/embed forces synth + Link off, so this configures fast and JUCE-free.
   embed-guard:
     runs-on: ubuntu-latest
     name: embed-consumer-guard
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev
-
-      - name: Configure as embedded subproject
-        run: cmake -S test/embed -B build/embed-guard
-
-  # ── ESP32-S3 engine build (real Xtensa, build-only) ─────────────────────────
-  # Compiles the shared engine for the esp32s3 target through ESP-IDF — the
-  # SCP_TARGET_ESP32 profile the desktop freestanding guard cannot reach: the
-  # no-byte-atomics path (supersonic_heap.cpp), EXT_RAM_BSS PSRAM placement, and
-  # Xtensa codegen. Build-only (no hardware/emulator) — it proves the engine
-  # compiles + links for embedded. The official Espressif action runs idf.py
-  # build inside the espressif/idf Docker image on a normal runner.
-  esp32s3:
-    runs-on: ubuntu-latest
-    name: esp32s3-engine-build
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Build the SuperSonic engine for ESP32-S3
-        uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.4
-          target: esp32s3
-          path: esp32s3
+          submodules: recursive
 
-  # ── MIT scheduler host + no-synth core (no synth, no JUCE, no Ableton Link) ─
-  # The MIT-licensed cell: the shared scheduler core + the Rust OSC/MIDI
-  # subsystems only — no synthesis, no JUCE, no Link. The boundary is
-  # structural: SUPERSONIC_ENABLE_SYNTH=OFF compiles the scsynth sources out
-  # entirely (JUCE is never fetched), and the host target lists none of them.
-  # Runs the host's own unit tests plus supersonic_nosynth_smoke — the only
-  # runtime exercise of the no-synth engine core (boot, tick, scheduler
-  # fire), which no other job builds or runs.
-  host:
-    runs-on: ubuntu-latest
-    name: scheduler-host-mit
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
-            libjack-dev \
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
             libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxcomposite-dev
 
-      - name: Configure (host on, synth/Link off)
-        run: cmake -B build/host -DCMAKE_BUILD_TYPE=Release -DSUPERSONIC_BUILD_SCHEDULER_HOST=ON -DSUPERSONIC_ENABLE_SYNTH=OFF -DSUPERSONIC_ENABLE_LINK=OFF
+      - name: Configure as embedded subproject
+        run: cmake -S test/embed -B build/embed-guard -DBUILD_TESTS=ON
 
-      - name: Build host + tests + no-synth smoke
-        run: cmake --build build/host --config Release --parallel --target supersonic-scheduler host_tests supersonic_nosynth_smoke
-
-      - name: Run host tests
-        working-directory: build/host
-        run: ctest --output-on-failure -R "host_tests"
-
-      - name: Run no-synth runtime smoke
-        run: ./build/host/supersonic_nosynth_smoke
-
-  # ── BEAM NIF shared library ─────────────────────────────────────────────────
+  # ── BEAM NIF shared library (build only) ────────────────────────────────────
+  # The NIF is clockwork's (clockwork/src/nif); built here with scsynth as its
+  # guest it is SuperSonic-on-the-BEAM. clockwork vendors the erl_nif headers,
+  # so no BEAM is needed to build it; its runtime tests run in clockwork's CI.
   nif:
     strategy:
       fail-fast: false
@@ -396,163 +276,78 @@ jobs:
         include:
           - os: ubuntu-latest
             name: linux-x64
-            ext: so
-            headless: "1"
-          - os: ubuntu-24.04-arm
-            name: linux-arm64
-            ext: so
-            headless: "1"
           - os: macos-latest
             name: macos-arm64
-            ext: so
-            headless: "1"
-          - os: macos-15-intel
-            name: macos-x64
-            ext: so
-            headless: "1"
           - os: windows-latest
             name: windows-x64
-            ext: dll
-            headless: "1"
-          # - os: windows-arm64        # temporarily disabled — runner queue too slow
-          #   name: windows-arm64
-          #   ext: dll
-          #   headless: "1"
 
     runs-on: ${{ matrix.os }}
     name: nif-${{ matrix.name }}
-    # A healthy build + mix test run is a few minutes; cap it so a NIF teardown
-    # hang fails fast instead of holding a runner to GitHub's 6-hour default.
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
-      - name: Install system dependencies (Linux)
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
-            libjack-dev \
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
             libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxcomposite-dev
 
-      # The arm64 runner reports ImageOS=ubuntu24-arm64, which setup-beam can't
-      # map. Point it at the base image (ubuntu24); it then resolves the arm64
-      # OTP build from the runner's architecture.
-      - name: Map ImageOS for arm64 runner
-        if: matrix.os == 'ubuntu-24.04-arm'
-        run: echo "ImageOS=ubuntu24" >> "$GITHUB_ENV"
-
-      # Likewise the VS-suffixed Windows images (e.g. ImageOS=win25-vs2026):
-      # strip the suffix so setup-beam maps the base image (win25).
-      - name: Map ImageOS for Windows runner
-        if: runner.os == 'Windows'
-        run: |
-          if ($env:ImageOS -match '^(win\d+)') {
-            echo "ImageOS=$($Matches[1])" >> $env:GITHUB_ENV
-          }
-
-      - name: Setup Erlang/Elixir
-        uses: erlef/setup-beam@v1
-        with:
-          otp-version: '27'
-          elixir-version: '1.18'
-
       - name: Configure
-        run: cmake -B build/nif -DBUILD_NIF=ON -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build/nif -DCLOCKWORK_NIF=ON -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build/nif --target supersonic_nif --config Release --parallel
+        run: cmake --build build/nif --target clockwork_nif --config Release --parallel 2
 
-      - name: Verify NIF binary
-        shell: bash
-        run: test -f build/nif/supersonic.${{ matrix.ext }}
-
-      - name: Run Elixir tests
-        working-directory: test/nif
-        env:
-          SUPERSONIC_NIF_PATH: ${{ github.workspace }}/build/nif
-          SUPERSONIC_HEADLESS: ${{ matrix.headless }}
-          SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
-        shell: bash
-        run: |
-          mix local.hex --force
-          mix local.rebar --force
-          mix test
-
-      - name: Prepare release artifact
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: cp build/nif/supersonic.${{ matrix.ext }} "supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}"
-
-      - name: Upload release artifact
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v7
-        with:
-          name: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
-          path: supersonic-nif-${{ matrix.name }}.${{ matrix.ext }}
-
-  # ── Sanitizer builds (ASan+UBSan and TSan) ──────────────────────────────────
-  # Linux only: TSan support is incomplete on Windows, and the sanitizers
-  # exercise the platform-agnostic engine — platform-specific audio backend
-  # paths (CoreAudio, WASAPI) are covered by the juce job above.
+  # ── Sanitizer build (ASan+UBSan) ────────────────────────────────────────────
+  # Linux only, gcc: the sanitizers exercise the platform-agnostic engine —
+  # platform-specific audio backend paths (CoreAudio, WASAPI) are covered by
+  # the native matrix above. Plugin hosting is off, as in clockwork's own
+  # sanitizer job: the bridge process is not what this job is about.
+  #
+  # TSan is not run here. The Rust subsystems are not TSan-instrumented in
+  # this build, and an uninstrumented staticlib turns every Rust-side
+  # happens-before edge into a false positive.
   sanitize:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - sanitizer: address+undefined
-            name: asan-ubsan
-            cc: gcc
-            cxx: g++
-          - sanitizer: thread
-            name: tsan
-            # clang, not gcc: the Rust staticlib is TSan-instrumented (std
-            # included; see the SUPERSONIC_RUST_TSAN_TOOLCHAIN block in
-            # CMakeLists.txt), and the final link must provide the single
-            # LLVM TSan runtime both languages share — gcc would link its
-            # own libtsan port alongside it instead.
-            cc: clang
-            cxx: clang++
-            # Pinned: -Zsanitizer / -Zbuild-std are unstable and occasionally
-            # break across nightlies. Bump deliberately.
-            rust_toolchain: nightly-2026-07-02
-
     runs-on: ubuntu-latest
-    name: sanitize-${{ matrix.name }}
-    # A sanitizer deadlock would otherwise sit on GitHub's 6-hour default.
-    # The full TSan suite runs in well under this even on a slow shared runner;
-    # if it ever exceeds it, fail fast rather than burn a 6-hour runner.
-    timeout-minutes: 30
+    name: sanitize-asan-ubsan
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libasound2-dev libudev-dev \
-            libjack-dev \
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
             libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
             libxinerama-dev libxcursor-dev libxcomposite-dev
 
-      - name: Install Rust toolchain (TSan-instrumented std)
-        if: matrix.rust_toolchain
-        run: rustup toolchain install ${{ matrix.rust_toolchain }} --profile minimal --component rust-src
-
       - name: Configure
-        env:
-          CC: ${{ matrix.cc }}
-          CXX: ${{ matrix.cxx }}
         run: |
           cmake -B build/native-sanitize \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DBUILD_TESTS=ON \
-            -DSUPERSONIC_SANITIZER=${{ matrix.sanitizer }} \
-            -DSUPERSONIC_RUST_TSAN_TOOLCHAIN=${{ matrix.rust_toolchain || 'nightly' }}
+            -DCLOCKWORK_PLUGINS=OFF \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address,undefined"
 
       - name: Build tests
         # parallel 2 keeps memory usage in check (instrumented builds are
@@ -562,28 +357,20 @@ jobs:
       - name: Run tests
         env:
           # halt_on_error=1 makes the first sanitizer report fatal — without
-          # this UBSan logs and continues, leaving CI green. Local dev can
-          # set =0 to collect every report in one run.
+          # this UBSan logs and continues, leaving CI green.
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:symbolize=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1:symbolize=1"
-          # suppressions file is currently empty (the Rust build is fully
-          # TSan-instrumented, std included); the wiring stays so a future
-          # suppression only needs an entry in .github/tsan.suppressions.
-          TSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:second_deadlock_stack=1:history_size=4:suppressions=${{ github.workspace }}/.github/tsan.suppressions"
           SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
-        # timeout: a sanitizer abort can wedge instead of exiting,
-        # which would otherwise sit silently until the 30-minute job timeout.
-        # A green suite runs in ~3 minutes; 600s fails fast with the report
-        # already flushed. -k covers a process stuck past SIGTERM.
-        # Exclude [load]: the high-volume load tests are for throughput/correctness
-        # under saturation (covered in the Release matrix + the rust-transports
-        # job), not races/UB — running them here only slows the sanitizer pass.
-        run: timeout -k 30 600 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]~[load]"
+        # timeout: a sanitizer abort can wedge instead of exiting, which would
+        # otherwise sit silently until the job timeout. -k covers a process
+        # stuck past SIGTERM. [load] is excluded: the high-volume load tests
+        # are for throughput under saturation, not races/UB.
+        run: timeout -k 30 900 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]~[load]"
 
   # ── Attach artifacts to GitHub Release ──────────────────────────────────────
   release:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [juce, nif]
+    needs: [native]
     runs-on: ubuntu-latest
     permissions:
       contents: write

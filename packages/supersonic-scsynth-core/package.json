@@ -1,7 +1,7 @@
 {
   "name": "supersonic-scsynth-core",
-  "version": "0.71.0",
-  "description": "SuperCollider scsynth WebAssembly engine and AudioWorklet for SuperSonic",
+  "version": "0.80.0",
+  "description": "SuperCollider scsynth on clockwork: the WebAssembly engine and AudioWorklet for SuperSonic",
   "type": "module",
   "main": "index.js",
   "unpkg": "index.js",
@@ -20,14 +20,14 @@
     "wasm"
   ],
   "author": "Sam Aaron",
-  "license": "GPL-3.0-or-later",
+  "license": "AGPL-3.0-or-later",
   "bugs": {
     "url": "https://github.com/samaaron/supersonic/issues"
   },
   "homepage": "https://github.com/samaaron/supersonic#readme",
   "files": [
     "wasm/",
-    "workers/scsynth_audio_worklet.js",
+    "workers/clockwork_audio_worklet.js",
     "index.js",
     "README.md",
     "LICENSE"

@@ -1,0 +1,12 @@
+[package]
+name = "supersonic-buffers"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Installing sample data into the engine's buffer table."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+supersonic-ugen-abi = { path = "../supersonic-ugen-abi" }

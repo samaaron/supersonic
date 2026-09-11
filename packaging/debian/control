@@ -7,14 +7,13 @@ Build-Depends: debhelper-compat (= 13),
  pkgconf,
  cargo,
  rustc,
- libsndfile1-dev,
- libflac-dev,
- libogg-dev,
- libvorbis-dev,
  catch2,
+ zlib1g-dev,
+ libstb-dev,
  libasound2-dev,
  libudev-dev,
  libjack-jackd2-dev | libjack-dev,
+ libpipewire-0.3-dev,
  libfreetype-dev,
  libfontconfig-dev,
  libx11-dev,
@@ -33,8 +32,9 @@ Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Suggests: jackd2 | pipewire-jack
 Description: low-latency scsynth-compatible audio synthesis server
- SuperSonic is a port of SuperCollider's scsynth audio engine focused on
- low latency and long-session reliability. The server accepts scsynth
+ SuperSonic is SuperCollider's scsynth audio engine running on clockwork,
+ a substrate providing audio device I/O, MIDI, OSC, game controller input,
+ the transport clock and Ableton Link. The server accepts scsynth
  command-line flags and the scsynth OSC command set, so SuperCollider
  clients (such as Sonic Pi) can launch and drive it as a drop-in
  replacement for scsynth.

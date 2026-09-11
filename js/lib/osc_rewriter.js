@@ -237,7 +237,7 @@ export class OSCRewriter {
     return [
       "/b_allocPtr",
       Math.floor(bufnum),
-      Math.floor(bufferInfo.ptr),
+      Math.floor(bufferInfo.laneOffset),   // an offset into the inbox, not an address
       Math.floor(bufferInfo.numFrames),
       Math.floor(bufferInfo.numChannels),
       bufferInfo.sampleRate,

@@ -1,5 +1,16 @@
-defmodule SupersonicTest do
+defmodule TauTest do
   use ExUnit.Case
+
+  # The clock verbs live under /clockwork/, the prefix clockwork keeps for
+  # itself (see clockwork_sys.h — the trailing slash is the whole rule, so /clockwork-sys
+  # and /clockwork-system-status are NOT claimed). These tests were written before
+  # that namespace existed and addressed /clock/... directly.
+  #
+  # The completion atoms are {:clockwork_started, _} / {:clockwork_stopped, _}, not
+  # {:supersonic_started, _} / {:supersonic_stopped, _}. They were renamed with
+  # the rest of clockwork's vocabulary during the extraction; these tests came
+  # across from upstream unchanged and had never been run against the renamed
+  # NIF, because no build rule for it came across either.
 
   # When SUPERSONIC_HEADLESS=1 is set (e.g. Windows CI with no audio device),
   # tests boot in headless mode. The HeadlessDriver inside the engine handles
@@ -11,7 +22,7 @@ defmodule SupersonicTest do
   # the completion here to guarantee the engine is actually down before each test.
   setup do
     stop_sync()
-    on_exit(fn -> :supersonic.stop() end)
+    on_exit(fn -> :clockwork.stop() end)
     :ok
   end
 
@@ -21,18 +32,18 @@ defmodule SupersonicTest do
   # the outcome as a message to the caller. These helpers re-synchronise for the
   # tests that want the engine up/down before proceeding.
   defp start_sync(config) do
-    assert :ok = :supersonic.start(config)
+    assert :ok = :clockwork.start(config)
     receive do
-      {:supersonic_started, result} -> result
+      {:clockwork_started, result} -> result
     after
       5000 -> flunk("start did not report completion")
     end
   end
 
   defp stop_sync do
-    assert :ok = :supersonic.stop()
+    assert :ok = :clockwork.stop()
     receive do
-      {:supersonic_stopped, result} -> result
+      {:clockwork_stopped, result} -> result
     after
       5000 -> flunk("stop did not report completion")
     end
@@ -116,7 +127,7 @@ defmodule SupersonicTest do
   # ── NIF loading ──────────────────────────────────────────────────────────
 
   test "NIF is loaded" do
-    assert :supersonic.is_nif_loaded() == true
+    assert :clockwork.is_nif_loaded() == true
   end
 
   # ── Lifecycle ────────────────────────────────────────────────────────────
@@ -128,20 +139,20 @@ defmodule SupersonicTest do
 
   test "start is asynchronous: returns :ok immediately, reports completion by message" do
     # The NIF returns before the engine is booted; completion arrives separately.
-    assert :ok = :supersonic.start(start_config())
-    assert_receive {:supersonic_started, :ok}, 5000
+    assert :ok = :clockwork.start(start_config())
+    assert_receive {:clockwork_started, :ok}, 5000
   end
 
   test "stop is asynchronous: returns :ok immediately, reports completion by message" do
     assert :ok = start_sync(start_config())
-    assert :ok = :supersonic.stop()
-    assert_receive {:supersonic_stopped, :ok}, 5000
+    assert :ok = :clockwork.stop()
+    assert_receive {:clockwork_stopped, :ok}, 5000
   end
 
   test "double start reports already_running via the completion message" do
     assert :ok = start_sync(start_config())
-    assert :ok = :supersonic.start(start_config())
-    assert_receive {:supersonic_started, {:error, :already_running}}, 5000
+    assert :ok = :clockwork.start(start_config())
+    assert_receive {:clockwork_started, {:error, :already_running}}, 5000
   end
 
   test "stop when not running is ok" do
@@ -151,24 +162,24 @@ defmodule SupersonicTest do
   # ── OSC send ─────────────────────────────────────────────────────────────
 
   test "send_osc when not running returns error" do
-    assert {:error, :not_running} = :supersonic.send_osc(osc_message("/status"))
+    assert {:error, :not_running} = :clockwork.send_osc(osc_message("/status"))
   end
 
   test "send_osc with valid message returns ok" do
     :ok = start_sync(start_config())
-    assert :ok = :supersonic.send_osc(osc_message("/status"))
+    assert :ok = :clockwork.send_osc(osc_message("/status"))
   end
 
   test "send_osc with non-binary returns badarg" do
     :ok = start_sync(start_config())
-    assert_raise ArgumentError, fn -> :supersonic.send_osc(:not_a_binary) end
+    assert_raise ArgumentError, fn -> :clockwork.send_osc(:not_a_binary) end
   end
 
   # ── Notifications ────────────────────────────────────────────────────────
 
   test "set and clear notification pid" do
-    assert :ok = :supersonic.set_notification_pid()
-    assert :ok = :supersonic.clear_notification_pid()
+    assert :ok = :clockwork.set_notification_pid()
+    assert :ok = :clockwork.clear_notification_pid()
   end
 
   test "multiple registered processes each receive replies" do
@@ -177,7 +188,7 @@ defmodule SupersonicTest do
 
     # A second process registers itself and relays the first reply it sees.
     relay = spawn(fn ->
-      :supersonic.set_notification_pid()
+      :clockwork.set_notification_pid()
       send(test_pid, :relay_registered)
 
       receive do
@@ -190,8 +201,8 @@ defmodule SupersonicTest do
     assert_receive :relay_registered, 2000
 
     # This process registers too, then triggers a reply.
-    :ok = :supersonic.set_notification_pid()
-    :ok = :supersonic.send_osc(osc_message("/version"))
+    :ok = :clockwork.set_notification_pid()
+    :ok = :clockwork.send_osc(osc_message("/version"))
 
     # Both audiences receive it — the registry fans out, it isn't single-pid.
     assert {:ok, _} = wait_for_reply_matching("/version.reply")
@@ -210,18 +221,18 @@ defmodule SupersonicTest do
 
   test "subscribing to Link notify pushes an immediate snapshot to the registered pid" do
     :ok = start_sync(start_config())
-    :ok = :supersonic.set_notification_pid()
+    :ok = :clockwork.set_notification_pid()
 
-    :ok = :supersonic.send_osc(osc_message("/clock/notify/subscribe"))
+    :ok = :clockwork.send_osc(osc_message("/clockwork/clock/notify/subscribe"))
 
-    assert {:ok, _} = wait_for_reply_matching("/clock/notify/tempo")
-    assert {:ok, _} = wait_for_reply_matching("/clock/notify/peers")
+    assert {:ok, _} = wait_for_reply_matching("/clockwork/clock/notify/tempo")
+    assert {:ok, _} = wait_for_reply_matching("/clockwork/clock/notify/peers")
   end
 
   test "receive /version.reply" do
     :ok = start_sync(start_config())
-    :ok = :supersonic.set_notification_pid()
-    :ok = :supersonic.send_osc(osc_message("/version"))
+    :ok = :clockwork.set_notification_pid()
+    :ok = :clockwork.send_osc(osc_message("/version"))
 
     assert {:ok, reply} = wait_for_reply()
     assert is_binary(reply)
@@ -230,8 +241,8 @@ defmodule SupersonicTest do
 
   test "receive /g_queryTree.reply" do
     :ok = start_sync(start_config())
-    :ok = :supersonic.set_notification_pid()
-    :ok = :supersonic.send_osc(osc_message("/g_queryTree", 0))
+    :ok = :clockwork.set_notification_pid()
+    :ok = :clockwork.send_osc(osc_message("/g_queryTree", 0))
 
     assert {:ok, reply} = wait_for_reply()
     assert is_binary(reply)
@@ -241,46 +252,46 @@ defmodule SupersonicTest do
   # ── Link / clock queries (travel the NRT plane, not the RT OUT ring) ──────
   #
   # A /clock query is forwarded to the NRT command ring, processed on the gateway
-  # thread (EngineControl/SuperClock), and its reply is framed into the NRT-out
+  # thread (EngineControl/TauClock), and its reply is framed into the NRT-out
   # ring. The gateway merges that with the RT OUT ring and the reply reaches the
   # registered pid as an {:osc_reply, binary} message — exactly the same sink as
   # scsynth's own replies, proving the unified egress works for the NRT plane.
 
   test "clock tempo query round-trips via the NRT egress ring" do
     :ok = start_sync(start_config())
-    :ok = :supersonic.set_notification_pid()
+    :ok = :clockwork.set_notification_pid()
 
-    :ok = :supersonic.send_osc(osc_message("/clock/tempo/set", 142.5))
-    :ok = :supersonic.send_osc(osc_message("/clock/tempo/get"))
+    :ok = :clockwork.send_osc(osc_message("/clockwork/clock/tempo/set", 142.5))
+    :ok = :clockwork.send_osc(osc_message("/clockwork/clock/tempo/get"))
 
     # /clock/tempo.reply travels the NRT command ring → gateway → NRT-out ring →
     # the registered pid, and the tempo value round-trips (read from the shared
-    # SuperClock state mirror, same as the web build).
-    assert {:ok, reply} = wait_for_reply_matching("/clock/tempo.reply")
+    # TauClock state mirror, same as the web build).
+    assert {:ok, reply} = wait_for_reply_matching("/clockwork/clock/tempo.reply")
     assert_in_delta trailing_double(reply), 142.5, 0.5
   end
 
   test "clock visibility query replies to the registered pid via the NRT ring" do
     :ok = start_sync(start_config())
-    :ok = :supersonic.set_notification_pid()
+    :ok = :clockwork.set_notification_pid()
 
-    :ok = :supersonic.send_osc(osc_message("/clock/visibility/get"))
+    :ok = :clockwork.send_osc(osc_message("/clockwork/clock/visibility/get"))
 
-    assert {:ok, reply} = wait_for_reply_matching("/clock/visibility.reply")
+    assert {:ok, reply} = wait_for_reply_matching("/clockwork/clock/visibility.reply")
     assert is_binary(reply)
   end
 
   test "RT (scsynth) and NRT (clock) replies both reach the same pid" do
     :ok = start_sync(start_config())
-    :ok = :supersonic.set_notification_pid()
+    :ok = :clockwork.set_notification_pid()
 
     # /version → scsynth reply on the RT OUT ring.
-    :ok = :supersonic.send_osc(osc_message("/version"))
+    :ok = :clockwork.send_osc(osc_message("/version"))
     assert {:ok, _} = wait_for_reply_matching("/version.reply")
 
     # /clock/tempo/get → reply on the NRT-out ring. Same registered pid.
-    :ok = :supersonic.send_osc(osc_message("/clock/tempo/get"))
-    assert {:ok, _} = wait_for_reply_matching("/clock/tempo.reply")
+    :ok = :clockwork.send_osc(osc_message("/clockwork/clock/tempo/get"))
+    assert {:ok, _} = wait_for_reply_matching("/clockwork/clock/tempo.reply")
   end
 
   # ── Config options ───────────────────────────────────────────────────────

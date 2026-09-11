@@ -2,6 +2,8 @@
 
 SuperSonic is a port of SuperCollider's scsynth audio engine to work within the strict constraints of a web audioworklet. The goal is low latency and high reliability for long running sessions.
 
+Since 0.80 SuperSonic runs on [clockwork](https://github.com/samaaron/clockwork), a git submodule at `clockwork/`. clockwork provides the audio device IO, MIDI, OSC, gamepad input, transport clock, Ableton Link, the shared-memory segment, the browser client (`clockwork/js`) and the workers; SuperSonic provides the scsynth guest (`dsp/scsynth`), its engine-side Rust (`rust/`), the native process (`host/`, `front/`), the JavaScript on top of clockwork's client (`js/supersonic.js` extends `Clockwork`), the tests and the packages. Changes to clockwork go to the clockwork repository; this repository then moves the submodule pointer.
+
 **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural documentation including message flow diagrams and component relationships.**
 
 ## Key Reference Files
@@ -28,7 +30,7 @@ The original scsynth was multi-threaded - separate threads for IO vs audio graph
 There isn't just the scsynth C++ compiled to wasm - it's actually a number of components:
 
 * The WASM audioworklet code (scsynth + scheduler + ringbuffer read/write code)
-* The JS prescheduler worker (for storing timestamped OSC bundles scheduled beyond the lookahead threshold)
+* clockwork's workers (OSC in, OSC out log) and its AudioWorklet processor
 * The SuperSonic JS code
 
 ## Communication Modes
@@ -48,7 +50,7 @@ Build the web (WASM + JS) distribution:
 scripts/build-web.sh
 ```
 
-Build the native (JUCE) backend:
+Build the native server (clockwork + scsynth):
 
 ```bash
 scripts/build-native.sh          # Release
@@ -58,11 +60,11 @@ scripts/build-native.sh --clean  # Clean rebuild
 
 On Windows use `scripts\build-native.bat` with the same flags.
 
-Debian packaging: CI builds a real Debian source package per push (offline build, system JUCE/libsndfile/Boost/Catch2, full test suite, lintian, autopkgtest) via `.github/workflows/debian.yml` + `scripts/ci-debian-package.sh`. Needs Docker, so it cannot run on this machine — iterate via `workflow_dispatch`. See `docs/DEBIAN-PACKAGING.md`.
+Debian packaging: CI builds a real Debian source package per push (offline build with clockwork archived into the orig tarball, system Catch2/zlib, full test suite, lintian, autopkgtest) via `.github/workflows/debian.yml` + `scripts/ci-debian-package.sh`. Needs Docker, so it cannot run on this machine — iterate via `workflow_dispatch`. See `docs/DEBIAN-PACKAGING.md`.
 
 ## Testing
 
-Tests use Playwright. The full suite is ~1200 tests across SAB and postMessage modes and takes ~3 minutes.
+Tests use Playwright. The full suite is ~1500 tests across SAB and postMessage modes and takes ~3 minutes. The native Catch2 suite (`test/native`, ~1000 cases) and the transport harness are separate; see docs/BUILDING.md.
 
 **The output is very large and will truncate. Always use concise output:**
 

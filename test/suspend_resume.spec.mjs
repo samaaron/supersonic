@@ -112,24 +112,24 @@ test.describe("Suspend / Resume", () => {
       // Wait for some process() calls to accumulate
       await new Promise(r => setTimeout(r, 300));
       const metricsBefore = sonic.getMetrics();
-      const countRunning = metricsBefore.scsynthProcessCount || 0;
+      const countRunning = metricsBefore.engineProcessCount || 0;
 
       await sonic.suspend();
       // Brief wait to confirm process stops
       await new Promise(r => setTimeout(r, 200));
       const metricsSuspended = sonic.getMetrics();
-      const countSuspended = metricsSuspended.scsynthProcessCount || 0;
+      const countSuspended = metricsSuspended.engineProcessCount || 0;
 
       // Another wait — count should NOT advance while suspended
       await new Promise(r => setTimeout(r, 200));
       const metricsStillSuspended = sonic.getMetrics();
-      const countStillSuspended = metricsStillSuspended.scsynthProcessCount || 0;
+      const countStillSuspended = metricsStillSuspended.engineProcessCount || 0;
 
       await sonic.resume();
       // Wait for process to run a few times
       await new Promise(r => setTimeout(r, 300));
       const metricsResumed = sonic.getMetrics();
-      const countResumed = metricsResumed.scsynthProcessCount || 0;
+      const countResumed = metricsResumed.engineProcessCount || 0;
 
       await sonic.shutdown();
       return { countRunning, countSuspended, countStillSuspended, countResumed };

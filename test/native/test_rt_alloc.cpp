@@ -13,7 +13,7 @@
  * (TSan flagged this on Linux where scheduling actually overlaps).
  *
  * Catches operator new/delete only — bare malloc from C code isn't
- * intercepted. scsynth's RT path goes through new in supersonic_heap,
+ * intercepted. scsynth's RT path goes through new in clockwork_heap,
  * so most audio-path allocations are covered.
  */
 

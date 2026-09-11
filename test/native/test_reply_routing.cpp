@@ -9,10 +9,10 @@
  */
 #include <catch2/catch_test_macros.hpp>
 
-#include "native/OriginTable.h"
+#include "comms/OriginTable.h"
 #include "native/OscEgress.h"
 #include "native/IOscTransport.h"
-#include "src/shared_memory.h"   // EGRESS_REPLY, EGRESS_SEND_TO_CALLER
+#include "shared_memory.h"   // EGRESS_REPLY, EGRESS_SEND_TO_CALLER
 
 #include <string>
 #include <vector>

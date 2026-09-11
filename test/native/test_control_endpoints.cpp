@@ -4,7 +4,7 @@
  * (sendOSC -> ingest -> handler -> reply).
  *
  * The suite previously exercised only one /supersonic/ command and gated the
- * /clock/ commands behind SUPERSONIC_ENABLE_LINK + a spawned peer. These cases
+ * /clock/ commands behind CLOCKWORK_ENABLE_LINK + a spawned peer. These cases
  * pin "each control command reaches its handler and emits its reply" with no
  * device or Link peer required, so the handlers can be relocated out of the
  * transport into an engine module without a silent regression slipping through.
@@ -30,20 +30,20 @@ void expectReply(EngineFixture& fx, const char* cmd, const char* replyAddr) {
 
 } // namespace
 
-// These read SuperClock / Link session state (local seqlock state when Link is
+// These read ClockworkClock / Link session state (local seqlock state when Link is
 // off), so they reply deterministically without an enabled Link session.
 TEST_CASE("link control commands route through the ingress to their handlers",
           "[control][link]") {
     EngineFixture fx;
-    expectReply(fx, "/clock/tempo/get", "/clock/tempo.reply");
-    expectReply(fx, "/clock/transport/get", "/clock/transport.reply");
-    expectReply(fx, "/clock/transport/time/get", "/clock/transport/time.reply");
-    expectReply(fx, "/clock/visibility/get", "/clock/visibility.reply");
-    expectReply(fx, "/clock/enabled/get", "/clock/enabled.reply");
-    expectReply(fx, "/clock/start_stop_sync/get", "/clock/start_stop_sync.reply");
-    expectReply(fx, "/clock/peers/count/get", "/clock/peers/count.reply");
-    expectReply(fx, "/clock/peer_name/get", "/clock/peer_name.reply");
-    expectReply(fx, "/clock/time/now/get", "/clock/time/now.reply");
+    expectReply(fx, "/clockwork/clock/tempo/get", "/clockwork/clock/tempo.reply");
+    expectReply(fx, "/clockwork/clock/transport/get", "/clockwork/clock/transport.reply");
+    expectReply(fx, "/clockwork/clock/transport/time/get", "/clockwork/clock/transport/time.reply");
+    expectReply(fx, "/clockwork/clock/visibility/get", "/clockwork/clock/visibility.reply");
+    expectReply(fx, "/clockwork/clock/enabled/get", "/clockwork/clock/enabled.reply");
+    expectReply(fx, "/clockwork/clock/start_stop_sync/get", "/clockwork/clock/start_stop_sync.reply");
+    expectReply(fx, "/clockwork/clock/peers/count/get", "/clockwork/clock/peers/count.reply");
+    expectReply(fx, "/clockwork/clock/peer_name/get", "/clockwork/clock/peer_name.reply");
+    expectReply(fx, "/clockwork/clock/time/now/get", "/clockwork/clock/time/now.reply");
 }
 
 // Config::defaultBpm seeds the session tempo at init, so the engine opens at the
@@ -56,9 +56,9 @@ TEST_CASE("clock: engine opens at Config::defaultBpm", "[control][clock]") {
     cfg.defaultBpm = 60.0;
     EngineFixture fx(cfg);
 
-    fx.send(osc_test::message("/clock/tempo/get"));
+    fx.send(osc_test::message("/clockwork/clock/tempo/get"));
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/tempo.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/clock/tempo.reply", r));
     CHECK(r.parsed().argDouble(0) == Catch::Approx(60.0).epsilon(1e-6));
 }
 
@@ -70,9 +70,9 @@ TEST_CASE("clock: engine opens at Config::defaultBpm", "[control][clock]") {
 TEST_CASE("clock: transport/time is in the NTP wall-clock domain like its siblings",
           "[control][clock]") {
     EngineFixture fx;
-    fx.send(osc_test::message("/clock/transport/time/get"));
+    fx.send(osc_test::message("/clockwork/clock/transport/time/get"));
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/transport/time.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/clock/transport/time.reply", r));
     CHECK(r.parsed().argInt64(0) > 1'000'000'000'000'000LL);
 }
 
@@ -80,9 +80,9 @@ TEST_CASE("clock: transport/time is in the NTP wall-clock domain like its siblin
 TEST_CASE("clock: default tempo is 120 when Config::defaultBpm is unset",
           "[control][clock]") {
     EngineFixture fx;  // defaultConfig(): defaultBpm == kDefaultBpm (120)
-    fx.send(osc_test::message("/clock/tempo/get"));
+    fx.send(osc_test::message("/clockwork/clock/tempo/get"));
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/tempo.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/clock/tempo.reply", r));
     CHECK(r.parsed().argDouble(0) == Catch::Approx(120.0).epsilon(1e-6));
 }
 
@@ -90,15 +90,15 @@ TEST_CASE("clock: default tempo is 120 when Config::defaultBpm is unset",
 // omitted ⇒ link (flat reply, back-compat); "link" echoes into the reply
 // address; "midi" with no clocking port resolves to a 60-BPM placeholder and
 // still replies; "timelines/get" enumerates. midi:<handle> content (both port
-// names) is covered by the SuperClock unit tests.
+// names) is covered by the ClockworkClock unit tests.
 TEST_CASE("clock timeline routing and enumerate",
           "[control][clock][timeline]") {
     EngineFixture fx;
-    expectReply(fx, "/clock/tempo/get",       "/clock/tempo.reply");        // flat (link)
-    expectReply(fx, "/clock/link/tempo/get",  "/clock/link/tempo.reply");   // explicit link
-    expectReply(fx, "/clock/midi/tempo/get",  "/clock/midi/tempo.reply");   // placeholder
-    expectReply(fx, "/clock/midi/transport/get", "/clock/midi/transport.reply");
-    expectReply(fx, "/clock/timelines/get",   "/clock/timelines.reply");    // enumerate
+    expectReply(fx, "/clockwork/clock/tempo/get",       "/clockwork/clock/tempo.reply");        // flat (link)
+    expectReply(fx, "/clockwork/clock/link/tempo/get",  "/clockwork/clock/link/tempo.reply");   // explicit link
+    expectReply(fx, "/clockwork/clock/midi/tempo/get",  "/clockwork/clock/midi/tempo.reply");   // placeholder
+    expectReply(fx, "/clockwork/clock/midi/transport/get", "/clockwork/clock/midi/transport.reply");
+    expectReply(fx, "/clockwork/clock/timelines/get",   "/clockwork/clock/timelines.reply");    // enumerate
 }
 
 // /supersonic/notify is device-free (it registers a notify target and replies),
@@ -108,23 +108,35 @@ TEST_CASE("clock timeline routing and enumerate",
 TEST_CASE("supersonic control commands route through the ingress to their handlers",
           "[control][supersonic]") {
     EngineFixture fx;
-    expectReply(fx, "/supersonic/notify", "/supersonic/notify.reply");
+    expectReply(fx, "/clockwork/notify", "/clockwork/notify.reply");
 }
 
-// Capability discovery: compile-time facts as name/value pairs. This test
-// build compiles Link + synth + MIDI, so all three report 1.
+// Capability discovery: compile-time facts as name/value pairs. What they
+// report follows the build — see the #ifdef below; synth and MIDI are always
+// compiled here, Link is not.
 TEST_CASE("clock: capabilities/get reports the compiled backends",
           "[control][clock]") {
     EngineFixture fx;
-    fx.send(osc_test::message("/clock/capabilities/get"));
+    fx.send(osc_test::message("/clockwork/clock/capabilities/get"));
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/capabilities.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/clock/capabilities.reply", r));
     auto p = r.parsed();
     REQUIRE(p.argCount() >= 6);
     CHECK(p.argString(0) == "link");
-    CHECK(p.argInt(1) == 1);
     CHECK(p.argString(2) == "link_audio");
+    // Link is a BUILD choice, not a given. This asserted 1 unconditionally,
+    // which was true of upstream (SUPERSONIC_ENABLE_LINK defaults ON) and is
+    // not true here: clockwork defaults CLOCKWORK_LINK OFF because Link is
+    // a fetched GPL-2.0-or-later dependency that a build opts into. Reporting
+    // a capability the build does not have would be the bug; the test asked
+    // for one.
+#ifdef CLOCKWORK_LINK
+    CHECK(p.argInt(1) == 1);
     CHECK(p.argInt(3) == 1);
+#else
+    CHECK(p.argInt(1) == 0);
+    CHECK(p.argInt(3) == 0);
+#endif
     CHECK(p.argString(4) == "midi");
     CHECK(p.argInt(5) == 1);
 }
@@ -136,10 +148,10 @@ TEST_CASE("clock: combined beat_phase RPCs", "[control][clock]") {
     EngineFixture fx;
 
     osc_test::Builder b;
-    b.begin("/clock/rpc/beat_phase_now") << 4.0f;
+    b.begin("/clockwork/clock/rpc/beat_phase_now") << 4.0f;
     fx.send(b.end());
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/rpc/beat_phase_now.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/clock/rpc/beat_phase_now.reply", r));
     auto p = r.parsed();
     const int64_t t    = p.argInt64(0);
     const double beat  = p.argDouble(1);
@@ -152,11 +164,11 @@ TEST_CASE("clock: combined beat_phase RPCs", "[control][clock]") {
     CHECK(phase == Catch::Approx(expectPhase).margin(1e-6));
 
     osc_test::Builder b2;
-    b2.begin("/clock/rpc/beat_phase_at_time")
+    b2.begin("/clockwork/clock/rpc/beat_phase_at_time")
         << static_cast<osc::int64>(t) << 4.0f;
     fx.send(b2.end());
     OscReply r2;
-    REQUIRE(fx.waitForReply("/clock/rpc/beat_phase_at_time.reply", r2));
+    REQUIRE(fx.waitForReply("/clockwork/clock/rpc/beat_phase_at_time.reply", r2));
     CHECK(r2.parsed().argDouble(0) == Catch::Approx(beat).margin(0.01));
 }
 
@@ -183,12 +195,12 @@ TEST_CASE("clock: rpc/time_at_beat carries a beat exactly as microbeats",
     auto timeAtMicrobeats = [&](int64_t ub, const char* what) {
         fx.clearReplies();
         osc_test::Builder b;
-        b.begin("/clock/rpc/time_at_beat")
+        b.begin("/clockwork/clock/rpc/time_at_beat")
             << static_cast<osc::int64>(ub) << 4.0f;
         fx.send(b.end());
         OscReply r;
         INFO(what);
-        REQUIRE(fx.waitForReply("/clock/rpc/time_at_beat.reply", r));
+        REQUIRE(fx.waitForReply("/clockwork/clock/rpc/time_at_beat.reply", r));
         return r.parsed().argInt64(0);
     };
 
@@ -212,10 +224,10 @@ TEST_CASE("clock: rpc/time_at_beat still accepts a float32 beat",
     EngineFixture fx(cfg);
 
     osc_test::Builder b;
-    b.begin("/clock/rpc/time_at_beat") << 8.0f << 4.0f;
+    b.begin("/clockwork/clock/rpc/time_at_beat") << 8.0f << 4.0f;
     fx.send(b.end());
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/rpc/time_at_beat.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/clock/rpc/time_at_beat.reply", r));
     CHECK(r.parsed().argInt64(0) > 1'000'000'000'000'000LL);
 }
 
@@ -224,8 +236,8 @@ TEST_CASE("clock: rpc/time_at_beat still accepts a float32 beat",
 // "lost datagram".
 TEST_CASE("clock: unknown verbs are refused explicitly", "[control][clock]") {
     EngineFixture fx;
-    fx.send(osc_test::message("/clock/definitely/not/a/verb"));
+    fx.send(osc_test::message("/clockwork/clock/definitely/not/a/verb"));
     OscReply r;
-    REQUIRE(fx.waitForReply("/clock/unsupported", r));
-    CHECK(r.parsed().argString(0) == "/clock/definitely/not/a/verb");
+    REQUIRE(fx.waitForReply("/clockwork/clock/unsupported", r));
+    CHECK(r.parsed().argString(0) == "/clockwork/clock/definitely/not/a/verb");
 }

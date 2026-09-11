@@ -63,7 +63,8 @@ fi
 cmake "${BUILD_ARGS[@]}"
 
 # Report
-BINARY="$BUILD_DIR/SuperSonic_artefacts/$BUILD_TYPE/SuperSonic"
+BINARY="$BUILD_DIR/SuperSonic"
+[ -f "$BINARY" ] || BINARY="$BUILD_DIR/$BUILD_TYPE/SuperSonic.exe"
 if [ -f "$BINARY" ]; then
     echo ""
     echo "Built: $BINARY"

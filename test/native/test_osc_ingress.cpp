@@ -13,7 +13,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 
-#include "src/OscIngress.h"
+#include "OscIngress.h"
 #include <cstring>
 
 namespace {
@@ -45,7 +45,7 @@ TEST_CASE("Router: unclaimed messages and bundles go to the default sink (audio 
     OscIngress ix;
     Recorder def, link;
     ix.setDefault(&sink, &def);
-    ix.registerRoute("/clock/", &sink, &link);
+    ix.registerRoute("/clockwork/clock/", &sink, &link);
 
     ingestAddr(ix, "/s_new");                  // a plain scsynth message
     CHECK(def.calls == 1);
@@ -63,16 +63,16 @@ TEST_CASE("Router: a registered control prefix peels off to its handler",
     OscIngress ix;
     Recorder def, link;
     ix.setDefault(&sink, &def);
-    ix.registerRoute("/clock/", &sink, &link);
+    ix.registerRoute("/clockwork/clock/", &sink, &link);
 
-    ingestAddr(ix, "/clock/tempo/get");
+    ingestAddr(ix, "/clockwork/clock/tempo/get");
     CHECK(link.calls == 1);
     CHECK(def.calls == 0);
 
     // A sibling prefix that ISN'T registered falls through to the default —
     // this is capability-gating: a target without the /supersonic subsystem
     // simply never registers it, and that traffic is treated as audio.
-    ingestAddr(ix, "/supersonic/devices/list");
+    ingestAddr(ix, "/clockwork/devices/list");
     CHECK(def.calls == 1);
     CHECK(link.calls == 1);
 }
@@ -101,16 +101,16 @@ TEST_CASE("Router is modular: a prefix is reachable only once its route is regis
 
     // Capability absent (route not registered): /clock/ traffic is just audio.
     REQUIRE(ix.routeCount() == 0);
-    ingestAddr(ix, "/clock/tempo/get");
+    ingestAddr(ix, "/clockwork/clock/tempo/get");
     CHECK(def.calls == 1);
     CHECK(link.calls == 0);
 
     // Register the endpoint (one call) — the capability is now present.
-    REQUIRE(ix.registerRoute("/clock/", &sink, &link));
+    REQUIRE(ix.registerRoute("/clockwork/clock/", &sink, &link));
     REQUIRE(ix.routeCount() == 1);
 
     // Same traffic now reaches the handler instead of the audio plane.
-    ingestAddr(ix, "/clock/tempo/get");
+    ingestAddr(ix, "/clockwork/clock/tempo/get");
     CHECK(link.calls == 1);
     CHECK(def.calls == 1);
 }

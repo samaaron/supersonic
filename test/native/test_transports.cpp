@@ -13,8 +13,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "src/native/StreamOscTransport.h"
-#include "src/native/UdsDgramOscTransport.h"
+#include "comms/StreamOscTransport.h"
+#include "comms/UdsDgramOscTransport.h"
 #include "OscTestUtils.h"
 
 #include <arpa/inet.h>
@@ -256,11 +256,11 @@ TEST_CASE("UdsDgramOscTransport: bound peers get replies, unbound peers are unad
 
     // …and can join a notify audience.
     CHECK(t.subscribeNotify(token));
-    auto push = message("/supersonic/devices/changed");
+    auto push = message("/clockwork/devices/changed");
     t.broadcastNotify(push.ptr(), push.size());
     n = recv(fd, buf, sizeof(buf), 0);
     REQUIRE(n > 0);
-    CHECK(parseAddress(buf, static_cast<uint32_t>(n)) == "/supersonic/devices/changed");
+    CHECK(parseAddress(buf, static_cast<uint32_t>(n)) == "/clockwork/devices/changed");
 
     // Unbound client: ingested, but replies and subscriptions are rejected.
     int anon = socket(AF_UNIX, SOCK_DGRAM, 0);

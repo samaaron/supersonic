@@ -25,8 +25,8 @@
  *      self-deadlock.
  */
 #include <catch2/catch_test_macros.hpp>
-#include "src/workers/RingReader.h"
-#include "src/workers/RingBufferWriter.h"
+#include "workers/RingReader.h"
+#include "workers/RingBufferWriter.h"
 
 #include <atomic>
 #include <chrono>

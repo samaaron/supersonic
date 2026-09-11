@@ -9,12 +9,12 @@
 // The test synthdefs are in supersonic/test/synthdefs/versions/
 // They were pre-compiled at different synthdef format versions.
 // Internal names: "test_simple" and "test_multi" (same across all versions).
-#ifndef SUPERSONIC_TEST_SYNTHDEFS_DIR
-#define SUPERSONIC_TEST_SYNTHDEFS_DIR ""
+#ifndef CLOCKWORK_TEST_SYNTHDEFS_DIR
+#define CLOCKWORK_TEST_SYNTHDEFS_DIR ""
 #endif
 
 static bool loadTestSynthDef(EngineFixture& fx, const std::string& name) {
-    std::string path = std::string(SUPERSONIC_TEST_SYNTHDEFS_DIR) + "/versions/" + name + ".scsyndef";
+    std::string path = std::string(CLOCKWORK_TEST_SYNTHDEFS_DIR) + "/versions/" + name + ".scsyndef";
     std::filesystem::path fsPath(path);
     if (!std::filesystem::exists(fsPath)) return false;
 

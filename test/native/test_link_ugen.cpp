@@ -1,6 +1,16 @@
-// Integration tests for LinkTempo / LinkPhase / LinkJump UGens.
-
-#ifdef SUPERSONIC_LINK
+// Integration tests for the session-clock UGens, LinkTempo and LinkPhase.
+//
+// NOT GATED ON CLOCKWORK_LINK ANY MORE, and that is the point of the change they
+// cover. These UGens used to hold a pointer to clockwork's ableton::LinkAudio
+// and call it from the render thread, so they only existed in a Link build and
+// answered -1.0 everywhere else. They read DspConfig::clock now — the
+// ClockworkClockState mirror clockwork publishes on every target, which Link
+// writes its converged tempo into when it is running — so the same synthdef
+// reports the same tempo whether Link is compiled in or not.
+//
+// Running in BOTH configurations is what proves that. A test that only ran with
+// Link on could not tell the difference between reading the clock and reading
+// Link.
 
 #include "EngineFixture.h"
 #include "FakeLinkPeerProcess.h"
@@ -19,7 +29,7 @@ namespace {
 
 // Config for the probes below. snapshotOutputBus() reads the shared output bus,
 // so no audio thread may be writing it while we look: manualAudioPump starts no
-// audio source (see SupersonicEngine::startAudioSource), leaving the test thread
+// audio source (see ClockworkEngine::startAudioSource), leaving the test thread
 // the only caller of process_audio. Under the HeadlessDriver this read raced the
 // driver's clear-then-fill.
 //
@@ -28,7 +38,7 @@ namespace {
 // (LinkSession::clockMicros -> link.clock().micros()), which is real time and
 // unaffected by either. So pumping decides when we render; only wall time
 // advances the phase, which is why the sleeps below must stay.
-SupersonicEngine::Config linkProbeConfig() {
+ClockworkEngine::Config linkProbeConfig() {
     auto cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     return cfg;
@@ -81,7 +91,10 @@ bool allAbove(const std::vector<float>& samples, float threshold) {
 TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
           "[Link][LinkUGen][integration]") {
     EngineFixture fx(linkProbeConfig());
-    fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
+#ifdef CLOCKWORK_LINK
+    // Only meaningful where Link exists; the UGens do not care either way.
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));   // LoopbackOnly
+#endif
 
     REQUIRE(fx.loadSynthDef("link_tempo_probe"));
     {
@@ -122,7 +135,10 @@ TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
 TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
           "[Link][LinkUGen][integration]") {
     EngineFixture fx(linkProbeConfig());
-    fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
+#ifdef CLOCKWORK_LINK
+    // Only meaningful where Link exists; the UGens do not care either way.
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));   // LoopbackOnly
+#endif
 
     REQUIRE(fx.loadSynthDef("link_phase_probe"));
     {
@@ -164,89 +180,15 @@ TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
 // the target. At 120 BPM / quantum=4, natural advance would walk
 // phase out of a 0.2-wide band in ~100 ms, so several consecutive
 // in-band samples is evidence the UGen is re-pinning.
-TEST_CASE("LinkUGen: LinkJump.kr forces beat-at-time on trigger",
-          "[Link][LinkUGen][integration]") {
-    EngineFixture fx(linkProbeConfig());
-    fx.send(osc_test::message("/clock/visibility", int32_t{1}));   // LoopbackOnly
-
-    REQUIRE(fx.loadSynthDef("link_phase_probe"));
-    REQUIRE(fx.loadSynthDef("link_jump_trigger"));
-
-    {
-        osc_test::Builder b;
-        auto& s = b.begin("/s_new");
-        s << "link_phase_probe" << static_cast<int32_t>(2402)
-          << static_cast<int32_t>(0) << static_cast<int32_t>(1)
-          << "out" << 0.0f << "quantum" << 4.0f;
-        fx.send(b.end());
-    }
-    {
-        OscReply r;
-        fx.send(osc_test::message("/sync", 42));
-        REQUIRE(fx.waitForReply("/synced", r));
-    }
-
-    constexpr uint32_t kBlockSize = 128;
-    std::vector<float> bus;
-    const auto sessionDeadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    bool sessionUp = false;
-    while (std::chrono::steady_clock::now() < sessionDeadline) {
-        REQUIRE(pumpAndSnapshot(fx, kBlockSize, bus));
-        const float p = peakAbs(bus);
-        if (allAbove(bus, -0.5f) && p > 0.001f && p < 4.0f) {
-            sessionUp = true;
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    REQUIRE(sessionUp);
-
-    // Mid-quantum target avoids ambiguity with the natural phase=0 wrap.
-    constexpr float kJumpTarget = 2.0f;
-    {
-        osc_test::Builder b;
-        auto& s = b.begin("/s_new");
-        s << "link_jump_trigger" << static_cast<int32_t>(2403)
-          << static_cast<int32_t>(0) << static_cast<int32_t>(1)
-          << "trig" << 1.0f
-          << "beat" << kJumpTarget
-          << "quantum" << 4.0f
-          << "hard" << 1.0f;
-        fx.send(b.end());
-    }
-    {
-        OscReply r;
-        fx.send(osc_test::message("/sync", 43));
-        REQUIRE(fx.waitForReply("/synced", r));
-    }
-
-    // Natural phase advance at 120 BPM / quantum=4 spends only ~10% of its
-    // cycle in [1.8, 2.2]; if the jump is re-pinning every block, the vast
-    // majority of samples land in-band, so a >=50% in-band rate cleanly
-    // separates the two regimes with headroom for K2A transients across the
-    // jump discontinuity and for CI scheduling jitter. The assertion stays on
-    // that window fraction rather than a single snapshot: each block is now read
-    // whole (this thread renders it), but an isolated block can still sit on the
-    // jump discontinuity, and the regimes differ in rate, not in any one sample.
-    int totalSamples = 0;
-    int inBandSamples = 0;
-    float lastMean = 0.0f;
-    const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (std::chrono::steady_clock::now() < deadline) {
-        REQUIRE(pumpAndSnapshot(fx, kBlockSize, bus));
-        lastMean = mean(bus);
-        ++totalSamples;
-        if (std::fabs(lastMean - kJumpTarget) < 0.2f) ++inBandSamples;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-    INFO("inBand=" << inBandSamples << "/" << totalSamples
-         << " lastMean=" << lastMean);
-    CHECK(inBandSamples * 2 >= totalSamples);
-
-    fx.send(osc_test::message("/n_free", 2402));
-    fx.send(osc_test::message("/n_free", 2403));
-}
-
-#endif  // SUPERSONIC_LINK
+/*
+ * "LinkJump.kr forces beat-at-time on trigger" was here.
+ *
+ * It went with the UGen. LinkJump committed a session state from inside a
+ * UGen's calc function — a synth graph moving the whole session's beat grid on
+ * the audio thread, around ClockworkClock, through a pointer to Ableton's API that
+ * guest code should never have held. Setting the beat position is a
+ * control-plane act and has verbs of its own under /clockwork/clock/.
+ *
+ * Nothing used it: the only references to LinkJump anywhere in this repository
+ * or upstream were the UGen, its registration, its sclang class and this test.
+ */

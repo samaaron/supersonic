@@ -19,8 +19,9 @@
 
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "src/shm_peer_plane.h"
-#include "src/synth/common/server_shm.hpp"
+#include "shm_peer_plane.h"
+#include "shm_segment.hpp"
+#include "shm_attach.hpp"
 
 #include <csignal>
 #include <random>
@@ -32,10 +33,10 @@
 // spam-flood loop below, which wedges under TSan for reasons unrelated to the
 // property it tests (see that TEST_CASE's guard comment).
 #if defined(__SANITIZE_THREAD__)
-#  define SS_TSAN 1
+#  define CLOCKWORK_TSAN 1
 #elif defined(__has_feature)
 #  if __has_feature(thread_sanitizer)
-#    define SS_TSAN 1
+#    define CLOCKWORK_TSAN 1
 #  endif
 #endif
 
@@ -66,8 +67,8 @@ constexpr int kEngineWaitMs = 10000 * kTimeoutScale;
 
 namespace {
 
-SupersonicEngine::Config crashConfig(unsigned port) {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config crashConfig(unsigned port) {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate   = 48000;
     cfg.bufferSize   = 128;
     cfg.udpPort      = port;
@@ -80,8 +81,22 @@ SupersonicEngine::Config crashConfig(unsigned port) {
     return cfg;
 }
 
+// The engine's attach endpoint, served for the peer processes exactly as the
+// standalone host serves it: the segment is anonymous, so this is the only
+// way another process can reach it.
+struct AttachServer {
+    std::string        endpoint;
+    shm_attach::server server;
+    AttachServer(EngineFixture& fx, unsigned port)
+        : endpoint(shm_attach::default_endpoint(port)) {
+        std::string err;
+        REQUIRE(server.start(endpoint, fx.engine().shmNativeHandle(),
+                             fx.engine().shmSegmentSize(), &err));
+    }
+};
+
 // Spawn the peer helper; block until it prints "ready" (attached).
-pid_t spawnPeer(const char* mode, unsigned port, int count = 0) {
+pid_t spawnPeer(const char* mode, const std::string& endpoint, int count = 0) {
     int fds[2];
     REQUIRE(pipe(fds) == 0);
     pid_t pid = fork();
@@ -89,10 +104,9 @@ pid_t spawnPeer(const char* mode, unsigned port, int count = 0) {
     if (pid == 0) {
         close(fds[0]);
         dup2(fds[1], STDOUT_FILENO);
-        std::string portStr = std::to_string(port);
         std::string countStr = std::to_string(count);
-        execl(SUPERSONIC_TEST_SHM_PEER_BINARY, "peer_shm",
-              mode, portStr.c_str(),
+        execl(CLOCKWORK_TEST_SHM_PEER_BINARY, "peer_shm",
+              mode, endpoint.c_str(),
               count > 0 ? countStr.c_str() : nullptr,
               nullptr);
         _exit(127);  // exec failed
@@ -137,11 +151,12 @@ bool waitPeerExit(pid_t pid, int timeoutMs = 10000) {
 // Release and ASan builds; the plane's *race* behaviour is covered under TSan
 // in-process by test_shm_peer_plane.cpp. The lighter reattach case below still
 // runs under TSan.
-#ifndef SS_TSAN
+#ifndef CLOCKWORK_TSAN
 TEST_CASE("shm-peer crash: SIGKILL mid-traffic never corrupts the ring or stalls the engine",
           "[shm][peer][crash]") {
     constexpr unsigned kPort = 57224;
     EngineFixture fx(crashConfig(kPort));
+    AttachServer  at(fx, kPort);
     const PerformanceMetrics& m = fx.engine().getMetrics();
 
     std::mt19937 rng(0x5EED);  // deterministic schedule; the fuzz is over iterations
@@ -150,7 +165,7 @@ TEST_CASE("shm-peer crash: SIGKILL mid-traffic never corrupts the ring or stalls
     constexpr int kKillCycles = 12;
     for (int i = 0; i < kKillCycles; ++i) {
         uint32_t sentBefore = m.osc_out_messages_sent.load(std::memory_order_relaxed);
-        pid_t pid = spawnPeer("spam", kPort);
+        pid_t pid = spawnPeer("spam", at.endpoint);
 
         // Let it write for a random slice so the kill lands at an arbitrary
         // point in the produce loop (including mid-frame-memcpy).
@@ -171,20 +186,21 @@ TEST_CASE("shm-peer crash: SIGKILL mid-traffic never corrupts the ring or stalls
         REQUIRE(fx.waitForReply("/status.reply", reply, kEngineWaitMs));
     }
 }
-#endif // !SS_TSAN
+#endif // !CLOCKWORK_TSAN
 
 TEST_CASE("shm-peer crash: a corpse holding the writer lock stalls nobody; reattach recovers it",
           "[shm][peer][crash]") {
     constexpr unsigned kPort = 57225;
     EngineFixture fx(crashConfig(kPort));
+    AttachServer  at(fx, kPort);
     const PerformanceMetrics& m = fx.engine().getMetrics();
 
-    server_shared_memory_client client(kPort);
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmNativeHandle()));
     ShmPeerPlaneHeader* plane = client.get_peer_plane();
     REQUIRE(plane != nullptr);
 
     // A peer dies holding cmd_write_lock.
-    pid_t holder = spawnPeer("hold-lock", kPort);
+    pid_t holder = spawnPeer("hold-lock", at.endpoint);
     killPeer(holder);
     REQUIRE(plane->cmd_write_lock.load(std::memory_order_relaxed) == 1);
 
@@ -197,7 +213,7 @@ TEST_CASE("shm-peer crash: a corpse holding the writer lock stalls nobody; reatt
     // burst — every committed frame is delivered, in order, none lost.
     constexpr int kBurst = 200;
     uint32_t sentBefore = m.osc_out_messages_sent.load(std::memory_order_relaxed);
-    pid_t burster = spawnPeer("burst", kPort, kBurst);
+    pid_t burster = spawnPeer("burst", at.endpoint, kBurst);
     REQUIRE(waitPeerExit(burster));
     REQUIRE(fx.pollUntil([&] {
         return m.osc_out_messages_sent.load(std::memory_order_relaxed)

@@ -29,10 +29,10 @@
 
     <title>SuperSonic - SuperCollider's Synthesis Engine in the Browser</title>
 
-    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-    <script src="https://cdn.jsdelivr.net/npm/force-graph"></script>
-    <script src="https://cdn.jsdelivr.net/npm/3d-force-graph"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/cascadia-code@4.2.1/index.min.css" />
+    <script src="assets/vendor/d3.min.js"></script>
+    <script src="assets/vendor/force-graph.min.js"></script>
+    <script src="assets/vendor/3d-force-graph.min.js"></script>
+    <link rel="stylesheet" href="assets/vendor/cascadia-code.css" />
     <link rel="stylesheet" href="dist/metrics-dark.css" />
     <link rel="stylesheet" href="assets/demo.css" />
   </head>
@@ -573,12 +573,12 @@ sonic.<span class="syn-fn">send</span>(<span class="syn-str">'/s_new'</span>, <s
                   </div>
                 </section>
 
-                <!-- Metrics (rendered by <supersonic-metrics> web component) -->
-                <supersonic-metrics
+                <!-- Metrics (rendered by the <clockwork-metrics> web component) -->
+                <clockwork-metrics
                   id="performance-metrics"
                   class="metrics-section metrics-section--top"
                   aria-label="Performance metrics"
-                ></supersonic-metrics>
+                ></clockwork-metrics>
               </div>
 
               <!-- Divider -->

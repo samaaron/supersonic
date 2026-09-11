@@ -4,7 +4,7 @@ import { test, expect, skipIfPostMessage } from './fixtures.mjs';
  * Behavioural test for the web scheduling path.
  *
  * A timestamped OSC bundle is scheduled by the engine's EngineScheduler against
- * SuperClock, where
+ * ClockworkClock, where
  *
  *     engine_now_ntp = audioContextTime + ntp_start + drift + global   (the worklet TimeSource)
  *
@@ -50,7 +50,7 @@ test.describe('Scheduled bundle timing (web engine scheduler)', () => {
     if (settleMs > 0) await new Promise((r) => setTimeout(r, settleMs));
 
     const driftAtSend = sonic.getMetrics().driftOffsetMs;
-    const peakBefore = sonic.getMetrics().scsynthSchedulerPeakDepth;
+    const peakBefore = sonic.getMetrics().engineSchedulerPeakDepth;
 
     const t0 = performance.now();
     const timetag = nowNtp() + N / 1000;
@@ -64,7 +64,7 @@ test.describe('Scheduled bundle timing (web engine scheduler)', () => {
     let firedDeltaMs = null;
     const deadline = performance.now() + N + 3000;
     while (performance.now() < deadline) {
-      const depth = sonic.getMetrics().scsynthSchedulerDepth;
+      const depth = sonic.getMetrics().engineSchedulerDepth;
       if (depth >= 1) queuedSeen = true;
       if (queuedSeen && depth === 0) {
         firedDeltaMs = performance.now() - t0;
@@ -73,7 +73,7 @@ test.describe('Scheduled bundle timing (web engine scheduler)', () => {
       await new Promise((r) => setTimeout(r, 4));
     }
 
-    const peakAfter = sonic.getMetrics().scsynthSchedulerPeakDepth;
+    const peakAfter = sonic.getMetrics().engineSchedulerPeakDepth;
     await sonic.destroy();
     return {
       N,

@@ -4,9 +4,10 @@
 # for SuperSonic, the way a Debian maintainer would.
 #
 # Layout produced (in build/debian/):
-#   supersonic_<uv>.orig.tar.xz             git archive of HEAD, minus the
-#                                           Files-Excluded set in
-#                                           packaging/debian/copyright
+#   supersonic_<uv>.orig.tar.xz             git archive of HEAD with the
+#                                           clockwork submodule archived into
+#                                           clockwork/, minus the Files-Excluded
+#                                           set in packaging/debian/copyright
 #   supersonic_<uv>.orig-link.tar.xz        pristine Ableton Link 4.0 with its
 #                                           asio-standalone submodule (the
 #                                           GitHub tag tarball lacks
@@ -15,7 +16,7 @@
 #                                           committed rust/Cargo.lock
 #   supersonic_<dv>.dsc + .debian.tar.xz    via dpkg-buildpackage -S
 #
-# The four Link patches stay single-sourced in external/*.patch; they are
+# The four Link patches are clockwork's (clockwork/external/*.patch); they are
 # path-shifted under link/ into debian/patches here so dpkg-source applies
 # them to the component tree.
 #
@@ -41,10 +42,10 @@ LINK_REPO="https://github.com/Ableton/link.git"
 cd "$PROJECT_ROOT"
 
 # ── Version ──────────────────────────────────────────────────────────────────
-ver_component() {
-    sed -n "s/^#define SUPERSONIC_VERSION_$1 \([0-9]*\)$/\1/p" src/supersonic_config.h
-}
-V="$(ver_component MAJOR).$(ver_component MINOR).$(ver_component PATCH)"
+# package.json is the one place the version is written by hand;
+# scripts/bump-version.sh carries it to CMakeLists.txt and the packages.
+V="$(sed -n 's/^  "version": "\([0-9][0-9.]*\)",$/\1/p' package.json | head -1)"
+[ -n "$V" ] || { echo "ERROR: no version in package.json" >&2; exit 1; }
 SHA="$(git rev-parse --short HEAD)"
 
 if git describe --tags --exact-match HEAD 2>/dev/null | grep -qx "v$V"; then
@@ -72,8 +73,12 @@ SRC="$WORK/supersonic-$UV"
 # ── Main orig tarball: git archive minus Files-Excluded ─────────────────────
 echo "=== orig tarball ==="
 git archive --format=tar --prefix="supersonic-$UV/" HEAD | tar -x -C "$WORK"
+# git archive stops at the submodule boundary: clockwork/ comes out as an
+# empty directory. Archive the submodule's own HEAD into it, so the orig
+# tarball is the whole program.
+git -C clockwork archive --format=tar --prefix="supersonic-$UV/clockwork/" HEAD | tar -x -C "$WORK"
 # Keep in sync with Files-Excluded in packaging/debian/copyright.
-rm -rf "$SRC/external_libs/ASIOSDK2.3.4"
+rm -rf "$SRC/clockwork/external/ASIOSDK2.3.4"
 tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig.tar.xz" "supersonic-$UV"
 
 # ── Link component: pristine upstream incl. submodules ──────────────────────
@@ -146,7 +151,7 @@ cp -a packaging/debian "$SRC/debian"
 # Path-shift the Link patches under the link/ component.
 mkdir -p "$SRC/debian/patches"
 : > "$SRC/debian/patches/series"
-for p in external/link-*.patch; do
+for p in clockwork/external/link-*.patch; do
     name="$(basename "$p")"
     sed -e 's|^--- a/|--- a/link/|' -e 's|^+++ b/|+++ b/link/|' \
         "$p" > "$SRC/debian/patches/$name"

@@ -13,7 +13,7 @@
  * Impact: Lost /n_end → synth pool entries never clear → GC VMs stuck →
  *         FX chains pile up → live_loop audio stops
  *
- * Reproduces: DJ Dave track pressed Run 7+ times rapidly in tau-cam.
+ * Reproduces: DJ Dave track pressed Run 7+ times rapidly in clockwork-cam.
  */
 
 import { test, expect } from "./fixtures.mjs";
@@ -87,8 +87,8 @@ test.describe("OUT Buffer Reply Corruption", () => {
       return {
         totalCreated,
         nEndReceived: nEndIds.length,
-        messagesDropped: metrics?.scsynthMessagesDropped || 0,
-        sequenceGaps: metrics?.scsynthSequenceGaps || 0,
+        messagesDropped: metrics?.engineMessagesDropped || 0,
+        sequenceGaps: metrics?.engineSequenceGaps || 0,
       };
     }, sonicConfig);
 

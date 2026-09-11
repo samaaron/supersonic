@@ -2,8 +2,7 @@
 # would: assemble a source package (.dsc + orig + component tarballs), build
 # it with dpkg-buildpackage in a container whose NETWORK IS DISCONNECTED
 # (proving the build needs none), run the full native test suite during the
-# build against Debian-archive dependency versions (system JUCE, libsndfile,
-# Boost, Catch2), then lintian (failing on errors AND warnings), autopkgtest
+# build against Debian-archive dependency versions (Catch2, zlib), then lintian (failing on errors AND warnings), autopkgtest
 # (the transport harness against the installed server), and an
 # install-and-boot smoke test in a pristine container.
 #
@@ -30,9 +29,11 @@ on:
     branches: [main]
     paths:
       - 'CMakeLists.txt'
-      - 'src/**'
+      - 'clockwork'
+      - 'dsp/**'
+      - 'host/**'
+      - 'front/**'
       - 'rust/**'
-      - 'external/**'
       - 'test/native/**'
       - 'test/transport-harness/**'
       - 'packaging/**'
@@ -59,6 +60,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          submodules: recursive
 
       - name: Start ${{ matrix.dist }} container
         run: |

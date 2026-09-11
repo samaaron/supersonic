@@ -23,12 +23,12 @@ TEST_CASE("Notify registration is device-free", "[control][3551]") {
     EngineFixture fix;
 
     OscReply r;
-    fix.send(osc_test::message("/supersonic/notify"));
-    REQUIRE(fix.waitForReply("/supersonic/notify.reply", r));
+    fix.send(osc_test::message("/clockwork/notify"));
+    REQUIRE(fix.waitForReply("/clockwork/notify.reply", r));
 
     // No device traffic may follow a registration — the list only arrives when
     // a client asks for it.
-    REQUIRE_FALSE(fix.waitForReply("/supersonic/devices", r, 250));
+    REQUIRE_FALSE(fix.waitForReply("/clockwork/devices", r, 250));
 }
 
 TEST_CASE("Notify registration stays device-free for every new client",
@@ -40,9 +40,9 @@ TEST_CASE("Notify registration stays device-free for every new client",
     // the boot handshake.
     for (int i = 0; i < 3; ++i) {
         OscReply r;
-        fix.send(osc_test::message("/supersonic/notify"));
-        REQUIRE(fix.waitForReply("/supersonic/notify.reply", r));
-        REQUIRE_FALSE(fix.waitForReply("/supersonic/devices", r, 100));
+        fix.send(osc_test::message("/clockwork/notify"));
+        REQUIRE(fix.waitForReply("/clockwork/notify.reply", r));
+        REQUIRE_FALSE(fix.waitForReply("/clockwork/devices", r, 100));
     }
 }
 
@@ -52,11 +52,11 @@ TEST_CASE("Device report is still delivered when asked for", "[control][3551]") 
     EngineFixture fix;
 
     OscReply r;
-    fix.send(osc_test::message("/supersonic/notify"));
-    REQUIRE(fix.waitForReply("/supersonic/notify.reply", r));
+    fix.send(osc_test::message("/clockwork/notify"));
+    REQUIRE(fix.waitForReply("/clockwork/notify.reply", r));
 
-    fix.send(osc_test::message("/supersonic/devices/report"));
-    REQUIRE(fix.waitForReply("/supersonic/devices", r, 2000));
+    fix.send(osc_test::message("/clockwork/devices/report"));
+    REQUIRE(fix.waitForReply("/clockwork/devices", r, 2000));
 }
 
 // Device commands now run on the device worker rather than the gateway, so the
@@ -68,14 +68,14 @@ TEST_CASE("Offloaded device commands still reply", "[control][3551]") {
 
     // The report only goes to notify subscribers, so register first — same as
     // a real client does before asking for device state.
-    fix.send(osc_test::message("/supersonic/notify"));
-    REQUIRE(fix.waitForReply("/supersonic/notify.reply", r));
+    fix.send(osc_test::message("/clockwork/notify"));
+    REQUIRE(fix.waitForReply("/clockwork/notify.reply", r));
 
-    fix.send(osc_test::message("/supersonic/devices/mode", "system"));
-    REQUIRE(fix.waitForReply("/supersonic/devices/mode.reply", r, 2000));
+    fix.send(osc_test::message("/clockwork/devices/mode", "system"));
+    REQUIRE(fix.waitForReply("/clockwork/devices/mode.reply", r, 2000));
 
-    fix.send(osc_test::message("/supersonic/devices/report"));
-    REQUIRE(fix.waitForReply("/supersonic/devices", r, 2000));
+    fix.send(osc_test::message("/clockwork/devices/report"));
+    REQUIRE(fix.waitForReply("/clockwork/devices", r, 2000));
 }
 
 // The control thread is the sole non-RT consumer: whatever it does while
@@ -92,8 +92,8 @@ TEST_CASE("Registering clients does not park the control thread",
     // was what parked the thread behind the first one's device probe.
     for (int i = 0; i < 5; ++i) {
         OscReply r;
-        fix.send(osc_test::message("/supersonic/notify"));
-        REQUIRE(fix.waitForReply("/supersonic/notify.reply", r));
+        fix.send(osc_test::message("/clockwork/notify"));
+        REQUIRE(fix.waitForReply("/clockwork/notify.reply", r));
     }
 
     CHECK(fix.engine().nrtInFlightMs() == 0);

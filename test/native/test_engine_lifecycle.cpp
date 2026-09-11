@@ -1,5 +1,5 @@
 /*
- * test_engine_lifecycle.cpp — SupersonicEngine lifecycle tests.
+ * test_engine_lifecycle.cpp — ClockworkEngine lifecycle tests.
  *
  * Covers init/shutdown safety, callback wiring, and basic OSC
  * round-trips that verify the engine is alive and well after boot.
@@ -14,13 +14,13 @@
 // =============================================================================
 
 TEST_CASE("Engine starts in non-running state before init", "[lifecycle]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     CHECK_FALSE(engine.isRunning());
 }
 
 TEST_CASE("isRunning returns true after init", "[lifecycle]") {
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);
@@ -29,8 +29,8 @@ TEST_CASE("isRunning returns true after init", "[lifecycle]") {
 }
 
 TEST_CASE("isRunning returns false after shutdown", "[lifecycle]") {
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);
@@ -40,8 +40,8 @@ TEST_CASE("isRunning returns false after shutdown", "[lifecycle]") {
 }
 
 TEST_CASE("Double init is safe", "[lifecycle]") {
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
 
@@ -56,8 +56,8 @@ TEST_CASE("Double init is safe", "[lifecycle]") {
 }
 
 TEST_CASE("Double shutdown is safe", "[lifecycle]") {
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
 
@@ -73,13 +73,13 @@ TEST_CASE("Double shutdown is safe", "[lifecycle]") {
 }
 
 // shutdown() must not leave the lanes entry points armed against a dead
-// engine: memory_initialized gates ss_ingress_write/ss_tick, and with the
+// engine: memory_initialized gates clockwork_ingress_write/clockwork_tick, and with the
 // shm-backed arena the segment is unmapped at the end of shutdown — a write
 // that passes the guard afterwards touches unmapped memory.
 TEST_CASE("Lanes entry points reject after shutdown (process-local arena)",
           "[lifecycle][lanes]") {
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;   // process-local arena
 
@@ -88,13 +88,13 @@ TEST_CASE("Lanes entry points reject after shutdown (process-local arena)",
     engine.shutdown();
 
     auto pkt = osc_test::message("/status");
-    CHECK_FALSE(ss_ingress_write(pkt.ptr(), pkt.size(), 0));
+    CHECK_FALSE(clockwork_ingress_write(pkt.ptr(), pkt.size(), 0));
 }
 
 TEST_CASE("Lanes entry points reject after shutdown (shm-backed arena)",
           "[lifecycle][lanes]") {
-    SupersonicEngine engine;
-    SupersonicEngine::Config cfg;
+    ClockworkEngine engine;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 57123;   // non-zero → arena lives in the public shm segment
 
@@ -106,14 +106,14 @@ TEST_CASE("Lanes entry points reject after shutdown (shm-backed arena)",
     // (SIGSEGV/SIGBUS), so "returns false" also proves "does not touch the
     // dead arena".
     auto pkt = osc_test::message("/status");
-    CHECK_FALSE(ss_ingress_write(pkt.ptr(), pkt.size(), 0));
+    CHECK_FALSE(clockwork_ingress_write(pkt.ptr(), pkt.size(), 0));
 }
 
 TEST_CASE("Null onReply callback does not crash", "[lifecycle]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = nullptr;
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);
@@ -132,10 +132,10 @@ TEST_CASE("Null onReply callback does not crash", "[lifecycle]") {
 }
 
 TEST_CASE("Null onDebug callback does not crash", "[lifecycle]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onDebug = nullptr;
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);

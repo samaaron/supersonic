@@ -1,0 +1,27 @@
+/* Cascadia Code, vendored.
+ *
+ * The page is served under COEP require-corp, which blocks every cross-origin
+ * subresource — so the jsdelivr @fontsource stylesheet this replaces could not
+ * load even though it resolves fine in a browser address bar. Latin subset,
+ * three weights, which is all demo.css asks for. */
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/cascadia-code-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/cascadia-code-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/cascadia-code-latin-700-normal.woff2") format("woff2");
+}

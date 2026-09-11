@@ -1,5 +1,5 @@
 /*
- * test_config_validation.cpp — SupersonicEngine::Config edge cases
+ * test_config_validation.cpp — ClockworkEngine::Config edge cases
  *
  * Tests that the engine boots and shuts down cleanly with various Config
  * parameter combinations, and verifies default values are correct.
@@ -12,7 +12,7 @@
 // ── 1. Default config values ────────────────────────────────────────────────
 
 TEST_CASE("Default Config values are correct", "[config]") {
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
 
     CHECK(cfg.sampleRate             == 48000);
     CHECK(cfg.bufferSize             == 0);   // 0 = auto (smallest multiple of 128)
@@ -22,8 +22,8 @@ TEST_CASE("Default Config values are correct", "[config]") {
     // Default is "auto" (-1) — JUCE/CoreAudio clamps to the device's real
     // channel count. Headless test fixtures override these to get
     // predictable 2-in / 2-out behaviour.
-    CHECK(cfg.numOutputChannels      == SupersonicEngine::kAutoChannelCount);
-    CHECK(cfg.numInputChannels       == SupersonicEngine::kAutoChannelCount);
+    CHECK(cfg.numOutputChannels      == ClockworkEngine::kAutoChannelCount);
+    CHECK(cfg.numInputChannels       == ClockworkEngine::kAutoChannelCount);
     CHECK(cfg.maxGraphDefs           == 512);
     CHECK(cfg.maxWireBufs            == 64);
     CHECK(cfg.numControlBusChannels  == 16384);
@@ -35,11 +35,11 @@ TEST_CASE("Default Config values are correct", "[config]") {
 // ── 2. Minimum viable config ────────────────────────────────────────────────
 
 TEST_CASE("Engine boots with minimum viable config", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     bool gotReply = false;
     engine.onReply = [&](const uint8_t*, uint32_t) { gotReply = true; };
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless    = true;
     cfg.udpPort     = 0;
     cfg.maxNodes    = 4;
@@ -57,10 +57,10 @@ TEST_CASE("Engine boots with minimum viable config", "[config]") {
 // ── 3. Large config values ──────────────────────────────────────────────────
 
 TEST_CASE("Engine boots with large config values", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.maxNodes   = 4096;
@@ -75,10 +75,10 @@ TEST_CASE("Engine boots with large config values", "[config]") {
 // ── 4. Sample rate 44100 ────────────────────────────────────────────────────
 
 TEST_CASE("Engine boots at 44100 Hz", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.sampleRate = 44100;
@@ -90,10 +90,10 @@ TEST_CASE("Engine boots at 44100 Hz", "[config]") {
 }
 
 TEST_CASE("Engine boots at 96000 Hz", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.sampleRate = 96000;
@@ -107,10 +107,10 @@ TEST_CASE("Engine boots at 96000 Hz", "[config]") {
 // ── 5. Buffer sizes ─────────────────────────────────────────────────────────
 
 TEST_CASE("Engine boots with bufferSize=64", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.bufferSize = 64;
@@ -122,10 +122,10 @@ TEST_CASE("Engine boots with bufferSize=64", "[config]") {
 }
 
 TEST_CASE("Engine boots with bufferSize=256", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.bufferSize = 256;
@@ -137,10 +137,10 @@ TEST_CASE("Engine boots with bufferSize=256", "[config]") {
 }
 
 TEST_CASE("Engine boots with bufferSize=512", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless   = true;
     cfg.udpPort    = 0;
     cfg.bufferSize = 512;
@@ -168,10 +168,10 @@ TEST_CASE("headless=true skips audio device", "[config]") {
 // ── 7. udpPort=0 disables UDP listener ──────────────────────────────────────
 
 TEST_CASE("udpPort=0 disables UDP listener", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless = true;
     cfg.udpPort  = 0;
     engine.init(cfg);
@@ -186,10 +186,10 @@ TEST_CASE("udpPort=0 disables UDP listener", "[config]") {
 // ── 8. Mono output (numOutputChannels=1) ────────────────────────────────────
 
 TEST_CASE("Engine boots with mono output", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless          = true;
     cfg.udpPort           = 0;
     cfg.numOutputChannels = 1;
@@ -203,10 +203,10 @@ TEST_CASE("Engine boots with mono output", "[config]") {
 // ── 9. No input channels ───────────────────────────────────────────────────
 
 TEST_CASE("Engine boots with zero input channels", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless         = true;
     cfg.udpPort          = 0;
     cfg.numInputChannels = 0;
@@ -220,10 +220,10 @@ TEST_CASE("Engine boots with zero input channels", "[config]") {
 // ── 11. numControlBusChannels variations ────────────────────────────────────
 
 TEST_CASE("Engine boots with small numControlBusChannels", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless              = true;
     cfg.udpPort               = 0;
     cfg.numControlBusChannels = 128;
@@ -237,10 +237,10 @@ TEST_CASE("Engine boots with small numControlBusChannels", "[config]") {
 // ── 12. realTimeMemorySize variations ───────────────────────────────────────
 
 TEST_CASE("Engine boots with small realTimeMemorySize", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless           = true;
     cfg.udpPort            = 0;
     cfg.realTimeMemorySize = 256;
@@ -252,10 +252,10 @@ TEST_CASE("Engine boots with small realTimeMemorySize", "[config]") {
 }
 
 TEST_CASE("Engine boots with large realTimeMemorySize", "[config]") {
-    SupersonicEngine engine;
+    ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    SupersonicEngine::Config cfg;
+    ClockworkEngine::Config cfg;
     cfg.headless           = true;
     cfg.udpPort            = 0;
     cfg.realTimeMemorySize = 32768;

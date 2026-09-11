@@ -7,7 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "SupersonicEngine.h"
+#include "ClockworkEngine.h"
 #include <atomic>
 #include <chrono>
 #include <mutex>
@@ -20,8 +20,8 @@ namespace {
 // non-headless (a real device manager exists), 2-channel output, no input,
 // 48 kHz, no UDP port (we send OSC in-process via sendOSC to keep the test
 // hermetic).
-SupersonicEngine::Config nonHeadlessTestConfig() {
-    SupersonicEngine::Config cfg;
+ClockworkEngine::Config nonHeadlessTestConfig() {
+    ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 0;
@@ -36,7 +36,7 @@ SupersonicEngine::Config nonHeadlessTestConfig() {
 }
 
 // EngineFixture constructs and initialises atomically, which is too late
-// to set testForceNoCurrentDeviceAfterInit. This harness sets the flag
+// to set testForceNoCurrentDeviceAfterInit. This fixture sets the flag
 // before init().
 class NoDeviceEngine {
 public:
@@ -54,17 +54,17 @@ public:
 
     ~NoDeviceEngine() { mEngine.shutdown(); }
 
-    void init(const SupersonicEngine::Config& cfg) { mEngine.init(cfg); }
-    SupersonicEngine& engine() { return mEngine; }
+    void init(const ClockworkEngine::Config& cfg) { mEngine.init(cfg); }
+    ClockworkEngine& engine() { return mEngine; }
 
 private:
     struct Reply { std::string address; std::vector<uint8_t> raw; };
-    SupersonicEngine mEngine;
+    ClockworkEngine mEngine;
     std::mutex mMutex;
     std::vector<Reply> mReplies;
 };
 
-uint32_t processCount(SupersonicEngine& e) {
+uint32_t processCount(ClockworkEngine& e) {
     return e.audioCallback().processCount.load(std::memory_order_acquire);
 }
 
@@ -90,8 +90,8 @@ TEST_CASE("NoAudioDevice: boot with no device lands in the waiting state, not a 
     // The engine boots (so it can accept device-switch / prefs OSC and recover)
     // but has NO audio source.
     CHECK(harness.engine().isRunning());
-    CHECK(harness.engine().audioSource() == SupersonicEngine::AudioSource::None);
-    CHECK(harness.engine().audioSource() != SupersonicEngine::AudioSource::Headless);
+    CHECK(harness.engine().audioSource() == ClockworkEngine::AudioSource::None);
+    CHECK(harness.engine().audioSource() != ClockworkEngine::AudioSource::Headless);
     CHECK(harness.engine().waitingForAudioDevice());
 }
 
@@ -135,15 +135,15 @@ TEST_CASE("NoAudioDevice: explicit headless ticks; no-device non-headless stays 
     {
         // Explicit headless (Config::headless=true) — tests / non-JUCE backends.
         EngineFixture fix;  // default fixture sets headless=true
-        CHECK(fix.engine().audioSource() == SupersonicEngine::AudioSource::Headless);
+        CHECK(fix.engine().audioSource() == ClockworkEngine::AudioSource::Headless);
         CHECK(pollUntil([&] { return processCount(fix.engine()) > 20; }, 3000));
     }
     {
         // Default engine, no device — idle, no headless, no ticks.
         NoDeviceEngine harness;
         harness.init(nonHeadlessTestConfig());
-        CHECK(harness.engine().audioSource() != SupersonicEngine::AudioSource::Headless);
-        CHECK(harness.engine().audioSource() == SupersonicEngine::AudioSource::None);
+        CHECK(harness.engine().audioSource() != ClockworkEngine::AudioSource::Headless);
+        CHECK(harness.engine().audioSource() == ClockworkEngine::AudioSource::None);
     }
 }
 
@@ -163,10 +163,10 @@ TEST_CASE("NoAudioDevice: the watchdog keeps trying to open a device",
     // failing — either way an attempt happens within the window.
     CHECK(pollUntil([&] {
         return harness.engine().watchdogRecoveryCount() >= 1
-            || harness.engine().audioSource() == SupersonicEngine::AudioSource::RealCallback;
+            || harness.engine().audioSource() == ClockworkEngine::AudioSource::RealCallback;
     }, 3000));
 
-    CHECK(harness.engine().audioSource() != SupersonicEngine::AudioSource::Headless);
+    CHECK(harness.engine().audioSource() != ClockworkEngine::AudioSource::Headless);
 }
 
 // ── Regression (W1): the waiting branch must honour an in-flight swap ──────────

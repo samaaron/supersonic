@@ -226,50 +226,14 @@ TEST_CASE("ColdSwap: concurrent swap is rejected", "[ColdSwap]") {
     REQUIRE(fix.waitForReply("/status.reply", reply));
 }
 
-// ── State cache is called during cold swap ───────────────────────────────────
-
-TEST_CASE("ColdSwap: captureAll called before destroy on cold swap", "[ColdSwap]") {
-    EngineFixture fix;
-
-    // Load a synthdef so the cache has something
-    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
-    REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 1);
-
-    int captureCount = 0;
-    fix.engine().stateCache().registerModule({
-        "test-capture-counter",
-        [&]() { captureCount++; },
-        [&]() { /* restore */ }
-    });
-
-    auto result = fix.engine().switchDevice("", 44100);
-    REQUIRE(result.success);
-    REQUIRE(result.type == SwapType::Cold);
-
-    // captureAll should have been called exactly once
-    REQUIRE(captureCount == 1);
-}
-
-TEST_CASE("ColdSwap: captureAll called on failed cold swap too", "[ColdSwap]") {
-    EngineFixture fix;
-
-    int captureCount = 0;
-    fix.engine().stateCache().registerModule({
-        "test-capture-counter",
-        [&]() { captureCount++; },
-        [&]() { /* restore */ }
-    });
-
-    fix.engine().testSwapFailure = [](bool) -> std::string {
-        return "test failure";
-    };
-
-    auto result = fix.engine().switchDevice("", 44100);
-    REQUIRE_FALSE(result.success);
-
-    // captureAll should still have been called (before the failure)
-    REQUIRE(captureCount == 1);
-}
+// ── State cache is called during cold swap — REMOVED ────────────────────────
+//
+// Two cases asserted StateCache::captureAll() ran before destroy on a cold
+// swap, and again on a failed one. StateCache has been deleted: a guest that
+// must survive its own destruction now writes into DspConfig::persistent,
+// which clockwork carries across the rebuild without reading it. What the
+// swap itself must still do is covered by the cases above and below, and by
+// clockwork/test/test_rebuild_contract.cpp.
 
 // ── Round-trip cold swaps ────────────────────────────────────────────────────
 

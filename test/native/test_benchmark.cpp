@@ -13,7 +13,7 @@
  * uses 10% of the available budget.
  */
 #include "EngineFixture.h"
-#include "SupersonicEngine.h"
+#include "ClockworkEngine.h"
 #include <cstdio>
 #include <algorithm>
 #include <vector>
@@ -223,7 +223,7 @@ TEST_CASE("benchmark: idle engine", "[.][benchmark]") {
 
     fprintf(stderr, "\n");
     fprintf(stderr, "  ╔══════════════════════════════════════════════════════════════════╗\n");
-    fprintf(stderr, "  ║  SUPERSONIC NATIVE BENCHMARK                                    ║\n");
+    fprintf(stderr, "  ║  TAU NATIVE BENCHMARK                                            ║\n");
     fprintf(stderr, "  ║  128 samples/block @ 48kHz = 2,666,667 ns budget                ║\n");
     fprintf(stderr, "  ╚══════════════════════════════════════════════════════════════════╝\n");
 

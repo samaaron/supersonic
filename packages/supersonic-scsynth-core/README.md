@@ -4,12 +4,12 @@ The SuperCollider scsynth WebAssembly engine and AudioWorklet processor for [Sup
 
 ## Overview
 
-This package contains only the GPL-licensed runtime components:
+This package contains only the copyleft runtime components (AGPL-3.0-or-later as a whole: clockwork is AGPL, scsynth GPL):
 
 - `wasm/scsynth-nrt.wasm` - The scsynth engine compiled to WebAssembly
-- `workers/scsynth_audio_worklet.js` - AudioWorklet processor
+- `workers/clockwork_audio_worklet.js` - AudioWorklet processor (clockwork's)
 
-The MIT-licensed workers (prescheduler, osc_in, debug, osc_out_log) are distributed with the main `supersonic-scsynth` package.
+The OSC workers (osc_in, osc_out_log) are distributed with the main `supersonic-scsynth` package.
 
 ## Usage
 

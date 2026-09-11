@@ -6,7 +6,7 @@
 // isolated from the test binary's address space (matches how a real
 // Link peer like Live participates on the mesh).
 //
-// Built only when SUPERSONIC_ENABLE_LINK is ON.
+// Built only when CLOCKWORK_ENABLE_LINK is ON.
 
 // MSVC's <cmath> doesn't expose M_PI unless _USE_MATH_DEFINES is set
 // before the include — define it ourselves to keep portability simple.

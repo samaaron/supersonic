@@ -130,7 +130,7 @@ TEST_CASE("ring wire conformance (C++): golden corpus replays byte-identically",
         INFO("case " << c.name);
         std::vector<uint8_t> buf(c.size, 0);
         std::atomic<int32_t> head{0}, tail{0}, seq{0}, lock{0};
-        SsDrainState st;
+        ClockworkDrainState st;
         std::vector<WireMsg> got;
 
         for (const auto& op : c.ops) {
@@ -142,12 +142,12 @@ TEST_CASE("ring wire conformance (C++): golden corpus replays byte-identically",
                 INFO("write src=" << op.sourceId << " len=" << op.payload.size());
                 CHECK(ok == (op.expect == "ok"));
             } else {
-                ss_drain_ring(buf.data(), c.size, &head, &tail, st,
-                              SsDrainMetrics{}, op.drainMax,
+                clockwork_drain_ring(buf.data(), c.size, &head, &tail, st,
+                              ClockworkDrainMetrics{}, op.drainMax,
                               [&](uint32_t src, const uint8_t* p, uint32_t n,
                                   uint32_t s) {
                                   got.push_back({s, src, toHex(p, n)});
-                                  return SsDrainVerdict::Consume;
+                                  return ClockworkDrainVerdict::Consume;
                               });
             }
         }

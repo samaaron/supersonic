@@ -3,13 +3,13 @@
  * loopback UDP socket: the cue server forwards inbound external OSC as
  * /external-osc-cue, and scheduled outbound OSC (/schedule → EngineScheduler →
  * OscControl) is delivered to the target host:port. Only built when
- * SUPERSONIC_ENABLE_OSC is on.
+ * CLOCKWORK_ENABLE_OSC is on.
  */
 #include <catch2/catch_test_macros.hpp>
 
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "WallClock.h"
+#include "clock/clock_math.h"   // wallClockNTP; WallClock.h was a shim for this
 
 #include <juce_core/juce_core.h>
 #include <chrono>
@@ -20,7 +20,7 @@
 #include <unistd.h>
 #endif
 
-#ifdef SUPERSONIC_OSC
+#ifdef CLOCKWORK_OSC
 
 // True if this host can bind the IPv6 loopback. juce::DatagramSocket is IPv4-only
 // so it can't be used to probe; use a raw socket (Unix only — Windows v6 coverage
@@ -48,7 +48,7 @@ static bool ipv6_loopback_available() {
 static osc_test::Packet scheduleOscSend(double ntp, const char* host, int port,
                                         const osc_test::Packet& inner) {
     osc_test::Builder send;
-    send.begin("/osc/send")
+    send.begin("/clockwork/osc/send")
         << host
         << static_cast<osc::int32>(port)
         << osc::Blob(inner.data.data(),
@@ -80,7 +80,7 @@ TEST_CASE("OSC cue server forwards inbound external OSC as a cue", "[osc]") {
     }
 
     osc_test::Builder cfg;
-    cfg.begin("/osc/cue-server/config")
+    cfg.begin("/clockwork/osc/cue-server/config")
         << static_cast<osc::int32>(cuePort)   // port
         << static_cast<osc::int32>(1)         // loopback-restricted
         << static_cast<osc::int32>(1);        // cues-on
@@ -168,7 +168,7 @@ TEST_CASE("OSC self-loop: sending to our own cue port comes back as a cue", "[os
         cuePort = probe.getBoundPort();
     }
     osc_test::Builder cfg;
-    cfg.begin("/osc/cue-server/config")
+    cfg.begin("/clockwork/osc/cue-server/config")
         << static_cast<osc::int32>(cuePort)
         << static_cast<osc::int32>(1)    // loopback
         << static_cast<osc::int32>(1);   // cues-on
@@ -208,7 +208,7 @@ TEST_CASE("OSC self-loop works over IPv6 (::1)", "[osc]") {
         cuePort = probe.getBoundPort();
     }
     osc_test::Builder cfg;
-    cfg.begin("/osc/cue-server/config")
+    cfg.begin("/clockwork/osc/cue-server/config")
         << static_cast<osc::int32>(cuePort)
         << static_cast<osc::int32>(1)    // loopback (binds 127.0.0.1 + ::1)
         << static_cast<osc::int32>(1);   // cues-on
@@ -276,7 +276,7 @@ TEST_CASE("OSC out: large message delivered, engine survives", "[osc]") {
     int cuePort = 0;
     { juce::DatagramSocket probe; REQUIRE(probe.bindToPort(0, "127.0.0.1")); cuePort = probe.getBoundPort(); }
     osc_test::Builder cfg;
-    cfg.begin("/osc/cue-server/config") << static_cast<osc::int32>(cuePort)
+    cfg.begin("/clockwork/osc/cue-server/config") << static_cast<osc::int32>(cuePort)
         << static_cast<osc::int32>(1) << static_cast<osc::int32>(1);
     fx.send(cfg.end());
     juce::DatagramSocket sender; REQUIRE(sender.bindToPort(0, "127.0.0.1"));
@@ -288,4 +288,4 @@ TEST_CASE("OSC out: large message delivered, engine survives", "[osc]") {
     CHECK(alive);
 }
 
-#endif // SUPERSONIC_OSC
+#endif // CLOCKWORK_OSC

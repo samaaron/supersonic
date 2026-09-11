@@ -2,17 +2,18 @@
  * peer_shm/main.cpp — out-of-process SHM command-plane peer used by
  * test_shm_peer_crash.cpp. Attaches to a running engine's segment and writes
  * /sync frames into the peer command ring exactly as a real peer (spider)
- * would: server_shared_memory_client + shm_peer_attach + RingBufferWriter.
+ * would: shm_segment_client + shm_peer_attach + RingBufferWriter.
  *
  * Modes (prints "ready" on stdout once attached):
- *   burst <port> <count>   write /sync ids 1..count (retry on ring-full), exit 0
- *   spam <port>            write /sync frames with increasing ids until killed
- *   hold-lock <port>       set cmd_write_lock and spin — a corpse holding the
+ *   burst <endpoint> <count>   write /sync ids 1..count (retry on ring-full), exit 0
+ *   spam <endpoint>            write /sync frames with increasing ids until killed
+ *   hold-lock <endpoint>       set cmd_write_lock and spin — a corpse holding the
  *                          writer lock, for the attach-recovery test
  */
-#include "src/synth/common/server_shm.hpp"
-#include "src/shm_peer_plane.h"
-#include "src/workers/RingBufferWriter.h"
+#include "shm_segment.hpp"
+#include "shm_attach.hpp"
+#include "shm_peer_plane.h"
+#include "workers/RingBufferWriter.h"
 
 #include <chrono>
 #include <cstdio>
@@ -57,20 +58,28 @@ void writeSync(ShmPeerPlaneHeader* plane, int32_t id) {
 
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::fprintf(stderr, "usage: %s <burst|spam|hold-lock> <port> [count]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <burst|spam|hold-lock> <endpoint> [count]\n", argv[0]);
         return 2;
     }
-    const std::string mode = argv[1];
-    const unsigned port    = static_cast<unsigned>(std::atoi(argv[2]));
+    const std::string mode     = argv[1];
+    const std::string endpoint = argv[2];
 
     ShmPeerPlaneHeader* plane = nullptr;
     try {
-        // The client mapping must outlive every plane access; keep it for the
+        // Across a real process boundary, the way a real peer does it: the
+        // engine hands its anonymous segment over the attach endpoint. The
+        // client mapping must outlive every plane access; keep it for the
         // whole process lifetime.
-        static server_shared_memory_client client(port);
+        std::string err;
+        const auto handle = shm_attach::receive(endpoint, &err);
+        if (!detail_shm_segment::shm_handle_valid(handle)) {
+            std::fprintf(stderr, "peer_shm: attach at %s failed: %s\n", endpoint.c_str(), err.c_str());
+            return 3;
+        }
+        static shm_segment_client client(handle);
         plane = client.get_peer_plane();
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "peer_shm: cannot open segment SuperSonic_%u: %s\n", port, e.what());
+        std::fprintf(stderr, "peer_shm: cannot map the segment from %s: %s\n", endpoint.c_str(), e.what());
         return 3;
     }
     if (!plane) return 3;

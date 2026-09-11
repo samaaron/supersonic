@@ -3,25 +3,51 @@ name = "supersonic-native"
 version = "0.1.0"
 edition = "2021"
 authors = ["Sam Aaron"]
-description = "Umbrella staticlib bundling SuperSonic's native Rust subsystems (MIDI, gamepad, OSC) into the single Rust staticlib a binary may link. CMake builds this; the C ABIs live in the subsystem crates."
-license = "MIT OR GPL-3.0-or-later"
+description = "SuperSonic's Rust umbrella: the clockwork subsystems and the scsynth engine layer, bundled into the one staticlib a binary may link."
+license = "GPL-3.0-or-later"
 
 [lib]
-# Exactly one Rust staticlib can be linked into a binary (each carries its own
-# copy of std, so two collide at link time). This crate is that one staticlib;
-# the subsystems are rlib dependencies whose #[no_mangle] C ABIs it re-exports.
+# Exactly one Rust staticlib per binary — each carries its own std, so two
+# collide at link. clockwork's own umbrella (clockwork-native) is the one IT uses
+# standalone; this is the one SuperSonic uses, and it contains both halves.
 crate-type = ["staticlib"]
 
 [features]
-default = ["midi", "gamepad", "osc"]
-midi = ["dep:supersonic-midi"]
-gamepad = ["dep:supersonic-gamepad"]
-osc = ["dep:supersonic-osc-net"]
-# Windows backend selector, forwarded to supersonic-midi (the gamepad crate
-# picks XInput on Windows by itself via a target-specific dependency).
-winrt = ["supersonic-midi/winrt"]
+# The names clockwork's CMake passes. It forwards each to the matching
+# clockwork crate and knows nothing else about this package — that contract is
+# the whole of what clockwork assumes about an embedder's umbrella.
+default = ["midi", "gamepad", "osc", "schedule"]
+midi     = ["dep:clockwork-midi", "clockwork-sinks/midi"]
+# Windows only, and added by clockwork's CMake beside `midi`: midir's WinRT
+# backend plus the DeviceWatcher for hot-swap. Named here because the contract
+# above is that every name clockwork passes exists in the embedder's umbrella —
+# a missing one is not ignored, it fails the build.
+winrt    = ["clockwork-midi/winrt"]
+gamepad  = ["dep:clockwork-gamepad"]
+osc      = ["dep:clockwork-osc-net", "clockwork-sinks/osc"]
+# The command transports (clockwork-comms): a client library carried here so
+# the host that links clockwork_comms finds the symbols; the engine uses none.
+comms    = ["osc", "dep:clockwork-comms"]
+schedule = ["clockwork-schedule/store"]
 
 [dependencies]
-supersonic-midi = { path = "../supersonic-midi", optional = true }
-supersonic-gamepad = { path = "../supersonic-gamepad", optional = true }
-supersonic-osc-net = { path = "../supersonic-osc-net", optional = true }
+# ── clockwork half, from the submodule ─────────────────────────────────────
+clockwork-heap        = { path = "../../clockwork/rust/clockwork-heap" }
+clockwork-ports       = { path = "../../clockwork/rust/clockwork-ports" }
+clockwork-ports-disk  = { path = "../../clockwork/rust/clockwork-ports-disk" }
+clockwork-sinks       = { path = "../../clockwork/rust/clockwork-sinks", default-features = false }
+clockwork-scope       = { path = "../../clockwork/rust/clockwork-scope" }
+supersonic-node-mirror = { path = "../supersonic-node-mirror" }
+clockwork-clock       = { path = "../../clockwork/rust/clockwork-clock" }
+clockwork-midi        = { path = "../../clockwork/rust/clockwork-midi", optional = true }
+clockwork-gamepad     = { path = "../../clockwork/rust/clockwork-gamepad", optional = true }
+clockwork-osc-net     = { path = "../../clockwork/rust/clockwork-osc-net", optional = true }
+clockwork-comms       = { path = "../../clockwork/rust/clockwork-comms", optional = true }
+clockwork-schedule    = { path = "../../clockwork/rust/clockwork-schedule", default-features = false, features = ["parse"] }
+
+# ── the engine half ──────────────────────────────────────────────────────────
+# What makes this umbrella necessary: the guest has Rust of its own, and it
+# cannot be a second staticlib.
+supersonic-buffers  = { path = "../supersonic-buffers" }
+supersonic-limiter  = { path = "../supersonic-limiter" }
+supersonic-nodetree = { path = "../supersonic-nodetree" }

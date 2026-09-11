@@ -1,0 +1,10 @@
+[package]
+name = "supersonic-ugen-abi"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sam Aaron"]
+description = "The memory layout the C++ ugens are compiled against — Unit, Wire, Rate, Graph, World, SndBuf, RGen — as repr(C) Rust declarations, asserted field by field against the compiler's own offsetof/sizeof. Declarations of an existing ABI; no engine behaviour is reimplemented here."
+license = "MIT OR GPL-3.0-or-later"
+
+[lib]
+crate-type = ["rlib"]

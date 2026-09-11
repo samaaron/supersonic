@@ -36,7 +36,10 @@ function createBundle(offsetMs) {
   return bundle;
 }
 
-self.onmessage = (e) => {
+// AWAITED, because a SAB channel opens a module instance of its own over the
+// engine's memory and instantiating one is asynchronous — that is how this
+// worker gets its own stack to run the ring code on.
+self.onmessage = async (e) => {
   const { type, ...data } = e.data;
 
   switch (type) {
@@ -44,7 +47,7 @@ self.onmessage = (e) => {
       // Receive OscChannel from main thread
       if (data.channel) {
         lastTransferData = data.channel;  // Save for SAB debugging
-        oscChannel = OscChannel.fromTransferable(data.channel);
+        oscChannel = await OscChannel.fromTransferable(data.channel);
         self.postMessage({
           type: "channelReady",
           mode: oscChannel.mode,

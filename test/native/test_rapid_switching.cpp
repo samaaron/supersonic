@@ -402,28 +402,13 @@ TEST_CASE("RapidSwitch: rapid mode changes don't crash in headless",
 }
 
 // =============================================================================
-// SYNTH STATE SURVIVES RAPID COLD SWAPS
+// SYNTH STATE SURVIVES RAPID COLD SWAPS — REMOVED
+//
+// This asserted clockwork's StateCache still held a synthdef after five
+// rapid cold swaps. Clockwork no longer caches definitions at all; the
+// guest owns what survives its own destruction, via DspConfig::persistent.
+// The swap sequence itself is still exercised by the case below.
 // =============================================================================
-
-TEST_CASE("RapidSwitch: synthdef cache survives rapid cold swaps",
-          "[RapidSwitch]") {
-    EngineFixture fix;
-
-    // Load a synthdef
-    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
-    REQUIRE(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 1);
-
-    // Rapid cold swaps
-    for (int i = 0; i < 5; ++i) {
-        double rate = (i % 2 == 0) ? 44100 : 48000;
-        auto result = fix.engine().switchDevice("", rate);
-        REQUIRE(result.success);
-        REQUIRE(result.type == SwapType::Cold);
-    }
-
-    // State cache should still have the synthdef
-    CHECK(fix.engine().stateCache().synthDefs().count("sonic-pi-beep") == 1);
-}
 
 TEST_CASE("RapidSwitch: engine processes synths after rapid cold swaps",
           "[RapidSwitch]") {
@@ -665,7 +650,7 @@ TEST_CASE("RapidSwitch: /supersonic/devices/switch via sendOSC",
     // /supersonic/devices/switch "" 44100.0 0
     {
         osc_test::Builder b;
-        auto& s = b.begin("/supersonic/devices/switch");
+        auto& s = b.begin("/clockwork/devices/switch");
         s << "" << 44100.0f << (int32_t)0;
         fix.send(b.end());
     }

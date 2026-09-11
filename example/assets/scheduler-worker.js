@@ -363,7 +363,9 @@ function sendOSC(oscData) {
 }
 
 // ===== MESSAGE HANDLER =====
-self.onmessage = (e) => {
+// AWAITED: see OscChannel.fromTransferable — a SAB channel instantiates a
+// module of its own, which is asynchronous.
+self.onmessage = async (e) => {
   const { type, ...data } = e.data;
 
   switch (type) {
@@ -371,7 +373,7 @@ self.onmessage = (e) => {
       // Receive OscChannel from main thread for direct worklet communication
       // OscChannel abstracts SAB vs postMessage - works transparently in both modes
       if (data.channel) {
-        oscChannel = OscChannel.fromTransferable(data.channel);
+        oscChannel = await OscChannel.fromTransferable(data.channel);
       }
       // Receive config (groups, buses, patterns) from main thread
       if (data.config) {

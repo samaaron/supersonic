@@ -19,7 +19,7 @@ static osc_test::Packet dRecvWithCompletion(const uint8_t* synthdefData, uint32_
 }
 
 static std::vector<uint8_t> loadSynthDefBytes(const std::string& name) {
-    std::string path = std::string(SUPERSONIC_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
+    std::string path = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/" + name + ".scsyndef";
     std::filesystem::path fsPath(path);
     std::ifstream f(fsPath, std::ios::binary);
     if (!f) return {};

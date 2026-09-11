@@ -405,7 +405,7 @@ peripheral that exchanges `/midi/*` OSC with the engine. Ports are addressed by 
 **normalised handle** (lowercase, OSC-unsafe chars → `_`, duplicates suffixed
 `_2`, `_3`); `port = "*"` means all open ports; MIDI channels are **1-based**
 (1–16), and `channel = -1` on output means "all 16". Available only on native
-builds (gated by `SUPERSONIC_ENABLE_MIDI`).
+builds (gated by `CLOCKWORK_MIDI`).
 
 ### Device management
 
@@ -485,7 +485,7 @@ SDL controller-mapping database — and Apple's GameController framework on
 macOS) folded into the engine, structured like the MIDI one. It is a peripheral that exchanges `/gamepad/*` OSC with the engine.
 Pads are addressed by a stable normalised handle (lowercased, unsafe chars →
 `_`, duplicates suffixed `_2`, `_3`); `pad = "*"` means all connected pads.
-Native builds only (gated by `SUPERSONIC_ENABLE_GAMEPAD`); on the web the
+Native builds only (gated by `CLOCKWORK_GAMEPAD`); on the web the
 main-thread `GamepadManager` (JS Gamepad API I/O + the shared Rust core
 compiled to wasm) serves the **input-event and rumble subset** of this
 contract — device lists arrive as structured JS callbacks rather than OSC,

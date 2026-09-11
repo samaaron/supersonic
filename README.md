@@ -20,7 +20,11 @@ This is SuperSonic. All the synthesis power of the original **scsynth** - rearch
 
 # Welcome to SuperSonic
 
-**SuperSonic** is a complete reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run in new places - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native server using [JUCE](https://juce.com), on embedded hardware such as the ESP32-S3, or as a native shared library running directly in the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
+**SuperSonic** is a complete reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run in new places - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native server, or as a native shared library running directly in the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
+
+### Built on clockwork
+
+SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwork). clockwork provides the audio device IO, MIDI, OSC, gamepad input, transport clock and Ableton Link; scsynth provides the synthesis engine, node tree and UGens. The two connect through Clockwork's DSP API in `dsp_api.h`.
 
 ### Core
 
@@ -30,7 +34,7 @@ This is SuperSonic. All the synthesis power of the original **scsynth** - rearch
 - **Pre-scheduler** - *dynamically growing holding bay for future OSC bundles with cancellation support.*
 - **Cold-swap recovery** - *multiple restart levels with automatic synthdef and buffer restoration.*
 - **Upstream compatible** - *kept in sync with the official SuperCollider scsynth server.*
-- **Tested** - *1400+ tests across web, native and NIF targets.*
+- **Tested** - *1700+ tests across web and native targets, plus clockwork's own suite.*
 
 ### Web
 
@@ -47,11 +51,6 @@ This is SuperSonic. All the synthesis power of the original **scsynth** - rearch
 - **Live device and driver switching** - *hot-swap at runtime with automatic cold swap on rate mismatch.*
 - **Headless mode** - *high-resolution timer-driven processing for CI and containers.*
 - **UDP OSC server** - *drop-in scsynth replacement with `/supersonic/*` device and recording commands.*
-
-### Embedded
-
-- **Two-tiered memory** - *a placement allocator routes audio-hot allocations to fast internal SRAM and bulk data to external PSRAM with graceful spillover; a zero-overhead passthrough on single-region platforms.*
-- **ESP32-S3** - *memory profile and tiered allocator in place for the ESP32-S3R8 (512 KiB SRAM + 8 MiB PSRAM); on-device build and tuning still in progress.*
 
 ### NIF
 
@@ -71,11 +70,17 @@ SuperSonic can be fetched remotely via CDN, locally via npm or self-built — se
 
 ### Native
 
-Build the standalone backend with `scripts/build-native.sh` — see [Building from Source](docs/BUILDING.md).
+Clone with the submodule and build with CMake - see [Building from Source](docs/BUILDING.md).
+
+    git clone --recurse-submodules https://github.com/samaaron/supersonic
+    cmake -B build -DCMAKE_BUILD_TYPE=Release
+    cmake --build build --target SuperSonic
+
+`CMakeLists.txt` here names the guest and links the host; everything else is clockwork's own build - see [clockwork/docs/BUILDING.md](clockwork/docs/BUILDING.md) for the options.
 
 ### NIF
 
-Build the BEAM NIF with `scripts/build-nif.sh` — see [Building from Source](docs/BUILDING.md).
+Build the BEAM NIF with `cmake -B build/nif -DCLOCKWORK_NIF=ON` — see [Building from Source](docs/BUILDING.md).
 
 For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION_WEB.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
@@ -89,7 +94,7 @@ For the full list of configuration options, see the [API Reference](docs/API.md#
 - [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
 - [Workers Guide](docs/WORKERS.md) - Send OSC directly from Web Workers and AudioWorklets for the lowest latency.
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
-- [Building from Source](docs/BUILDING.md) - WASM, native (JUCE), and NIF (Erlang/Elixir) builds
+- [Building from Source](docs/BUILDING.md) - WASM, native, and NIF (Erlang/Elixir) builds
 - [Debian Packaging](docs/DEBIAN-PACKAGING.md) - CI-proven Debian source package: offline build, system dependencies, lintian/autopkgtest
 
 ## Support
@@ -101,7 +106,7 @@ SuperSonic is brought to you by Sam Aaron. Please consider joining the community
 
 ## License
 
-See [LICENSE](LICENSE) for details.         
+SuperSonic as a whole is copyleft: scsynth is GPL-3.0-or-later and clockwork is AGPL-3.0-or-later (or commercially licensed), so the combined program is AGPL-3.0-or-later. The clockwork half keeps its own licence and stays separable. See [LICENSE](LICENSE) and [clockwork/LICENSE](clockwork/LICENSE).
 
 ## Credits
 

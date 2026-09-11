@@ -1,0 +1,12 @@
+[package]
+name = "supersonic-node-mirror"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later OR LicenseRef-Clockwork-Commercial"
+publish = false
+description = "The flat node-tree mirror JavaScript polls, in shared memory."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]

@@ -70,7 +70,7 @@ test.describe("RT Pool / Buffer Pool Isolation", () => {
 
       return {
         audioNanInf: metrics.audioNanInfCount || 0,
-        processCount: metrics.scsynthProcessCount || 0,
+        processCount: metrics.engineProcessCount || 0,
         nodeCount: tree.nodeCount,
       };
     }, sonicConfig);

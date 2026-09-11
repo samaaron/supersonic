@@ -151,8 +151,8 @@ TEST_CASE("Swap: /supersonic/devices/reopen recovers through the factory seam",
     // makeDeviceManager() — with the factory seam that means fresh fakes,
     // exactly like recovery after wake rebuilds against real hardware.
     OscReply reply;
-    fix.send(osc_test::message("/supersonic/devices/reopen"));
-    REQUIRE(fix.waitForReply("/supersonic/devices/reopen.done", reply, 10000));
+    fix.send(osc_test::message("/clockwork/devices/reopen"));
+    REQUIRE(fix.waitForReply("/clockwork/devices/reopen.done", reply, 10000));
 
     auto args = reply.parsed();
     REQUIRE(args.argCount() >= 1);
@@ -170,7 +170,7 @@ TEST_CASE("Swap: devicePhase is Idle at rest, Swapping under a held swap",
           "[SwapChar][phase]") {
     auto sys = makeSimpleSystem();
     EngineFixture fix(fakeEngineConfig(sys, "Fake Speakers"));
-    using Phase = SupersonicEngine::DevicePhase;
+    using Phase = ClockworkEngine::DevicePhase;
 
     REQUIRE(fix.engine().devicePhase() == Phase::Idle);
     {

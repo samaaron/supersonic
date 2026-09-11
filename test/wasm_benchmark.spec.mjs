@@ -56,8 +56,8 @@ test.describe('WASM AudioWorklet Benchmark', () => {
           glitchDurationMs: metrics.glitchDurationMs ?? -1,
           avgLatencyUs: metrics.averageLatencyUs ?? -1,
           maxLatencyUs: metrics.maxLatencyUs ?? -1,
-          processCount: metrics.scsynthProcessCount,
-          schedulerLates: metrics.scsynthSchedulerLates,
+          processCount: metrics.engineProcessCount,
+          schedulerLates: metrics.engineSchedulerLates,
           hasPlaybackStats: metrics.hasPlaybackStats === 1,
           healthIssues: report.health?.issues?.length ?? 0,
           healthSummary: report.health?.summary ?? '',
@@ -135,7 +135,7 @@ test.describe('WASM AudioWorklet Benchmark', () => {
           second: s + 1,
           healthPct: m.audioHealthPct,
           glitchCount: m.glitchCount ?? -1,
-          processCount: m.scsynthProcessCount,
+          processCount: m.engineProcessCount,
         });
       }
 

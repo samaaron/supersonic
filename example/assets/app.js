@@ -22,6 +22,10 @@ const FX_BUS_OUTPUT = 0; // Final output (main out)
 // FX node IDs
 const FX_LPF_NODE = 2000;
 const FX_REVERB_NODE = 2001;
+// How long the fx nodes take to glide to a new cutoff or mix — and how long
+// the pad's blob takes to reach a new position, so what is seen arrives with
+// what is heard.
+const FX_SLIDE_S = 0.1;
 const FX_ARP_LEVEL_NODE = 2002;
 const FX_BEAT_LEVEL_NODE = 2003;
 
@@ -578,7 +582,15 @@ function addSentMessage({ html, sequence, timestamp, comment } = {}) {
 // Metrics rendering is handled by the <supersonic-metrics> web component.
 // See js/lib/metrics_component.js for implementation.
 const metricsEl = $("performance-metrics");
-metricsEl?.buildFromSchema(SuperSonic);
+// <clockwork-metrics> is upgraded by dist/metrics_component.js, which is loaded as a
+// separate module — so on a cold load this line can run before the element is
+// defined and `buildFromSchema` is not yet on it. Upstream never hit this
+// because the tag and the class shipped from the same bundle. Wait for the
+// definition rather than throwing at module top level, which aborted the rest
+// of this file and left the boot button unwired.
+customElements.whenDefined("clockwork-metrics").then(() => {
+  metricsEl?.buildFromSchema(SuperSonic);
+});
 
 // ===== SCOPE VISUALISER =====
 const scopeCanvas = $("scope-canvas");
@@ -704,30 +716,59 @@ if (trailCanvas) {
 }
 
 let lastSpawnTime = 0;
-const MIN_SPAWN_INTERVAL = 50; // Max 20 spawns/sec = 60 particles/sec
+let lastSpawnX = null;
+let lastSpawnY = null;
+const IDLE_SPAWN_INTERVAL = 50; // a resting blob still glows: a cluster every 50 ms
+const TRAIL_SPACING = 6; // px between clusters along a moving blob's path
 
-function spawnTrailParticle() {
-  if (!trailCanvas || !uiState.padActive) return;
-
-  const now = performance.now();
-  if (now - lastSpawnTime < MIN_SPAWN_INTERVAL) return;
-  lastSpawnTime = now;
-
-  const x = uiState.padX * trailCanvas.width,
-    y = (1 - uiState.padY) * trailCanvas.height;
-
+function spawnCluster(x, y, ux, uy) {
   for (let i = 0; i < 3; i++) {
     const angle = Math.random() * Math.PI * 2,
       speed = 0.3 + Math.random() * 0.5;
     trailParticles.push({
       x: x + (Math.random() - 0.5) * 10,
       y: y + (Math.random() - 0.5) * 10,
-      vx: Math.cos(angle) * speed * 0.2,
-      vy: Math.sin(angle) * speed * 0.2,
+      // Scatter, plus a drift back along the path: a moving blob leaves a wake.
+      vx: Math.cos(angle) * speed * 0.2 - ux * 0.15,
+      vy: Math.sin(angle) * speed * 0.2 - uy * 0.15,
       life: 1.0,
       maxLife: 1.2 + Math.random() * 0.8,
       size: 8 + Math.random() * 8,
     });
+  }
+}
+
+// The trail is laid along the path the blob travelled since the last cluster,
+// at a fixed spacing. Spawning at the blob's position once per frame left a
+// fast glide as a few dots with gaps between; this leaves a line whatever the
+// speed. A blob that is not moving still glows, on a timer.
+function spawnTrailParticle() {
+  if (!trailCanvas || !uiState.padActive) return;
+
+  const now = performance.now();
+  const x = uiState.padX * trailCanvas.width,
+    y = (1 - uiState.padY) * trailCanvas.height;
+  if (lastSpawnX === null) {
+    lastSpawnX = x;
+    lastSpawnY = y;
+  }
+
+  const dx = x - lastSpawnX,
+    dy = y - lastSpawnY,
+    dist = Math.hypot(dx, dy);
+  if (dist >= TRAIL_SPACING) {
+    const n = Math.min(Math.floor(dist / TRAIL_SPACING), 60);
+    const ux = dx / dist,
+      uy = dy / dist;
+    for (let i = 1; i <= n; i++) {
+      spawnCluster(lastSpawnX + ux * TRAIL_SPACING * i, lastSpawnY + uy * TRAIL_SPACING * i, ux, uy);
+    }
+    lastSpawnX += ux * TRAIL_SPACING * n;
+    lastSpawnY += uy * TRAIL_SPACING * n;
+    lastSpawnTime = now;
+  } else if (now - lastSpawnTime >= IDLE_SPAWN_INTERVAL) {
+    spawnCluster(x, y, 0, 0);
+    lastSpawnTime = now;
   }
 }
 
@@ -751,6 +792,7 @@ function updateTrail() {
     trailCtx.clearRect(0, 0, trailCanvas.width, trailCanvas.height);
     trailActive = false;
     trailReleaseTime = null;
+    lastSpawnX = lastSpawnY = null;
     return;
   }
 
@@ -787,6 +829,8 @@ function updateTrail() {
 function startTrailAnimation() {
   trailReleaseTime = null;
   trailActive = true;
+  // The path starts where the blob is now, not where the last trail ended.
+  lastSpawnX = lastSpawnY = null;
 }
 
 function stopTrailAnimation() {
@@ -1034,6 +1078,12 @@ async function initFXChain() {
       FX_BUS_LPF_TO_REVERB,
       "cutoff",
       130.0,
+      // The pad retargets the cutoff on every pointer move, and Autoplay's
+      // first move jumps it from wide open to wherever the pointer sits.
+      // A filter whose cutoff moves in one block clicks; this is the glide
+      // every later /n_set inherits.
+      "cutoff_slide",
+      FX_SLIDE_S,
       "res",
       0.5,
     );
@@ -1050,6 +1100,8 @@ async function initFXChain() {
       FX_BUS_OUTPUT,
       "mix",
       0.3,
+      "mix_slide",
+      FX_SLIDE_S,
       "room",
       0.6,
     );
@@ -1364,6 +1416,63 @@ const padCrosshairV = $("synth-pad-crosshair-v");
 const padXVal = $("pad-x-value");
 const padYVal = $("pad-y-value");
 
+// The blob moves the way the sound does. A pointer move (or Autoplay) sets a
+// target at once: the fx nodes start their slide to it, and the blob takes
+// FX_SLIDE_S to get there. While it is travelling, uiState.padX/padY are
+// where it IS, which is what the trail draws.
+//
+// It carries a velocity, set on each retarget as the distance still to go
+// over the slide time, and each frame advances by that velocity for the time
+// since the LAST FRAME. A tween measured from the last retarget instead could
+// not keep up with a drag: pointer events arrive faster than frames, every
+// event reset its clock, and each frame then advanced by only the few
+// milliseconds since the last event. The lag grew with pointer speed.
+const blob = { x: 0.5, y: 0.5, toX: 0.5, toY: 0.5, vx: 0, vy: 0, last: 0, raf: null };
+
+function paintBlob(x, y) {
+  uiState.padX = x;
+  uiState.padY = y;
+  if (!synthPad) return;
+  const rect = synthPad.getBoundingClientRect();
+  const px = x * rect.width,
+    py = (1 - y) * rect.height;
+  padTouch.style.left = px + "px";
+  padTouch.style.top = py + "px";
+  padCrosshairH.style.top = py + "px";
+  padCrosshairV.style.left = px + "px";
+  if (padXVal) padXVal.textContent = x.toFixed(2);
+  if (padYVal) padYVal.textContent = y.toFixed(2);
+}
+
+// One axis: advance, and stop exactly on the target rather than past it.
+function advance(at, to, v, dt) {
+  if (v === 0) return [to, 0];
+  const next = at + v * dt;
+  return (next - to) * v >= 0 ? [to, 0] : [next, v];
+}
+
+function stepBlob(now) {
+  const dt = Math.min(now - blob.last, 50); // a stalled tab does not teleport the blob
+  blob.last = now;
+  [blob.x, blob.vx] = advance(blob.x, blob.toX, blob.vx, dt);
+  [blob.y, blob.vy] = advance(blob.y, blob.toY, blob.vy, dt);
+  paintBlob(blob.x, blob.y);
+  blob.raf = blob.vx !== 0 || blob.vy !== 0 ? requestAnimationFrame(stepBlob) : null;
+}
+
+function slideBlobTo(x, y) {
+  const ms = FX_SLIDE_S * 1000;
+  blob.toX = x;
+  blob.toY = y;
+  blob.vx = (x - blob.x) / ms;
+  blob.vy = (y - blob.y) / ms;
+  if (blob.raf === null) {
+    blob.last = performance.now();
+    blob.raf = requestAnimationFrame(stepBlob);
+  }
+  updateFXParameters(x, y);
+}
+
 if (synthPad) {
   synthPad.classList.add("disabled");
   $("play-toggle")?.classList.add("disabled");
@@ -1374,22 +1483,10 @@ if (synthPad) {
     const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height));
 
-    uiState.padX = x;
-    uiState.padY = y;
     // Preserve padActive during autoplay (don't let mouse-up override it)
     if (!isAutoPlaying) uiState.padActive = isPadActive;
 
-    const px = x * rect.width,
-      py = (1 - y) * rect.height;
-    padTouch.style.left = px + "px";
-    padTouch.style.top = py + "px";
-    padCrosshairH.style.top = py + "px";
-    padCrosshairV.style.left = px + "px";
-
-    if (padXVal) padXVal.textContent = x.toFixed(2);
-    if (padYVal) padYVal.textContent = y.toFixed(2);
-
-    updateFXParameters(x, y);
+    slideBlobTo(x, y);
   }
 
   function activatePad(clientX, clientY) {
@@ -1466,51 +1563,13 @@ $("play-toggle")?.addEventListener("click", async function () {
     padTouch?.classList.add("active");
     crosshair?.classList.add("active");
 
-    // Animate pointer to top-left area
+    // Park the pointer near the top-left. The blob glides there over the
+    // slide time, and the sound with it.
     if (synthPad && padTouch) {
       const rect = synthPad.getBoundingClientRect();
       const padding = 60;
-      const targetPx = padding;
-      const targetPy = padding;
-
-      // Get current position (default to center if not set)
-      const startPx = parseFloat(padTouch.style.left) || rect.width / 2;
-      const startPy = parseFloat(padTouch.style.top) || rect.height / 2;
-
-      // Enable trail animation
       uiState.padActive = true;
-
-      const duration = 1200; // ms
-      const startTime = performance.now();
-
-      function animatePointer(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        // Ease out cubic for smooth deceleration
-        const eased = 1 - Math.pow(1 - progress, 3);
-
-        const px = startPx + (targetPx - startPx) * eased;
-        const py = startPy + (targetPy - startPy) * eased;
-
-        padTouch.style.left = px + "px";
-        padTouch.style.top = py + "px";
-        if (padCrosshairH) padCrosshairH.style.top = py + "px";
-        if (padCrosshairV) padCrosshairV.style.left = px + "px";
-
-        // Update normalized coordinates (y is inverted: 0=bottom, 1=top)
-        const x = px / rect.width;
-        const y = 1 - py / rect.height;
-        uiState.padX = x;
-        uiState.padY = y;
-        if (padXVal) padXVal.textContent = x.toFixed(2);
-        if (padYVal) padYVal.textContent = y.toFixed(2);
-        updateFXParameters(x, y);
-
-        if (progress < 1) {
-          requestAnimationFrame(animatePointer);
-        }
-      }
-      requestAnimationFrame(animatePointer);
+      slideBlobTo(padding / rect.width, 1 - padding / rect.height);
     }
 
     // Trail animation starts via "started" message for proper sync
@@ -1718,7 +1777,8 @@ $("init-button").addEventListener("click", async () => {
 
     orchestrator.on("ready", async () => {
       updateStatus("loading_assets");
-      if (DEV_MODE) window.orchestrator = orchestrator;
+      // The instance, for the console and for the page tests.
+      window.orchestrator = orchestrator;
 
       // Samples and FX chain are initialized in 'setup' event
       bootPhase = false;

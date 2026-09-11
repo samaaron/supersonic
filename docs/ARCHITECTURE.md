@@ -1,5 +1,16 @@
 # SuperSonic Architecture
 
+> **Since 0.80, SuperSonic runs on [clockwork](https://github.com/samaaron/clockwork)**
+> (the git submodule at `clockwork/`). The substrate described below — the
+> AudioWorklet, the shared-memory rings, the workers, the transports, the
+> clock, metrics and the native device layer — is clockwork's, and
+> clockwork's own docs (`clockwork/docs/`) are the reference for it. What is
+> SuperSonic's is the scsynth guest (`dsp/scsynth`), the JavaScript on top of
+> clockwork's client (`js/supersonic.js` extends `Clockwork`), the native
+> process (`host/`, `front/`) and the packages. The mechanisms below still
+> hold; where a file is named, it now lives under `clockwork/` unless it is
+> one of those.
+
 SuperSonic ports SuperCollider's scsynth audio engine to run in a WebAssembly AudioWorklet. This document explains the architecture and the design decisions behind it.
 
 ## Core Challenges
@@ -219,8 +230,7 @@ Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
 | SAB transport | `js/lib/transport/sab_transport.js` |
 | PM transport | `js/lib/transport/postmessage_transport.js` |
 | Reply worker (SAB only) | `js/workers/osc_in_worker.js` |
-| Prescheduler | `js/workers/osc_out_prescheduler_worker.js` |
-| AudioWorklet | `js/workers/scsynth_audio_worklet.js` |
+| AudioWorklet | `clockwork/js/workers/clockwork_audio_worklet.js` |
 | NTP timing | `js/lib/ntp_timing.js` |
 | WASM entry | `src/audio_processor.cpp` |
 | WASM scheduler | `src/scheduler/EngineScheduler.h` |

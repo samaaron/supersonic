@@ -16,6 +16,13 @@ const MIME_TYPES = {
   ".flac": "audio/flac",
   ".wav": "audio/wav",
   ".scsyndef": "application/octet-stream",
+  // What the example pages load besides the library. A stylesheet served as
+  // octet-stream is refused by the browser, and the pages were being tested
+  // unstyled — which changes what a synthetic press lands on.
+  ".css": "text/css",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".woff2": "font/woff2",
 };
 
 const server = http.createServer((req, res) => {

@@ -1,911 +1,648 @@
-// SPDX-License-Identifier: MIT OR GPL-3.0-or-later
-// Copyright (c) 2025 Sam Aaron
-
-/**
- * SuperSonic - WebAssembly SuperCollider synthesis engine
- * Coordinates SharedArrayBuffer, WASM, AudioWorklet, and IO Workers
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025-2026 Sam Aaron
+/*
+ * supersonic.js — SuperSonic's client: clockwork's, plus what scsynth means.
+ *
+ * Clockwork client is deliberately guest-agnostic. It sends OSC, holds the
+ * clock, manages devices, and knows nothing about synthdefs — a definition
+ * reaches the DSP through a verb the DSP declared, and clockwork never learns
+ * what the bytes are.
+ *
+ * That is right for clockwork and not enough for a product. Sonic Pi asks
+ * SuperSonic to load "sonic-pi-beep", and something has to know that means
+ * fetching sonic-pi-beep.scsyndef and sending it to /d_recv. That knowledge
+ * lives here, on this side of the seam, in the only class that is allowed to
+ * know what an scsyndef is.
  */
-
-import { createTransport, OscChannel } from "./lib/transport/index.js";
-import { readTimetag, getCurrentNTPFromPerformance } from "./lib/osc_classifier.js";
-
-// Re-export OscChannel for use in workers
-export { OscChannel };
+import { Clockwork } from "../clockwork/js/clockwork.js";
 import { BufferManager } from "./lib/buffer_manager.js";
-import { AssetLoader } from "./lib/asset_loader.js";
 import { OSCRewriter } from "./lib/osc_rewriter.js";
-import { extractSynthDefName } from "./lib/synthdef_parser.js";
-import { EventEmitter } from "./lib/event_emitter.js";
-import { MetricsReader } from "./lib/metrics_reader.js";
-import { METRICS_SCHEMA } from "./lib/metrics_schema.js";
-import { SuperClock } from "./lib/superclock.js";
-import { AudioHealthMonitor } from "./lib/audio_health_monitor.js";
-import { AudioCapture } from "./lib/audio_capture.js";
+import * as oscFast from "../clockwork/js/lib/osc_fast.js";
+import { scsynthProfile } from "./scsynth_profile.js";
+import { NODE_TREE_HEADER_SIZE, NODE_TREE_ENTRY_SIZE } from "./lib/node_tree_parser.js";
 import { parseNodeTree } from "./lib/node_tree_parser.js";
-import * as oscFast from "./lib/osc_fast.js";
-// Timeout waiting for /synced response from scsynth
-const SYNC_TIMEOUT_MS = 10000;
-// Timeout waiting for AudioWorklet initialization
-const WORKLET_INIT_TIMEOUT_MS = 5000;
-// Timeout waiting for the worklet's clearSched ack in purge(). A live worklet
-// acks synchronously from its message handler, so this only elapses when the
-// worklet is gone — at which point purge() resolves best-effort so recover()
-// can fall back to reload() instead of hanging.
-const PURGE_ACK_TIMEOUT_MS = 1000;
-// Interval for metrics/tree snapshots in postMessage mode (ms)
-const SNAPSHOT_INTERVAL_MS = 150;
-import { MemoryLayout } from "./memory_layout.js";
-import { defaultWorldOptions } from "./scsynth_options.js";
-import { addWorkletModule } from "./lib/worker_loader.js";
+import { MemoryLayout } from "../clockwork/js/memory_layout.js";
+import { defaultScsynthOptions, validateScsynthOptions, encodeScsynthOptions } from "./scsynth_options.js";
 
+/*
+ * HOW SUPERSONIC SPLITS ITS MEMORY.
+ *
+ * Clockwork hands over one opaque region and never asks what is in it.
+ * scsynth needs two things in there, so the split is decided HERE:
+ *
+ *   inbox().offset ───────── buffer pool  sample frames, grows
+ *
+ * IT USED TO BE TWO. The front of the region was an RT arena for scsynth's
+ * AllocPool, carved here and handed to the engine as a byte offset in a
+ * config-block slot, which the engine read back through a pair of file-scope
+ * externs — the only allocation on any target that did not come from
+ * clockwork::mem. The engine takes its pool from clockwork::mem now (memArenaSize in
+ * memory_layout.js is the span clockwork gives it), so the client no longer
+ * reserves anything here and the whole region is buffers.
+ */
+/* Room in the arena for everything that is not the engine's pool:
+ * clockwork's own heap (CLOCKWORK_HEAP_SIZE, 8MB on this target) and the AllocPool's
+ * area headers. */
+const RT_ARENA_HEADROOM = 16 * 1024 * 1024;
+const BUFFERS_INIT   =  4 * 1024 * 1024;
+const BUFFERS_MAX    = 768 * 1024 * 1024;
+
+/** Refuse a malformed buffer command at the call site rather than in the queue. */
+function validateBufferCommand(address, args) {
+  const int = (i, msg) => { if (!Number.isFinite(args[i])) throw new Error(msg); };
+  const str = (i, msg) => { if (typeof args[i] !== "string") throw new Error(msg); };
+  const blob = (i, msg) => {
+    const v = args[i];
+    if (!(v instanceof Uint8Array || v instanceof ArrayBuffer)) throw new Error(msg);
+  };
+  switch (address) {
+    case "/b_alloc":
+      int(0, "/b_alloc requires a buffer number");
+      int(1, "/b_alloc requires a frame count"); break;
+    case "/b_allocRead":
+      int(0, "/b_allocRead requires a buffer number");
+      str(1, "/b_allocRead requires a file path"); break;
+    case "/b_allocReadChannel":
+      int(0, "/b_allocReadChannel requires a buffer number");
+      str(1, "/b_allocReadChannel requires a file path"); break;
+    case "/b_allocFile":
+      int(0, "/b_allocFile requires a buffer number");
+      blob(1, "/b_allocFile requires audio file data as blob"); break;
+  }
+}
+
+/** The arena scsynth asks for, in bytes, never below what it used to get. */
+/*
+ * The verbs that cannot reach the engine as sent.
+ *
+ * scsynth's allocate-from-a-file commands name a PATH, and the engine has no
+ * filesystem — in a browser it never did. So they are answered on this side:
+ * the material is fetched and decoded here, staged into our slice of guest
+ * memory, and what actually reaches the engine is /b_allocPtr with an
+ * address. Purely a product concern; clockwork forwards verbs it was never
+ * asked to understand.
+ */
 const BUFFER_ALLOC_COMMANDS = new Set([
-  '/b_alloc', '/b_allocRead', '/b_allocReadChannel', '/b_allocFile',
+  "/b_alloc", "/b_allocRead", "/b_allocReadChannel", "/b_allocFile",
 ]);
 
-const HEX = [];
-for (let i = 0; i < 256; i++) HEX[i] = i.toString(16).padStart(2, '0');
+export { OscChannel } from "../clockwork/js/osc_channel.js";
 
-function formatUUID(bytes) {
-  return HEX[bytes[0]] + HEX[bytes[1]] + HEX[bytes[2]] + HEX[bytes[3]] + '-' +
-    HEX[bytes[4]] + HEX[bytes[5]] + '-' + HEX[bytes[6]] + HEX[bytes[7]] + '-' +
-    HEX[bytes[8]] + HEX[bytes[9]] + '-' + HEX[bytes[10]] + HEX[bytes[11]] +
-    HEX[bytes[12]] + HEX[bytes[13]] + HEX[bytes[14]] + HEX[bytes[15]];
-}
+const looksLikePathOrURL = (s) =>
+  s.includes("/") || s.includes("\\") || s.startsWith("http") || s.endsWith(".scsyndef");
 
-function formatUUIDShort(bytes) {
-  return '\u2026' + HEX[bytes[13]] + HEX[bytes[14]] + HEX[bytes[15]];
-}
-
-function formatOscArg(a, maxLen) {
-  if (a && a.type === 'uuid' && a.value) return formatUUIDShort(a.value);
-  if (a instanceof Uint8Array || a instanceof ArrayBuffer) return `<${a.byteLength || a.length} bytes>`;
-  const str = JSON.stringify(a);
-  return maxLen && str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function formatOscArgHtml(arg, address, argIndex) {
-  if (arg && arg.type === 'uuid' && arg.value) {
-    return `<span class="supersonic-scsynth-string" title="${formatUUID(arg.value)}">${formatUUIDShort(arg.value)}</span>`;
-  }
-  let value = arg, type = null;
-  if (typeof arg === 'object' && arg !== null && arg.value !== undefined) {
-    value = arg.value;
-    type = arg.type;
-  }
-  if (type === 'b' || value instanceof Uint8Array || value instanceof ArrayBuffer) {
-    const len = value.byteLength ?? value.length ?? '?';
-    return `<span class="supersonic-scsynth-binary">&lt;${len} bytes&gt;</span>`;
-  }
-  const isFloat = type === 'f' || (type === null && typeof value === 'number' && !Number.isInteger(value));
-  const isInt = type === 'i' || (type === null && Number.isInteger(value));
-  const isSnew = address === '/s_new';
-  const isParam = isSnew && argIndex >= 4 && (argIndex - 4) % 2 === 0 && typeof value === 'string';
-  if (isFloat) return `<span class="supersonic-scsynth-float">${parseFloat(value.toFixed(3))}</span>`;
-  if (isInt) return `<span class="supersonic-scsynth-int">${value}</span>`;
-  if (isParam) return `<span class="supersonic-scsynth-param">${escapeHtml(value)}</span>`;
-  if (typeof value === 'string') return `<span class="supersonic-scsynth-string">${escapeHtml(JSON.stringify(value))}</span>`;
-  return `<span class="supersonic-scsynth-string">${escapeHtml(value)}</span>`;
-}
-
-function formatOscLineHtml(msg, sequence, timestamp, initTime, sourceId) {
-  const address = msg[0];
-  const args = msg.slice(1);
-  const relTime = initTime && timestamp ? (timestamp - initTime).toFixed(2) : '';
-  let html = `<span class="supersonic-scsynth-seq">[${sequence}]</span>`;
-  if (relTime) html += ` <span class="supersonic-scsynth-time">${relTime}</span>`;
-  if (sourceId !== undefined) html += ` <span class="supersonic-scsynth-source">ch${sourceId}</span>`;
-  html += ` <span class="supersonic-scsynth-address">${escapeHtml(address)}</span>`;
-  if (args.length > 0) {
-    const argsHtml = args.map((a, i) => formatOscArgHtml(a, address, i)).join(', ');
-    html += ' ' + argsHtml;
-  }
-  return html;
-}
-
-function formatBundleHtml(decoded, sequence, timestamp, initTime, sourceId) {
-  if (!decoded.packets) return formatOscLineHtml(decoded, sequence, timestamp, initTime, sourceId);
-  if (decoded.packets.length === 1) return formatOscLineHtml(decoded.packets[0], sequence, timestamp, initTime, sourceId);
-  const relTime = initTime && timestamp ? (timestamp - initTime).toFixed(2) : '';
-  let html = `<span class="supersonic-scsynth-seq">[${sequence}]</span>`;
-  if (relTime) html += ` <span class="supersonic-scsynth-time">${relTime}</span>`;
-  if (sourceId !== undefined) html += ` <span class="supersonic-scsynth-source">ch${sourceId}</span>`;
-  html += ` <span class="supersonic-scsynth-bundle">Bundle (${decoded.packets.length})</span>`;
-  for (const pkt of decoded.packets) {
-    const addr = pkt[0];
-    const pktArgs = pkt.slice(1);
-    html += `<br><span class="supersonic-scsynth-address">${escapeHtml(addr)}</span>`;
-    if (pktArgs.length > 0) {
-      html += ' ' + pktArgs.map((a, i) => formatOscArgHtml(a, addr, i)).join(', ');
-    }
-  }
-  return html;
-}
-
-export class SuperSonic {
-  // Expose OSC utilities as static methods (uses plain args, not typed {type, value} format)
-  static osc = {
-    encodeMessage: (address, args) => oscFast.copyEncoded(oscFast.encodeMessage(address, args)),
-    encodeBundle: (timeTag, packets) => oscFast.copyEncoded(oscFast.encodeBundle(timeTag, packets)),
-    decode: (data) => oscFast.decodePacket(data),
-    encodeSingleBundle: (timeTag, address, args) =>
-      oscFast.copyEncoded(oscFast.encodeSingleBundle(timeTag, address, args)),
-    readTimetag: (bundleData) => readTimetag(bundleData),
-    ntpNow: () => getCurrentNTPFromPerformance(),
-    NTP_EPOCH_OFFSET: oscFast.NTP_EPOCH_OFFSET,
-  };
-
+export class SuperSonic extends Clockwork {
   /**
-   * Get schema describing all available metrics with array offsets and UI layout.
+   * The metrics SuperSonic reports: clockwork's, plus scsynth's own.
    *
-   * - `metrics`: each key maps to { offset, type, unit, description } for the merged Uint32Array
-   * - `layout`: panel structure for rendering a metrics UI
-   * - `sentinels`: magic values used in the metrics array
-   *
-   * The `getMetrics()` object API is unchanged — this schema adds array-offset
-   * metadata and a declarative layout on top.
+   * Overriding the static form matters because callers inspect what a product
+   * reports without booting one — the suite does exactly that.
    */
   static getMetricsSchema() {
-    return METRICS_SCHEMA;
+    return Clockwork.mergeGuestMetrics(scsynthProfile);
+  }
+
+  #synthdefBaseURL;
+  #sampleBaseURL;
+  #bufferManager = null;
+  #buffersInit;
+  #buffersMax;
+  #numBuffers;
+  #scsynthOptions;
+  #rewriter = null;
+  #bufferQueue = Promise.resolve();
+  /*
+   * The synthdefs this client has loaded, name → bytes.
+   *
+   * TAU USED TO KEEP THIS and should never have. It watched for
+   * /d_recv, /d_free and /d_freeAll going past — verbs it was handed by one
+   * engine — and kept a copy against a device switch, which asked clockwork
+   * to know which of a guest's messages carry state worth keeping. That went
+   * on 2026-08-31 with the rest of the definition cache, on the understanding
+   * that restore across a rebuild is the client's job. Only the buffer half
+   * of that landed; this is the other half.
+   *
+   * The bytes are kept, not just the names, because restoring means sending
+   * the definition again — a name alone cannot be replayed. They are the same
+   * blobs the caller already handed over, so this costs one reference each.
+   */
+  #loadedSynthDefs = new Map();
+
+  constructor(options = {}) {
+    /*
+     * `scsynthOptions` is what a SuperSonic caller calls the engine's config —
+     * the name the whole suite and Sonic Pi use — and it is scsynth's schema:
+     * numBuffers, maxNodes, maxWireBufs, numRGens, realTimeMemorySize and the
+     * rest. Clockwork knows this object only as opaque bytes it copies into
+     * a region. Its defaults, its validation and its binary layout are all
+     * scsynth knowledge, so all three live here.
+     *
+     * `worldOptions` is still accepted as a spelling of the same thing. It was
+     * clockwork's word for it until 2026-08-31, when "world" went back to
+     * being scsynth's concept rather than everyone's.
+     */
+    const scOpts = { ...defaultScsynthOptions,
+                     ...options.worldOptions, ...options.scsynthOptions };
+    validateScsynthOptions(scOpts);
+    // The guest's vocabulary, unless the caller overrides it. Without this
+    // clockwork falls back to NO_DSP: nothing is cached across a device switch
+    // and sync() refuses, because no verb asks.
+    // The artifact this product ships. clockwork's default name is
+    // deliberately guest-agnostic — it cannot know what its guest compiled to —
+    // so naming the file is SuperSonic's job, the same way declaring the
+    // vocabulary is.
+    const wasmBase = options.wasmBaseURL
+      || (options.baseURL ? `${options.baseURL}wasm/` : null);
+    const wasmUrl = options.wasmUrl
+      || (wasmBase ? `${wasmBase}scsynth-nrt.wasm` : undefined);
+
+    const bufInit  = options.bufferPoolSize ?? BUFFERS_INIT;
+    const bufMax   = options.maxBufferMemory ?? BUFFERS_MAX;
+    const memory   = { ...options.memory };
+    /*
+     * The engine's real-time pool comes out of clockwork's placement arena,
+     * so the arena has to be at least as big as the pool this guest is about
+     * to ask for. scsynth asks in `realTimeMemorySize` KB, which is scsynth's
+     * word, known only here.
+     *
+     * This is the arithmetic that used to size an RT arena inside the guest's
+     * own region and pass its offset to the engine in a config slot. The
+     * region moved and the side channel went; the sum did not change, and it
+     * still belongs to the guest's client rather than to clockwork.
+     *
+     * The headroom covers what else is taken from the same span —
+     * clockwork's own heap, and the pool's area bookkeeping — so a default
+     * config does not land exactly on the boundary.
+     */
+    const rtBytes = scOpts.realTimeMemorySize ?? 8192;
+    memory.memArenaSize = memory.memArenaSize
+      ?? Math.max(MemoryLayout.memArenaSize, rtBytes * 1024 + RT_ARENA_HEADROOM);
+    // /b_allocPtr NAMES A SAMPLE'S POSITION AS AN OFFSET FROM THE INBOX BASE,
+    // never as an address: the guest adds the inbox pointer it was handed at
+    // dsp_new. The buffer manager computes that offset once (laneOffset) and
+    // every sender — here and the OSC rewriter — reads it, so there is one
+    // subtraction to get right. On the web the sum is the address this side
+    // already had; natively the engine maps the lane wherever it likes, and
+    // an address from here would name the wrong bytes without faulting
+    // (dsp_api.h: "OFFSETS, NOT POINTERS").
+    // THE SAMPLE POOL LIVES IN THE INBOX. It is bulk the client writes and the
+    // guest reads in place — /b_allocPtr points a buffer straight at it — which
+    // is what the inbox is for, and it is the region clockwork grows.
+    memory.inboxSize    = memory.inboxSize    ?? bufInit;
+    memory.maxInboxSize = memory.maxInboxSize ?? bufMax;
+
+    super({
+      dsp: scsynthProfile,
+      ...options,
+      memory,
+      // Opaque to clockwork; this class encodes it in encodeGuestConfig.
+      guestOptions: { ...scOpts },
+      // What clockwork needs in its OWN words: the channels it must open on
+      // the audio graph, and the channels it must read from the device.
+      audio: {
+        outputChannels: scOpts.numOutputBusChannels,
+        inputChannels: scOpts.numInputBusChannels,
+      },
+      ...(wasmUrl ? { wasmUrl } : {}),
+    });
+
+    this.#scsynthOptions = { ...scOpts };
+    this.#buffersInit  = bufInit;
+    this.#buffersMax   = bufMax;
+    this.#numBuffers   = scOpts.numBuffers;
+    /*
+     * maxNodes against the mirror's capacity.
+     *
+     * Clockwork warned about this until 2026-08-31, which meant comparing a
+     * number it knew only as `maxNodes` — scsynth's word — against a capacity
+     * it publishes generically. It publishes the capacity; deciding whether it
+     * is enough is arithmetic in the guest's own units, so it happens here.
+     */
+    this.on("ready", () => {
+      // Clockwork publishes the window's SIZE; how many nodes fit is this
+      // guest's arithmetic, the same sum node_tree.h does for
+      // NODE_TREE_MIRROR_MAX_NODES, in the same units.
+      const windowBytes = this.bufferConstants?.SHM_WINDOW_SIZE;
+      if (!windowBytes) return;
+      const mirrorMax = Math.floor((windowBytes - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
+      if (scOpts.maxNodes > mirrorMax) {
+        const needed = NODE_TREE_HEADER_SIZE + scOpts.maxNodes * NODE_TREE_ENTRY_SIZE;
+        console.warn(
+          `SuperSonic: maxNodes (${scOpts.maxNodes}) exceeds `
+          + `NODE_TREE_MIRROR_MAX_NODES (${mirrorMax}). Nodes beyond it play `
+          + `normally but will not appear in getTree(); droppedCount counts `
+          + `them. Rebuild with -DCLOCKWORK_WINDOW_BYTES=${needed} to see them all.`);
+      }
+    });
+
+    this.#sampleBaseURL = options.sampleBaseURL
+      || (options.baseURL ? `${options.baseURL}samples/` : null);
+    // Derived from baseURL when not given, as upstream did: a caller that
+    // co-locates its assets should not have to name each tree.
+    this.#synthdefBaseURL = options.synthdefBaseURL
+      || (options.baseURL ? `${options.baseURL}synthdefs/` : null);
   }
 
   /**
-   * Get schema describing the node tree structure.
-   * Useful for generating UIs or understanding tree data.
+   * Load one synthdef: a bare name, a path or URL, or the bytes themselves.
+   *
+   * A bare name is resolved against synthdefBaseURL — that resolution is the
+   * whole reason this method exists rather than callers using send() directly.
+   */
+  async loadSynthDef(source) {
+    let bytes;
+
+    if (typeof source === "string") {
+      const path = looksLikePathOrURL(source)
+        ? source
+        : (() => {
+            if (!this.#synthdefBaseURL) throw new Error("synthdefBaseURL not configured.");
+            return `${this.#synthdefBaseURL}${source}.scsyndef`;
+          })();
+      // Through clockwork's loader, not a bare fetch: it carries the retry
+      // policy AND emits loading:start / loading:complete, which is how a
+      // client shows progress. A raw fetch works and is silent, so the events
+      // simply never fired.
+      const pathName = (path.split("/").pop() || path).replace(/\.scsyndef$/i, "");
+      const buf = await this.assetLoader.fetch(path, { type: "synthdef", name: pathName });
+      bytes = new Uint8Array(buf);
+
+    } else if (source instanceof ArrayBuffer) {
+      bytes = new Uint8Array(source);
+    } else if (ArrayBuffer.isView(source)) {
+      bytes = new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+    } else if (typeof Blob !== "undefined" && source instanceof Blob) {
+      bytes = new Uint8Array(await source.arrayBuffer());
+    } else {
+      throw new Error(
+        "loadSynthDef source must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob");
+    }
+
+    // The name is read by the DSP's own profile, not by anything here — the
+    // same function clockwork uses to key its definition cache.
+    const name = scsynthProfile.nameOf(bytes);
+    if (!name) {
+      throw new Error("Could not extract synthdef name from the data. Make sure it is a valid .scsyndef file.");
+    }
+
+    // send() records it — this call goes through the same interception a
+    // caller writing /d_recv by hand does, so there is one place that knows
+    // what has been loaded rather than two that can drift.
+    await this.send(scsynthProfile.defineVerb, bytes);
+    // `{name, size}`, not a bare name: callers want to know how much went
+    // over, and the suite reads both. Upstream's shape, kept deliberately.
+    return { name, size: bytes.length };
+  }
+
+  /**
+   * The synthdefs loaded through this client, as a Map of name → bytes.
+   *
+   * Live, not a copy: `.has(name)` and `.size` are what callers and the suite
+   * ask, and handing back a clone on every access would make a hot path out of
+   * a bookkeeping read.
+   */
+  get loadedSynthDefs() { return this.#loadedSynthDefs; }
+
+  /** Several, in parallel. Returns their names in the order given. */
+  async loadSynthDefs(names) {
+    return Promise.all(names.map((n) => this.loadSynthDef(n)));
+  }
+
+  // ── Samples ──────────────────────────────────────────────────────────────
+  //
+  // Clockwork has no idea what a sample is. It reserved a region and will
+  // move opaque bytes into it on request; everything below — decoding,
+  // interleaving, guard frames, the bufnum table — is what scsynth means by a
+  // buffer, so it lives here.
+
+  /**
+   * The buffer manager, built on first use.
+   *
+   * Lazily, because it needs a booted engine: the audio context does the
+   * decoding and the guest region does not exist until memory is initialised.
+   */
+  #buffers() {
+    if (this.#bufferManager) return this.#bufferManager;
+
+    const pool = this.inbox();
+    this.#bufferManager = new BufferManager({
+      clockwork: this,
+      mode: this.mode,
+      audioContext: this.audioContext,
+      sharedBuffer: this.sharedBuffer,
+      wasmMemory: this.wasmMemory,
+      // The whole inbox: nothing is reserved ahead of the pool.
+      bufferPoolConfig: {
+        start: pool.offset,
+        size: this.#buffersInit,
+        maxSize: this.#buffersMax,
+      },
+      maxBufferMemory: this.#buffersMax,
+      assetLoader: this.assetLoader,
+      sampleBaseURL: this.#sampleBaseURL,
+      maxBuffers: this.#numBuffers,
+      onBufferPoolGrowth: (info) => this.emit("buffer:pool:grown", info),
+    });
+
+    this.#rewriter = new OSCRewriter({
+      bufferManager: this.#bufferManager,
+      getDefaultSampleRate: () => this.audioContext?.sampleRate || 44100,
+    });
+
+    // The engine answers an allocation on the egress rather than with /done,
+    // so the completion has to be picked out of the inbound stream.
+    this.on("in:osc", ({ oscData }) => {
+      let msg;
+      try { msg = oscFast.decodePacket(oscData); } catch { return; }
+      const [address, ...args] = msg;
+      if (address === "/supersonic/buffer/allocated") this.#bufferManager?.handleBufferAllocated(args);
+      else if (address === "/supersonic/buffer/freed") this.#bufferManager?.handleBufferFreed(args);
+    });
+
+    return this.#bufferManager;
+  }
+
+  /**
+   * scsynth's config block, in the byte layout its C++ reads.
+   *
+   * Eighteen slots, seventeen of which are scsynth's own fields. Clockwork
+   * wrote them itself until 2026-08-31 — every field name and every index
+   * hardcoded in a guest-agnostic worklet — which meant no other guest could
+   * be configured without editing it. Clockwork reserves the region and
+   * copies these bytes; only this side knows what they say.
+   */
+  encodeGuestConfig(ctx) {
+    return encodeScsynthOptions(this.#scsynthOptions, ctx);
+  }
+
+  /**
+   * Send, intercepting the verbs that must be answered client-side.
+   *
+   * They are queued rather than sent: rewriting is asynchronous — it may
+   * fetch and decode a file — and two allocations racing would interleave
+   * their pointers. The queue keeps them in the order the caller wrote them.
+   */
+  send(address, ...args) {
+    // The definition verbs, tracked on the way past.
+    //
+    // Not intercepted — every one of these still goes to the engine exactly as
+    // written. The client only notes what it will have to put back after a
+    // rebuild, which is the job clockwork gave up when it stopped reading a
+    // guest's messages to find its state.
+    if (address === scsynthProfile.defineVerb) {
+      const blob = args.find((a) => a instanceof ArrayBuffer || ArrayBuffer.isView(a));
+      if (blob) {
+        const bytes = blob instanceof ArrayBuffer
+          ? new Uint8Array(blob)
+          : new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength);
+        // A blob whose name will not parse is still sent — refusing it is the
+        // engine's call, not ours — it simply cannot be replayed later.
+        const name = scsynthProfile.nameOf(bytes);
+        if (name) this.#loadedSynthDefs.set(name, bytes);
+      }
+    } else if (address === scsynthProfile.forgetVerb) {
+      const name = args.find((a) => typeof a === "string");
+      if (name) this.#loadedSynthDefs.delete(name);
+    } else if (address === scsynthProfile.forgetAllVerb) {
+      this.#loadedSynthDefs.clear();
+    }
+
+    if (!BUFFER_ALLOC_COMMANDS.has(address)) return super.send(address, ...args);
+
+    const normalized = args.map((a) => (a instanceof ArrayBuffer ? new Uint8Array(a) : a));
+    // Validated HERE, synchronously, before anything is queued: a caller that
+    // wrote a bad command should have it thrown back at the call, not learn
+    // about it later on the error channel with no stack pointing at them.
+    validateBufferCommand(address, normalized);
+    this.#bufferQueue = this.#bufferQueue
+      .then(async () => {
+        this.#buffers();
+        const { packet } = await this.#rewriter.rewritePacket([address, ...normalized]);
+        return super.send(packet[0], ...packet.slice(1));
+      })
+      .catch((error) => {
+        // The caller has already been handed a void return, so the only way
+        // this can be seen is on the error channel.
+        console.error(`[SuperSonic] ${address} failed:`, error);
+        this.emit?.("error", error);
+      });
+    return undefined;
+  }
+
+  /**
+   * Values for the metrics scsynth_profile declares — flat, by declared name.
+   *
+   * Clockwork used to be handed nested `bufferPoolStats` objects and know
+   * how to unpack them, which put scsynth's shapes inside guest-agnostic
+   * code. It takes declared names and nothing else now.
+   */
+  clientMetrics() {
+    const stats  = this.#bufferManager?.getStats();
+    const growth = this.#bufferManager?.getGrowthStats();
+    return {
+      bufferPoolUsedBytes:      stats?.used?.size ?? 0,
+      bufferPoolAvailableBytes: stats?.available ?? 0,
+      bufferPoolAllocations:    stats?.used?.count ?? 0,
+      bufferPoolTotalCapacity:  growth?.totalCapacity ?? 0,
+      bufferPoolMaxCapacity:    growth?.maxCapacity ?? 0,
+      bufferPoolGrowthCount:    growth?.growthCount ?? 0,
+      bufferPoolPoolCount:      growth?.poolCount ?? 0,
+      loadedSynthDefs:          this.#loadedSynthDefs.size,
+    };
+  }
+
+  /**
+   * Put the sample buffers back after a reload.
+   *
+   * The frames themselves are still in guest memory — a reload rebuilds the
+   * engine, not the region — so this only has to hand the engine the pointers
+   * again. In postMessage mode a buffer that came from a file is reloaded
+   * from it instead, because the client's pool there is bookkeeping and the
+   * worklet's heap went with the engine.
+   */
+  async restoreClientState() {
+    // DEFINITIONS FIRST. A buffer is just frames, but a synth made from a
+    // definition the rebuilt engine has not been given fails at /s_new — so
+    // the definitions go back before anything that might reference them.
+    for (const [name, bytes] of this.#loadedSynthDefs) {
+      try {
+        await super.send(scsynthProfile.defineVerb, bytes);
+      } catch (e) {
+        console.error(`[SuperSonic] synthdef ${name} did not survive the reload:`, e);
+      }
+    }
+
+    const buffers = this.#bufferManager?.getAllocatedBuffers() || [];
+    for (const buf of buffers) {
+      try {
+        if (this.mode === "postMessage" && buf.source?.type === "file") {
+          await this.loadSample(buf.bufnum, buf.source.path,
+                                buf.source.startFrame || 0, buf.source.numFrames || 0);
+        } else {
+          await this.send("/b_allocPtr", buf.bufnum, buf.laneOffset, buf.numFrames,
+                          buf.numChannels, buf.sampleRate, crypto.randomUUID());
+        }
+      } catch (e) {
+        console.error(`[SuperSonic] buffer ${buf.bufnum} did not survive the reload:`, e);
+      }
+    }
+  }
+
+  /**
+   * Full teardown, which forgets what was loaded.
+   *
+   * reset() is shutdown + init, so the engine that comes back has been given
+   * nothing and this client must not claim otherwise. reload() does NOT come
+   * through here — it partially tears down and calls restoreClientState(),
+   * which needs the record intact to put the definitions back.
+   */
+  async shutdown(...args) {
+    this.#loadedSynthDefs.clear();
+    return super.shutdown(...args);
+  }
+
+  /** Settle any queued buffer commands — tests and shutdown both need this. */
+  drainBufferQueue() { return this.#bufferQueue; }
+
+  /**
+   * Sync, after the queued buffer commands have actually gone out.
+   *
+   * Interception makes those commands asynchronous, so a caller that writes
+   * `/b_allocFile` then `sync()` would otherwise pass the barrier before the
+   * allocation had been sent — the barrier would be telling the truth about
+   * an engine that had not yet been asked. Draining first is what makes the
+   * sequence mean what it reads like.
+   */
+  async sync(...args) {
+    await this.#bufferQueue;
+    return super.sync(...args);
+  }
+
+  /**
+   * Load audio into a buffer number.
+   *
+   * `source` may be a path or URL resolved against sampleBaseURL, raw bytes,
+   * or a File/Blob. The frames are decoded, staged into our slice of guest
+   * memory, and the engine is handed the pointer — the bytes never ride OSC.
+   */
+  async loadSample(bufnum, source, startFrame = 0, numFrames = 0) {
+    const buffers = this.#buffers();
+
+    let info;
+    if (typeof source === "string") {
+      info = await buffers.prepareFromFile({ bufnum, path: source, startFrame, numFrames });
+    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
+      info = await buffers.prepareFromBlob({ bufnum, blob: source, startFrame, numFrames });
+    } else if (typeof Blob !== "undefined" && source instanceof Blob) {
+      info = await buffers.prepareFromBlob({
+        bufnum, blob: await source.arrayBuffer(), startFrame, numFrames,
+      });
+    } else {
+      throw new Error("loadSample source must be a path/URL, ArrayBuffer, TypedArray, or Blob");
+    }
+
+    await this.send("/b_allocPtr", bufnum, info.laneOffset, info.numFrames,
+                    info.numChannels, info.sampleRate, info.uuid);
+    await info.allocationComplete;
+
+    const { numFrames: frames, numChannels: channels, sampleRate: sr } = info;
+    return {
+      bufnum,
+      hash: info.hash,
+      source: typeof source === "string" ? source : null,
+      numFrames: frames,
+      numChannels: channels,
+      sampleRate: sr,
+      duration: sr > 0 ? frames / sr : 0,
+    };
+  }
+
+  /** Allocate an empty buffer: the same path, with no material to decode. */
+  async allocSample(bufnum, numFrames, numChannels = 1, sampleRate = null) {
+    const buffers = this.#buffers();
+    const info = await buffers.prepareEmpty({ bufnum, numFrames, numChannels, sampleRate });
+    await this.send("/b_allocPtr", bufnum, info.laneOffset, info.numFrames,
+                    info.numChannels, info.sampleRate, info.uuid);
+    await info.allocationComplete;
+    return { bufnum, numFrames: info.numFrames, numChannels: info.numChannels,
+             sampleRate: info.sampleRate };
+  }
+
+  /** What is loaded, for a client that wants to show it. */
+  // ── The node tree ─────────────────────────────────────────────────────────
+  //
+  // scsynth publishes its tree into the window clockwork reserves. The host
+  // knows only that the window's first word is a version stamp; the shape of
+  // the rest is ours, so the parsing is here rather than there.
+
+  /**
+   * What getTree() and getRawTree() hand back, described for a consumer that
+   * builds a UI or an inspector from the shape rather than from reading this
+   * file. Static, because the shape is a property of this class, not of any
+   * one engine.
+   *
+   * Kept honest against the parser, not against intent: an earlier version
+   * said `id` was a number when getTree() gives a node its UUID whenever it
+   * has one, and left out every v2 field the parser produces. schema.spec.mjs
+   * now compares these against a real tree, so the two cannot drift apart
+   * silently again.
    */
   static getTreeSchema() {
-    const nodeSchema = {
-      id: { type: 'number', description: 'Unique node ID' },
-      type: { type: 'string', values: ['group', 'synth'], description: 'Node type' },
-      defName: { type: 'string', description: 'Synthdef name (synths only, empty for groups)' },
-      children: { type: 'array', description: 'Child nodes (recursive)', itemSchema: '(self)' }
-    };
     return {
-      nodeCount: { type: 'number', description: 'Total nodes in tree' },
-      version: { type: 'number', description: 'Increments on any tree change, useful for detecting updates' },
-      droppedCount: { type: 'number', description: 'Nodes that exceeded mirror capacity (tree may be incomplete)' },
+      nodeCount: { type: 'number', description: 'Nodes present in the mirror' },
+      version: { type: 'number', description: 'Increments on any change; watch it to know when to re-read' },
+      droppedCount: { type: 'number', description: 'Nodes beyond the mirror\'s capacity, absent below' },
       root: {
         type: 'object',
-        description: 'Root node of the tree (always a group with id 0)',
-        schema: nodeSchema
-      }
+        nullable: true,
+        description: 'The root group, or null before the engine has published one',
+        schema: {
+          id: { type: ['uuid', 'number'], description: 'The node\'s UUID (16 bytes) when it has one, else its numeric id' },
+          type: { type: 'string', values: ['group', 'synth'], description: 'Group or synth' },
+          defName: { type: 'string', description: 'Synthdef name; empty for a group' },
+          children: { type: 'array', description: 'Child nodes in sibling order (recursive)', itemSchema: '(self)' },
+        },
+      },
     };
   }
 
   static getRawTreeSchema() {
     return {
-      nodeCount: { type: 'number', description: 'Total nodes in tree' },
-      version: { type: 'number', description: 'Increments on any tree change, useful for detecting updates' },
-      droppedCount: { type: 'number', description: 'Nodes that exceeded mirror capacity (tree may be incomplete)' },
+      nodeCount: { type: 'number', description: 'Nodes present in the mirror' },
+      version: { type: 'number', description: 'Increments on any change; watch it to know when to re-read' },
+      droppedCount: { type: 'number', description: 'Nodes beyond the mirror\'s capacity, absent below' },
       nodes: {
         type: 'array',
-        description: 'Flat array of all nodes with internal linkage pointers',
+        description: 'Every node as the mirror holds it, with its linkage intact',
         itemSchema: {
-          id: { type: 'number', description: 'Unique node ID' },
-          parentId: { type: 'number', description: 'Parent node ID (-1 for root)' },
-          isGroup: { type: 'boolean', description: 'True if group, false if synth' },
-          prevId: { type: 'number', description: 'Previous sibling node ID (-1 if none)' },
-          nextId: { type: 'number', description: 'Next sibling node ID (-1 if none)' },
-          headId: { type: 'number', description: 'First child node ID (groups only, -1 if empty)' },
-          defName: { type: 'string', description: 'Synthdef name (synths only, empty for groups)' }
-        }
-      }
-    };
-  }
-
-  // Private implementation
-  #audioContext;
-  #workletNode;
-  #node = null;
-  #osc;
-  #wasmMemory;
-  #bufferManager;
-  #oscRewriter;
-  #syncListeners;
-  #sampleBaseURL;
-  #synthdefBaseURL;
-  #fetchRetryConfig;
-  #assetLoader;
-  #initialized;
-  #initializing;
-  #initPromise;
-  #capabilities;
-  #version;
-  #config;
-
-  // Extracted modules
-  #eventEmitter;
-  #metricsReader;
-  #superClock;
-  #audioCapture;
-  #audioHealthMonitor;
-
-  // Main thread OscChannel for sending OSC
-  #oscChannel;
-
-  // Node ID counter for PM mode (SAB mode uses shared memory).
-  // Starts at 1000 following sclang convention — 0 is the root group,
-  // 1 is the default group, and 2–999 are left free for manual use.
-  #nodeIdCounter = 1000;
-
-  // Track AudioContext state for recovery detection
-  #previousAudioContextState = null;
-
-  // Cached WASM bytes for fast recover()
-  #cachedWasmBytes = null;
-
-  // Snapshot tracking (postMessage mode)
-  #snapshotsSent = 0;
-
-  // Buffer for early debugRawBatch messages
-  #earlyDebugMessages = [];
-  #debugRawHandler = null;
-
-  // Promise chain for async buffer alloc commands
-  #bufferQueue = Promise.resolve();
-
-  // Cached TypedArray views for scope slots (lazily initialized, avoids per-frame allocations)
-  #scopeViews = null;
-
-  /**
-   * Validate scsynthOptions (worldOptions) at construction time.
-   * Throws descriptive errors for invalid configurations.
-   * @param {Object} opts - The merged world options
-   */
-  #validateWorldOptions(opts) {
-    // Table-driven numeric validation: [name, min, max?]
-    const numericRules = [
-      ['numBuffers', 1, 65535],
-      ['maxNodes', 1],
-      ['maxGraphDefs', 1],
-      ['maxWireBufs', 1],
-      ['numAudioBusChannels', 1],
-      ['numInputBusChannels', 0],
-      ['numOutputBusChannels', 1, 128],
-      ['numControlBusChannels', 1],
-      ['realTimeMemorySize', 1],
-      ['numRGens', 1],
-      ['preferredSampleRate', 0, 384000],
-      ['verbosity', 0, 4],
-    ];
-    for (const [name, min, max] of numericRules) {
-      const v = opts[name];
-      if (typeof v !== 'number' || !Number.isFinite(v)) {
-        throw new Error(`scsynthOptions.${name} must be a finite number, got: ${v}`);
-      }
-      if (v < min) throw new Error(`scsynthOptions.${name} must be >= ${min}, got: ${v}`);
-      if (max !== undefined && v > max) throw new Error(`scsynthOptions.${name} must be <= ${max}, got: ${v}`);
-    }
-
-    // Special cases
-    if (opts.bufLength !== 128) {
-      throw new Error(`scsynthOptions.bufLength must be 128 (WebAudio API constraint), got: ${opts.bufLength}`);
-    }
-    for (const name of ['realTime', 'memoryLocking']) {
-      if (typeof opts[name] !== 'boolean') {
-        throw new Error(`scsynthOptions.${name} must be a boolean, got: ${typeof opts[name]}`);
-      }
-    }
-    if (opts.loadGraphDefs !== 0 && opts.loadGraphDefs !== 1) {
-      throw new Error(`scsynthOptions.loadGraphDefs must be 0 or 1, got: ${opts.loadGraphDefs}`);
-    }
-    if (opts.preferredSampleRate !== 0 && opts.preferredSampleRate < 8000) {
-      throw new Error(`scsynthOptions.preferredSampleRate must be 0 (auto) or >= 8000, got: ${opts.preferredSampleRate}`);
-    }
-  }
-
-  /** Build memory config, syncing rtPoolSize with realTimeMemorySize */
-  #buildMemoryConfig(overrides, scsynthOptions) {
-    const mem = overrides ? { ...MemoryLayout, ...overrides } : { ...MemoryLayout };
-    // Sync rtPoolSize with scsynthOptions.realTimeMemorySize (in KB).
-    // This ensures the SAB region is large enough for the RT pool.
-    const rtMemKB = scsynthOptions?.realTimeMemorySize || defaultWorldOptions.realTimeMemorySize;
-    if (rtMemKB) {
-      mem.rtPoolSize = Math.max(mem.rtPoolSize, rtMemKB * 1024);
-    }
-    // Re-derive computed values since spread loses getters
-    mem.rtPoolOffset = (mem.wasmHeapSize || MemoryLayout.wasmHeapSize) + (mem.ringBufferReserved || MemoryLayout.ringBufferReserved);
-    mem.bufferPoolOffset = mem.rtPoolOffset + mem.rtPoolSize;
-    mem.totalMemory = mem.bufferPoolOffset + mem.bufferPoolSize;
-    mem.maxTotalMemory = mem.bufferPoolOffset + mem.maxBufferPoolSize;
-    return mem;
-  }
-
-  constructor(options = {}) {
-    this.#initialized = false;
-    this.#initializing = false;
-    this.#initPromise = null;
-    this.#capabilities = {};
-    this.#version = null;
-
-    // Initialize extracted modules
-    this.#eventEmitter = new EventEmitter();
-    this.#metricsReader = new MetricsReader({ mode: options.mode || 'postMessage' });
-    this.#audioCapture = new AudioCapture({});
-
-    // Core components
-    this.#audioContext = null;
-    this.#workletNode = null;
-    this.#osc = null;
-    this.#bufferManager = null;
-    this.loadedSynthDefs = new Map();
-
-    // Configuration
-    // baseURL is a convenience shorthand when all assets are co-located
-    // coreBaseURL is for GPL assets (WASM + AudioWorklet) from supersonic-scsynth-core
-    // workerBaseURL is for MIT workers from supersonic-scsynth (the main package)
-    const baseURL = options.baseURL || null;
-    const coreBaseURL = options.coreBaseURL || baseURL;
-    const workerBaseURL = options.workerBaseURL || (baseURL ? `${baseURL}workers/` : null);
-    const wasmBaseURL = options.wasmBaseURL || (coreBaseURL ? `${coreBaseURL}wasm/` : null);
-
-    if (!workerBaseURL || !wasmBaseURL) {
-      throw new Error(
-        `SuperSonic requires explicit URL configuration.\n\n` +
-        `For CDN usage:\n` +
-        `  import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@VERSION/dist/supersonic.js';\n` +
-        `  new SuperSonic({\n` +
-        `    baseURL: 'https://unpkg.com/supersonic-scsynth@VERSION/dist/',\n` +
-        `    coreBaseURL: 'https://unpkg.com/supersonic-scsynth-core@VERSION/',\n` +
-        `  })\n\n` +
-        `For local usage:\n` +
-        `  new SuperSonic({ baseURL: '/path/to/supersonic/dist/' })\n\n` +
-        `See: https://github.com/samaaron/supersonic#configuration`
-      );
-    }
-
-    const worldOptions = { ...defaultWorldOptions, ...options.scsynthOptions };
-    this.#validateWorldOptions(worldOptions);
-    const mode = options.mode || 'postMessage';
-
-    this.#config = {
-      mode: mode,
-      snapshotIntervalMs: options.snapshotIntervalMs ?? SNAPSHOT_INTERVAL_MS,
-      wasmBytes: options.wasmBytes ?? null,
-      wasmUrl: options.wasmUrl || wasmBaseURL + "scsynth-nrt.wasm",
-      wasmBaseURL: wasmBaseURL,
-      workletUrl: options.workletUrl || (coreBaseURL ? `${coreBaseURL}workers/scsynth_audio_worklet.js` : workerBaseURL + "scsynth_audio_worklet.js"),
-      workerBaseURL: workerBaseURL,
-      audioContext: options.audioContext || null,
-      autoConnect: options.autoConnect !== false,
-      audioContextOptions: {
-        latencyHint: "interactive",
-        sampleRate: 48000,
-        ...options.audioContextOptions,
+          id: { type: 'number', nullable: true, description: 'Numeric node id; null for a row the engine surface cannot address' },
+          parentId: { type: 'number', description: 'Parent node id; -1 for the root' },
+          isGroup: { type: 'boolean', description: 'True for a group, false for a synth' },
+          prevId: { type: 'number', description: 'Previous sibling; -1 if none' },
+          nextId: { type: 'number', description: 'Next sibling; -1 if none' },
+          headId: { type: 'number', description: 'First child (groups); -1 if empty' },
+          defName: { type: 'string', description: 'Synthdef name; empty for a group' },
+          uuid: { type: 'uuid', nullable: true, description: '16-byte UUID, or null when the node has none' },
+          parentUuid: { type: 'uuid', nullable: true, description: 'Parent\'s UUID, or null' },
+          outPeak: { type: 'number', description: 'Peak of the node\'s output over the last block' },
+          synthCount: { type: 'number', description: 'Synths under this node, itself included' },
+          listens: { type: 'boolean', description: 'Whether the node subscribes to input' },
+        },
       },
-      memory: this.#buildMemoryConfig(options.memory, options.scsynthOptions),
-      worldOptions: worldOptions,
-      bypassLookaheadMs: options.bypassLookaheadMs ?? 500,
-      activityEvent: {
-        maxLineLength: options.activityEvent?.maxLineLength ?? 200,
-        scsynthMaxLineLength: options.activityEvent?.scsynthMaxLineLength ?? null,
-        oscInMaxLineLength: options.activityEvent?.oscInMaxLineLength ?? null,
-        oscOutMaxLineLength: options.activityEvent?.oscOutMaxLineLength ?? null,
-      },
-      debug: options.debug ?? false,
-      debugScsynth: options.debugScsynth ?? false,
-      debugOscIn: options.debugOscIn ?? false,
-      debugOscOut: options.debugOscOut ?? false,
-      bufferGrowIncrement: options.bufferGrowIncrement ?? (32 * 1024 * 1024),
-    };
-
-    // Compute effective max buffer memory once (used by memory init, buffer manager, PM mode).
-    // Fallback: user option → memory layout default → initial pool size (no growth).
-    this.#config.effectiveMaxBufferMemory = options.maxBufferMemory
-        || this.#config.memory.maxBufferPoolSize
-        || this.#config.memory.bufferPoolSize;
-
-    this.#sampleBaseURL = options.sampleBaseURL || (baseURL ? `${baseURL}samples/` : null);
-    this.#synthdefBaseURL = options.synthdefBaseURL || (baseURL ? `${baseURL}synthdefs/` : null);
-
-    this.#fetchRetryConfig = {
-      maxRetries: options.fetchMaxRetries ?? 3,
-      baseDelay: options.fetchRetryDelay ?? 1000,
-    };
-
-    this.#assetLoader = new AssetLoader({
-      onLoadingEvent: (event, data) => this.#eventEmitter.emit(event, data),
-      maxRetries: this.#fetchRetryConfig.maxRetries,
-      baseDelay: this.#fetchRetryConfig.baseDelay,
-      skipHeadRequests: options.skipHeadRequests ?? false,
-    });
-
-    this.bootStats = {
-      initStartTime: null,
-      initDuration: null,
     };
   }
-
-  // ============================================================================
-  // PUBLIC GETTERS
-  // ============================================================================
-
-  get initialized() { return this.#initialized; }
-  get initializing() { return this.#initializing; }
-
-  // Mirrors C++ SupersonicEngine::isRunning(). Same value as the
-  // `initialized` getter, exposed as a method to match the C++ API shape.
-  isRunning() { return this.#initialized; }
-
-  // Mirrors C++ SupersonicEngine::engineState(). Returns 'stopped',
-  // 'booting', or 'running'. The C++ enum also has 'restarting' and 'error'
-  // values that JS does not currently distinguish — calls to recover/resume
-  // do not surface a separate 'restarting' state from JS.
-  getEngineState() {
-    if (this.#initializing) return 'booting';
-    if (this.#initialized) return 'running';
-    return 'stopped';
-  }
-  get audioContext() { return this.#audioContext; }
-  // SuperClock — engine-wide session-state + time authority.
-  // Available after init() resolves. Read-only reference.
-  get superClock() { return this.#superClock; }
-  get mode() { return this.#config.mode; }
-  get bufferConstants() { return this.#metricsReader.bufferConstants; }
-  get ringBufferBase() { return this.#metricsReader.ringBufferBase; }
-  get sharedBuffer() { return this.#metricsReader.sharedBuffer; }
-  get node() { return this.#node; }
-  get osc() { return this.#osc; }
-
-  /**
-   * NTP time (seconds since 1900) when the AudioContext started.
-   *
-   * @deprecated Use `sonic.superClock.getNTPStartTime()` for the same value, or
-   *   `sonic.superClock.now()` to get the current audio-thread NTP. This getter
-   *   stays for backward compatibility with older callers that did
-   *   `event.timestamp - sonic.initTime`.
-   */
-  get initTime() { return this.#superClock?.getNTPStartTime() ?? 0; }
-
-  // ============================================================================
-  // EVENT EMITTER DELEGATION
-  // ============================================================================
-
-  on(event, callback) { return this.#eventEmitter.on(event, callback); }
-  off(event, callback) { this.#eventEmitter.off(event, callback); return this; }
-  once(event, callback) { return this.#eventEmitter.once(event, callback); }
-  removeAllListeners(event) { this.#eventEmitter.removeAllListeners(event); return this; }
-
-  // ============================================================================
-  // INITIALIZATION
-  // ============================================================================
-
-  async init() {
-    if (this.#initialized) return;
-    if (this.#initPromise) return this.#initPromise;
-
-    this.#initPromise = this.#doInit();
-    return this.#initPromise;
-  }
-
-  async #doInit() {
-    this.#initializing = true;
-    this.bootStats.initStartTime = performance.now();
-
-    try {
-      this.#setAndValidateCapabilities();
-      this.#initializeMemory();
-      this.#initializeAudioContext();
-      this.#initializeBufferManager();
-      this.#initializeOSCRewriter();
-      const wasmBytes = await this.#loadWasm();
-      await this.#initializeAudioWorklet(wasmBytes);
-      await this.#initializeOSC();
-      await this.#finishInitialization();
-    } catch (error) {
-      this.#initializing = false;
-      this.#initPromise = null;
-      console.error("[SuperSonic] Initialization failed:", error);
-      this.#eventEmitter.emit('error', error);
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // METRICS API
-  // ============================================================================
-
-  getMetrics() {
-    return this.#gatherMetrics();
-  }
-
-  /**
-   * Get metrics as a flat Uint32Array for zero-allocation reading.
-   * Returns the same array reference every call — values are updated in-place.
-   * Slots 0-68: SAB/snapshot metrics (slot 69 is struct alignment padding),
-   * 69+: main-thread context metrics.
-   * Use getMetricsSchema().metrics for offset mappings.
-   * @returns {Uint32Array}
-   */
-  getMetricsArray() {
-    this.#updateMergedArray();
-    return this.#metricsReader.getMergedArray();
-  }
-
-  /**
-   * Get a diagnostic snapshot containing metrics, node tree, and memory info.
-   * Useful for debugging timing issues, capturing state for bug reports, etc.
-   * @returns {Object} Snapshot with timestamp, metrics (with descriptions), nodeTree, and memory info
-   */
-  getSnapshot() {
-    const rawMetrics = this.#gatherMetrics();
-    const schemaMetrics = SuperSonic.getMetricsSchema()?.metrics || {};
-
-    // Build metrics with descriptions
-    const metricsWithDescriptions = {};
-    for (const [key, value] of Object.entries(rawMetrics)) {
-      const def = schemaMetrics[key];
-      if (def?.description) {
-        metricsWithDescriptions[key] = {
-          value,
-          description: def.description,
-        };
-      } else {
-        metricsWithDescriptions[key] = { value };
-      }
-    }
-
-    // Get JS heap memory info (Chrome only, non-standard API)
-    let memory = null;
-    if (typeof performance !== 'undefined' && performance.memory) {
-      memory = {
-        usedJSHeapSize: performance.memory.usedJSHeapSize,
-        totalJSHeapSize: performance.memory.totalJSHeapSize,
-        jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
-      };
-    }
-
-    return {
-      timestamp: new Date().toISOString(),
-      metrics: metricsWithDescriptions,
-      nodeTree: this.getRawTree(),
-      memory,
-    };
-  }
-
-  /**
-   * Get a comprehensive system performance report.
-   *
-   * Includes hardware info, audio configuration, Chrome playbackStats (if available),
-   * a cross-browser audio health percentage, and a human-readable health assessment.
-   * Useful for diagnosing audio crackling on constrained hardware.
-   * @returns {Object} SystemReport
-   */
-  getSystemReport() {
-    this.#ensureInitialized('get system report');
-
-    const metrics = this.#gatherMetrics();
-    const issues = [];
-
-    // System info
-    const system = {
-      userAgent: navigator.userAgent,
-      hardwareConcurrency: navigator.hardwareConcurrency ?? null,
-      deviceMemory: navigator.deviceMemory ?? null,
-      platform: navigator.platform,
-    };
-
-    // Audio config
-    const audio = {
-      sampleRate: this.#audioContext.sampleRate,
-      baseLatency: this.#audioContext.baseLatency ?? null,
-      outputLatency: this.#audioContext.outputLatency ?? null,
-      state: this.#audioContext.state,
-      channelCount: this.#config.worldOptions.numOutputBusChannels,
-    };
-
-    // Playback stats (Chrome 146+)
-    const pbStats = this.#capabilities.playbackStats ? this.#audioContext.playbackStats : null;
-    const playbackStats = pbStats ? {
-      glitchCount: pbStats.fallbackFramesEvents,
-      glitchDurationS: pbStats.fallbackFramesDuration,
-      totalDurationS: pbStats.totalFramesDuration,
-      averageLatencyS: pbStats.averageLatency,
-      maximumLatencyS: pbStats.maximumLatency,
-    } : null;
-
-    // Health assessment
-    const healthPct = this.#audioHealthMonitor?.getHealth()?.healthPct ?? 100;
-
-    if (healthPct < 95) {
-      issues.push({
-        severity: healthPct < 80 ? 'critical' : 'warning',
-        message: `Audio health at ${healthPct}% — audio thread may be falling behind`,
-      });
-    }
-    if (metrics.scsynthSchedulerLates > 0) {
-      issues.push({
-        severity: 'warning',
-        message: `${metrics.scsynthSchedulerLates} late bundles in scsynth scheduler`,
-      });
-    }
-    if (metrics.scsynthWasmErrors > 0) {
-      issues.push({
-        severity: 'error',
-        message: `${metrics.scsynthWasmErrors} WASM errors detected`,
-      });
-    }
-    if (pbStats?.fallbackFramesEvents > 0) {
-      issues.push({
-        severity: 'warning',
-        message: `${pbStats.fallbackFramesEvents} audio glitch events (${(pbStats.fallbackFramesDuration * 1000).toFixed(1)}ms total silence)`,
-      });
-    }
-    if (metrics.driftOffsetMs !== undefined && Math.abs(metrics.driftOffsetMs) > 10) {
-      issues.push({
-        severity: 'warning',
-        message: `Clock drift: ${metrics.driftOffsetMs}ms between AudioContext and wall clock`,
-      });
-    }
-
-    const summary = issues.length === 0
-      ? `Audio health: ${healthPct}% — no issues detected`
-      : `Audio health: ${healthPct}% — ${issues.length} issue(s): ${issues.map(i => i.message).join('; ')}`;
-
-    return {
-      timestamp: new Date().toISOString(),
-      system,
-      audio,
-      playbackStats,
-      engine: {
-        mode: this.mode,
-        version: this.#version,
-        bootTimeMs: this.bootStats.initDuration,
-      },
-      health: {
-        audioHealthPct: healthPct,
-        issues,
-        summary,
-      },
-      metrics,
-    };
-  }
-
-  // ============================================================================
-  // TIMING API
-  // ============================================================================
-
-  /**
-   * Set clock offset for multi-system sync (e.g., Ableton Link, NTP server).
-   * This shifts all scheduled bundle execution times by the specified offset.
-   * Positive values mean the shared/server clock is ahead of local time —
-   * bundles with shared-clock timetags are shifted earlier to compensate.
-   * @param {number} offsetS - Offset in seconds
-   */
-  setClockOffset(offsetS) {
-    this.#ensureInitialized('set clock offset');
-    this.#superClock?.setClockOffset(offsetS);
-  }
-
-  // ============================================================================
-  // RECOVERY API
-  // ============================================================================
-
-  /**
-   * Smart recovery - tries quick resume first, falls back to full reload.
-   * Use this when you don't know if a quick resume will work.
-   * @returns {Promise<boolean>} true if audio is running after recovery
-   */
-  async recover() {
-    if (!this.#initialized) return false;
-
-    if (__DEV__) console.log('[Dbg-SuperSonic] Attempting recovery...');
-
-    if (await this.resume()) {
-      if (__DEV__) console.log('[Dbg-SuperSonic] Quick resume succeeded');
-      return true;
-    }
-
-    if (__DEV__) console.log('[Dbg-SuperSonic] Resume failed, doing full reload');
-    return await this.reload();
-  }
-
-  /**
-   * Quick resume - just resumes AudioContext and resyncs timing.
-   * Memory and node tree are preserved. Does NOT emit 'setup' event.
-   * Use when you know the worklet is still running (e.g., tab was just backgrounded briefly).
-   * @returns {Promise<boolean>} true if worklet is running after resume
-   */
-  async resume() {
-    if (!this.#initialized || !this.#audioContext) return false;
-
-    // Clear stale messages before resuming so scheduled events from
-    // before the suspend (e.g. fade-outs) don't interfere with new work
-    await this.purge();
-
-    try {
-      await this.#audioContext.resume();
-    } catch (e) {
-      // Resume may fail
-    }
-
-    this.#superClock?.startDriftTimer();
-
-    const count1 = this.#readProcessCount();
-    if (count1 === null) {
-      // No metrics available yet — check AudioContext state instead
-      const isRunning = this.#audioContext.state === 'running';
-      if (isRunning) {
-        this.#superClock?.resync();
-        this.#eventEmitter.emit('resumed');
-      }
-      return isRunning;
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 200));
-    const count2 = this.#readProcessCount();
-
-    const isRunning = count2 !== null && count2 > count1;
-    if (isRunning) {
-      this.#superClock?.resync();
-      this.#eventEmitter.emit('resumed');
-    }
-
-    return isRunning;
-  }
-
-  /**
-   * Suspend the AudioContext and stop the drift timer.
-   * The worklet remains loaded but processing stops.
-   * The audiocontext statechange listener handles emitting events.
-   */
-  async suspend() {
-    if (!this.#initialized) return;
-    this.#superClock?.stopDriftTimer();
-    try {
-      await this.#audioContext?.suspend();
-    } catch (e) {
-      // Suspend may fail
-    }
-  }
-
-  /**
-   * Full reload - destroys and recreates worklet/WASM, restores synthdefs and buffers.
-   * Emits 'setup' event so you can rebuild groups, FX chains, bus routing.
-   * Use when the worklet was killed (e.g., long background, browser reclaimed memory).
-   * @returns {Promise<boolean>} true if reload succeeded
-   */
-  async reload() {
-    if (!this.#initialized) return false;
-
-    this.#eventEmitter.emit('reload:start');
-
-    const cachedSynthDefs = new Map(this.loadedSynthDefs);
-    const cachedBuffers = this.#bufferManager?.getAllocatedBuffers() || [];
-
-    await this.#partialShutdown();
-    await this.#partialInit();
-
-    // Restore synthdefs
-    for (const [name, data] of cachedSynthDefs) {
-      try {
-        await this.send('/d_recv', data);
-      } catch (e) {
-        console.error(`[SuperSonic] Failed to restore synthdef ${name}:`, e);
-      }
-    }
-
-    // Restore buffers
-    for (const buf of cachedBuffers) {
-      try {
-        if (this.#config.mode === 'postMessage' && buf.source) {
-          if (buf.source.type === 'file') {
-            await this.loadSample(buf.bufnum, buf.source.path, buf.source.startFrame || 0, buf.source.numFrames || 0);
-          }
-        } else {
-          const uuid = crypto.randomUUID();
-          await this.send('/b_allocPtr', buf.bufnum, buf.ptr, buf.numFrames, buf.numChannels, buf.sampleRate, uuid);
-        }
-      } catch (e) {
-        console.error(`[SuperSonic] Failed to restore buffer ${buf.bufnum}:`, e);
-      }
-    }
-
-    if (cachedSynthDefs.size > 0 || cachedBuffers.length > 0) {
-      await this.sync();
-    }
-
-    this.#eventEmitter.emit('reload:complete', { success: true });
-    return true;
-  }
-
-  async #partialShutdown() {
-    this.#superClock?.stopDriftTimer();
-    this.#syncListeners?.clear();
-    this.#syncListeners = null;
-
-    if (this.#osc) {
-      this.#osc.dispose();
-      this.#osc = null;
-    }
-    // Stop forwarding worklet debug batches — the transport is gone. A live
-    // handler here would deref the null #osc when a late batch arrives.
-    this.#debugRawHandler = null;
-
-    if (this.#workletNode) {
-      this.#workletNode.disconnect();
-      this.#workletNode = null;
-    }
-
-    if (this.#audioContext) {
-      await this.#audioContext.close();
-      this.#audioContext = null;
-    }
-
-    this.#initialized = false;
-    this.#scopeViews = null;
-    this.loadedSynthDefs.clear();
-    this.#initPromise = null;
-    this.#oscChannel = null;
-    this.#superClock?.reset();
-    this.#audioHealthMonitor?.reset();
-  }
-
-  async #partialInit() {
-    this.#initializing = true;
-    this.bootStats.initStartTime = performance.now();
-
-    try {
-      this.#initializeAudioContext();
-      if (this.#bufferManager) {
-        this.#bufferManager.updateAudioContext(this.#audioContext);
-      }
-      this.#initializeOSCRewriter();
-      const wasmBytes = await this.#loadWasm();
-      await this.#initializeAudioWorklet(wasmBytes);
-      await this.#initializeOSC();
-      await this.#finishInitialization();
-    } catch (error) {
-      this.#initializing = false;
-      this.#initPromise = null;
-      console.error("[SuperSonic] Partial init failed:", error);
-      this.#eventEmitter.emit('error', error);
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // NODE TREE API
-  // ============================================================================
 
   getRawTree() {
-    if (!this.#initialized) {
-      return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
-    }
-
-    const bc = this.#metricsReader.bufferConstants;
-    if (!bc) {
-      return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
-    }
-
-    let buffer, treeOffset;
-    if (this.#config.mode === 'postMessage') {
-      const snapshot = this.#metricsReader.getSnapshotBuffer();
-      if (!snapshot) {
-        return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
-      }
-      buffer = snapshot;
-      treeOffset = bc.METRICS_SIZE;
-    } else {
-      const sab = this.#metricsReader.sharedBuffer;
-      if (!sab) {
-        return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
-      }
-      buffer = sab;
-      treeOffset = this.#metricsReader.ringBufferBase + bc.NODE_TREE_START;
-    }
-
-    return parseNodeTree(buffer, treeOffset, bc);
+    const w = this.readWindow();
+    if (!w) return { nodeCount: 0, version: 0, droppedCount: 0, nodes: [] };
+    return parseNodeTree(w.buffer, w.offset, w.size);
   }
 
   getTree() {
     const raw = this.getRawTree();
 
-    // One map per node holding both raw + tree representations.
-    // Find the root in the same pass.
+    // One map per node holding both raw + tree representations, finding the
+    // root in the same pass.
     const byId = new Map();
     let rootRaw = null;
     for (const rawNode of raw.nodes) {
@@ -916,1295 +653,69 @@ export class SuperSonic {
         children: [],
       };
       byId.set(rawNode.id, { raw: rawNode, tree });
-      if (rawNode.parentId === -1 || (rawNode.parentId === 0 && rawNode.id === 0)) {
-        rootRaw = rawNode;
-      }
+      if (rawNode.parentId === -1) rootRaw = rawNode;
     }
 
-    // Walk children via headId/nextId — sibling order is the linked-list
-    // order maintained by scsynth, NOT raw.nodes iteration order.
-    // Bound the walk by total node count to make any cycle visible.
-    const maxSteps = byId.size;
-    const populateChildren = (groupId) => {
-      const groupEntry = byId.get(groupId);
-      if (!groupEntry || !groupEntry.raw.isGroup) return;
-      let cur = groupEntry.raw.headId;
-      let steps = 0;
-      while (cur !== -1 && cur !== 0 && steps < maxSteps) {
-        const childEntry = byId.get(cur);
-        if (!childEntry) break;
-        groupEntry.tree.children.push(childEntry.tree);
-        if (childEntry.raw.isGroup) populateChildren(cur);
-        cur = childEntry.raw.nextId;
-        steps++;
+    // Hang each group's children off it IN SIBLING ORDER: from the group's
+    // headId along nextId, which is the order scsynth plays them and the
+    // order /n_order and HEAD-action inserts change. The mirror's row order
+    // is allocation order and says nothing about siblings — walking the rows
+    // instead put every group's children in the order they were created,
+    // which is wrong the moment anything is moved or inserted at the head.
+    for (const { raw: groupRaw, tree: groupTree } of byId.values()) {
+      if (!groupRaw.isGroup) continue;
+      const seen = new Set();
+      for (let id = groupRaw.headId; id !== -1 && !seen.has(id); ) {
+        seen.add(id);                       // a cycle is corruption, not a loop
+        const child = byId.get(id);
+        if (!child) break;
+        groupTree.children.push(child.tree);
+        id = child.raw.nextId;
       }
-    };
-
-    const root = rootRaw ? byId.get(rootRaw.id).tree : null;
-    if (rootRaw) populateChildren(rootRaw.id);
+    }
 
     return {
       nodeCount: raw.nodeCount,
       version: raw.version,
       droppedCount: raw.droppedCount,
-      root: root || { id: 0, type: 'group', defName: '', children: [] }
-    };
-  }
-
-  // ============================================================================
-  // SCOPE API
-  // ============================================================================
-
-  /** @returns {object} Cached TypedArray views for a scope stream slot (lazily created) */
-  #getScopeSlotViews(scopeNum) {
-    if (!this.#scopeViews) {
-      this.#scopeViews = new Array(this.#metricsReader.bufferConstants.SHM_SCOPE_MAX_SCOPES);
-    }
-    let views = this.#scopeViews[scopeNum];
-    if (views) return views;
-
-    const bc = this.#metricsReader.bufferConstants;
-    const sab = this.#metricsReader.sharedBuffer;
-    const base = this.#metricsReader.ringBufferBase;
-    const slotOffset = base + bc.SHM_SCOPE_START + bc.SHM_SCOPE_HEADER_SIZE + scopeNum * bc.SHM_SCOPE_SLOT_SIZE;
-    const ringFrames = bc.SHM_SCOPE_RING_FRAMES;
-
-    // shm_scope_stream layout (shm_scope_stream.hpp): state u32, channels u32,
-    // capacity u32, pad u32, write_position u64, base_engine_frames u64, then
-    // an interleaved float ring of ringFrames * channels.
-    views = {
-      meta: new Uint32Array(sab, slotOffset, 4),
-      cursor: new BigUint64Array(sab, slotOffset + 16, 2), // [write_position, base_engine_frames]
-      data: new Float32Array(sab, slotOffset + bc.SHM_SCOPE_SLOT_HEADER_SIZE,
-                             ringFrames * bc.SHM_SCOPE_CHANNELS),
-      ringFrames,
-    };
-    this.#scopeViews[scopeNum] = views;
-    return views;
-  }
-
-  /**
-   * Get the newest `frames` frames of a ScopeOut2 scope stream.
-   *
-   * The stream is a lossless interleaved ring with a monotonic write cursor
-   * (see docs/scope-streams-sample-clock.md); this copies out the window ending at
-   * the current cursor. SAB mode only for now.
-   *
-   * @param {number} scopeNum - Scope slot index (0 to maxScopes-1)
-   * @param {number} [frames] - Window length; defaults to 1024
-   * @returns {{ frames: number, channels: number, writePosition: bigint, interleaved: Float32Array }|null}
-   */
-  getScope(scopeNum, frames = 1024) {
-    if (!this.#initialized) return null;
-
-    const bc = this.#metricsReader.bufferConstants;
-    if (!bc || bc.SHM_SCOPE_START == null || bc.SHM_SCOPE_MAX_SCOPES == null) return null;
-    if (scopeNum < 0 || scopeNum >= bc.SHM_SCOPE_MAX_SCOPES) return null;
-
-    // TODO: PM mode — read from latest heartbeat snapshot
-    if (!this.#metricsReader.sharedBuffer) return null;
-
-    const views = this.#getScopeSlotViews(scopeNum);
-    if (Atomics.load(views.meta, 0) !== 1) return null;  // free/inactive
-
-    // Untrusted runtime value: clamp so a corrupt slot can't index outside
-    // the ring views.
-    const channels = Math.min(Math.max(views.meta[1], 1), bc.SHM_SCOPE_CHANNELS);
-    const cap = views.ringFrames;
-    const writer = Atomics.load(views.cursor, 0);
-    if (writer === 0n) return null;
-
-    const want = Math.min(frames, cap);
-    const end = writer;
-    let start = end > BigInt(want) ? end - BigInt(want) : 0n;
-    // Stay clear of the region the writer may currently be overwriting.
-    // Same margin formula as the native copy_window: the writer can append
-    // several blocks back-to-back per hardware callback, so stay
-    // SHM_SCOPE_READ_MARGIN_FRAMES (2048, clamped to cap/4 for small rings)
-    // behind the ring's oldest edge — keep in step with shm_scope_stream.hpp.
-    const margin = BigInt(Math.min(cap >> 2, 2048));
-    const oldest = end > BigInt(cap) ? end - BigInt(cap) + margin : 0n;
-    if (start < oldest) start = oldest;
-
-    const real = Number(end - start);
-    const out = new Float32Array(want * channels); // zero-filled lead-in
-    const fill = want - real;
-    let at = Number(start % BigInt(cap));
-    for (let i = 0; i < real; i++) {
-      for (let c = 0; c < channels; c++) {
-        out[(fill + i) * channels + c] = views.data[at * channels + c];
-      }
-      at = (at + 1) % cap;
-    }
-
-    return { frames: want, channels, writePosition: writer, interleaved: out };
-  }
-
-  /**
-   * Get all active scope slots.
-   * @returns {Array<{ index: number, channels: number }>}
-   */
-  getScopes() {
-    if (!this.#initialized) return [];
-
-    const bc = this.#metricsReader.bufferConstants;
-    if (!bc || bc.SHM_SCOPE_START == null || bc.SHM_SCOPE_MAX_SCOPES == null) return [];
-    if (!this.#metricsReader.sharedBuffer) return [];
-
-    const scopes = [];
-    for (let i = 0; i < bc.SHM_SCOPE_MAX_SCOPES; i++) {
-      const views = this.#getScopeSlotViews(i);
-      if (views.meta[0] !== 0) {
-        scopes.push({ index: i, channels: views.meta[1] });
-      }
-    }
-    return scopes;
-  }
-
-  /**
-   * Get scope schema (capacity, ring frames per slot, channels).
-   * @returns {{ maxScopes: number, ringFrames: number, channels: number }|null}
-   */
-  static getScopeSchema() {
-    // Compile-time defaults — matches shared_memory.h SCOPE_ constants.
-    // A proper implementation would read from the WASM buffer layout.
-    return {
-      maxScopes: 32,
-      ringFrames: 16384,
-      channels: 2,
-    };
-  }
-
-  // ============================================================================
-  // AUDIO CAPTURE API
-  //
-  // Slot 0 of shm_audio_buffer is the master output mix, written by the
-  // audio thread's post-block hook (audio_processor.cpp) while the slot's
-  // `enabled` flag is set. startCapture/stopCapture toggle that flag and
-  // read the slot through the SAB.
-  //
-  // Slots 1..N-1 are written by AudioOut2 UGens (DelayUGens.cpp) for
-  // user-driven stem and FX taps; that path is independent of this API.
-  // ============================================================================
-
-  startCapture() {
-    this.#ensureInitialized("start capture");
-    if (!this.#audioCapture.isAvailable()) {
-      throw new Error(
-        "Audio capture is only available in SAB mode (set mode: 'sab').");
-    }
-    this.#audioCapture.start();
-  }
-
-  stopCapture() {
-    this.#ensureInitialized("stop capture");
-    return this.#audioCapture.stop();
-  }
-
-  isCaptureEnabled() {
-    return this.#audioCapture.isEnabled();
-  }
-
-  getCaptureFrames() {
-    return this.#audioCapture.getFrameCount();
-  }
-
-  getMaxCaptureDuration() {
-    return this.#audioCapture.getMaxDuration();
-  }
-
-  // ============================================================================
-  // OSC MESSAGING API
-  // ============================================================================
-
-  send(address, ...args) {
-    this.#ensureInitialized("send OSC messages");
-
-    // Block unsupported commands
-    const blocked = {
-      "/d_load": "Use loadSynthDef() or send /d_recv with synthdef bytes instead.",
-      "/d_loadDir": "Use loadSynthDef() or send /d_recv with synthdef bytes instead.",
-      "/b_read": "Use loadSample() to load audio into a buffer.",
-      "/b_readChannel": "Use loadSample() to load audio into a buffer.",
-      "/b_write": "Writing audio files is not available in the browser.",
-      "/b_close": "Writing audio files is not available in the browser.",
-      "/clearSched": "Use purge() to clear both the JS prescheduler and WASM scheduler.",
-      "/error": "SuperSonic always enables error notifications so you never miss a /fail message.",
-      "/quit": "Use destroy() to shut down SuperSonic.",
-    };
-
-    if (blocked[address]) {
-      throw new Error(`${address} is not supported in SuperSonic. ${blocked[address]}`);
-    }
-
-    // Cache synthdefs for /d_recv
-    if (address === "/d_recv") {
-      const synthdefBytes = args[0];
-      if (synthdefBytes instanceof Uint8Array || synthdefBytes instanceof ArrayBuffer) {
-        const bytes = synthdefBytes instanceof ArrayBuffer ? new Uint8Array(synthdefBytes) : synthdefBytes;
-        const name = extractSynthDefName(bytes) || 'unknown';
-        this.loadedSynthDefs.set(name, bytes);
-      }
-    }
-
-    // Track synthdef frees
-    if (address === "/d_free") {
-      for (const name of args) {
-        if (typeof name === "string") {
-          this.loadedSynthDefs.delete(name);
-        }
-      }
-    } else if (address === "/d_freeAll") {
-      this.loadedSynthDefs.clear();
-    }
-
-    // Normalize ArrayBuffer to Uint8Array for blob args
-    const normalizedArgs = args.map(arg => {
-      if (arg instanceof ArrayBuffer) return new Uint8Array(arg);
-      return arg;
-    });
-
-    // Buffer alloc commands need async rewriting — validate sync, then queue
-    if (BUFFER_ALLOC_COMMANDS.has(address)) {
-      this.#validateBufferCommand(address, normalizedArgs);
-      this.#enqueueBufferCommand(address, normalizedArgs);
-      return;
-    }
-
-    const oscData = SuperSonic.osc.encodeMessage(address, normalizedArgs);
-    this.sendOSC(oscData);
-  }
-
-  sendOSC(oscData) {
-    this.#ensureInitialized("send OSC data");
-
-    const uint8Data = this.#toUint8Array(oscData);
-    this.#sendPreparedOSC(uint8Data);
-  }
-
-  /**
-   * Flush pending OSC from the WASM BundleScheduler and the IN ring.
-   *
-   * Uses a postMessage flag (not the ring buffer) to avoid the race where stale
-   * scheduled bundles would fire before a /clearSched command could be read from
-   * the ring buffer. Resolves when the worklet confirms it is cleared.
-   *
-   * @returns {Promise<void>}
-   */
-  async purge() {
-    this.#ensureInitialized("purge");
-
-    await new Promise(resolve => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.#workletNode.port.removeEventListener('message', handler);
-        resolve();
-      };
-      const handler = (event) => {
-        if (event.data.type === 'clearSchedAck') finish();
-      };
-      // The worklet acks synchronously from its message handler, so a live
-      // worklet — even one whose AudioContext is suspended — replies almost
-      // immediately. A missing ack therefore means the worklet is gone (its
-      // global scope was reclaimed, e.g. a long-backgrounded mobile tab — the
-      // exact case recover() exists to handle). Resolve best-effort on a
-      // timeout so purge()/resume()/recover() can't wedge and recover() falls
-      // through to reload() instead of hanging forever.
-      const timer = setTimeout(() => {
-        if (__DEV__) console.warn('[Dbg-SuperSonic] purge() timed out waiting for clearSchedAck; worklet may be gone');
-        finish();
-      }, PURGE_ACK_TIMEOUT_MS);
-      this.#workletNode.port.addEventListener('message', handler);
-      this.#workletNode.port.postMessage({ type: 'clearSched', ack: true });
-    });
-  }
-
-  /**
-   * Create an OscChannel for direct worker-to-worklet communication
-   *
-   * Returns an OscChannel that can be transferred to a Web Worker,
-   * allowing that worker to send OSC messages directly to the AudioWorklet
-   * without going through the main thread.
-   *
-   * In SAB mode: Returns a channel backed by SharedArrayBuffer (ring buffer writes)
-   * In postMessage mode: Returns a channel backed by MessagePort
-   *
-   * Usage:
-   *   const channel = supersonic.createOscChannel();
-   *   myWorker.postMessage({ channel: channel.transferable }, channel.transferList);
-   *
-   * In worker:
-   *   import { OscChannel } from 'supersonic-scsynth';
-   *   const channel = OscChannel.fromTransferable(event.data.channel);
-   *   channel.send(oscBytes);
-   *
-   * @returns {OscChannel}
-   */
-  createOscChannel(options = {}) {
-    this.#ensureInitialized("create OSC channel");
-    return this.#osc.createOscChannel(options);
-  }
-
-  /**
-   * Get the next unique node ID.
-   *
-   * Returns globally unique scsynth node IDs without coordination conflicts.
-   * IDs start at 1000 following sclang convention — 0 is the root group,
-   * 1 is the default group, and 2–999 are left free for manual use.
-   *
-   * SAB mode uses a single atomic increment per call. PM mode uses
-   * range-based allocation (async pre-fetching is used by worker OscChannels, not the main thread).
-   *
-   * Also available on OscChannel for use in Web Workers.
-   *
-   * @returns {number} A unique node ID (>= 1000)
-   */
-  nextNodeId() {
-    this.#ensureInitialized("allocate node IDs");
-    return this.#oscChannel.nextNodeId();
-  }
-
-  // ============================================================================
-  // ASSET LOADING API
-  // ============================================================================
-
-  async loadSynthDef(source) {
-    this.#ensureInitialized("load synthdef");
-
-    let synthdefData;
-    let synthName;
-
-    if (typeof source === 'string') {
-      // Name or path/URL string
-      let path;
-      if (this.#looksLikePathOrURL(source)) {
-        path = source;
-      } else {
-        if (!this.#synthdefBaseURL) {
-          throw new Error("synthdefBaseURL not configured.");
-        }
-        path = `${this.#synthdefBaseURL}${source}.scsyndef`;
-      }
-
-      // Extract name from path for loading event
-      const pathName = extractSynthDefName(path);
-
-      const arrayBuffer = await this.#assetLoader.fetch(path, { type: 'synthdef', name: pathName });
-      synthdefData = new Uint8Array(arrayBuffer);
-
-      // Extract actual name from binary (more reliable than filename)
-      synthName = extractSynthDefName(synthdefData) || pathName;
-
-    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
-      // Raw bytes (ArrayBuffer or TypedArray like Uint8Array)
-      synthdefData = source instanceof ArrayBuffer
-        ? new Uint8Array(source)
-        : new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
-
-      synthName = extractSynthDefName(synthdefData);
-      if (!synthName) {
-        throw new Error('Could not extract synthdef name from binary data. Make sure it\'s a valid .scsyndef file.');
-      }
-
-    } else if (source instanceof Blob) {
-      // File or Blob
-      const arrayBuffer = await source.arrayBuffer();
-      synthdefData = new Uint8Array(arrayBuffer);
-
-      synthName = extractSynthDefName(synthdefData);
-      if (!synthName) {
-        throw new Error('Could not extract synthdef name from file. Make sure it\'s a valid .scsyndef file.');
-      }
-
-    } else {
-      throw new Error('loadSynthDef source must be a name, path/URL string, ArrayBuffer, Uint8Array, or File/Blob');
-    }
-
-    await this.send("/d_recv", synthdefData);
-
-    return { name: synthName, size: synthdefData.length };
-  }
-
-  async loadSynthDefs(names) {
-    this.#ensureInitialized("load synthdefs");
-
-    const results = {};
-    await Promise.all(
-      names.map(async (name) => {
-        try {
-          await this.loadSynthDef(name);
-          results[name] = { success: true };
-        } catch (error) {
-          results[name] = { success: false, error: error.message };
-        }
-      })
-    );
-    return results;
-  }
-
-  async loadSample(bufnum, source, startFrame = 0, numFrames = 0) {
-    this.#ensureInitialized("load samples");
-
-    let bufferInfo;
-
-    if (typeof source === 'string') {
-      // Path or URL
-      bufferInfo = await this.#bufferManager.prepareFromFile({
-        bufnum, path: source, startFrame, numFrames,
-      });
-    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
-      // ArrayBuffer or TypedArray
-      bufferInfo = await this.#bufferManager.prepareFromBlob({
-        bufnum, blob: source, startFrame, numFrames,
-      });
-    } else if (source instanceof Blob) {
-      // File or Blob - read into ArrayBuffer first
-      const arrayBuffer = await source.arrayBuffer();
-      bufferInfo = await this.#bufferManager.prepareFromBlob({
-        bufnum, blob: arrayBuffer, startFrame, numFrames,
-      });
-    } else {
-      throw new Error('loadSample source must be a path/URL string, ArrayBuffer, TypedArray, or File/Blob');
-    }
-
-    await this.send(
-      "/b_allocPtr", bufnum, bufferInfo.ptr, bufferInfo.numFrames,
-      bufferInfo.numChannels, bufferInfo.sampleRate, bufferInfo.uuid
-    );
-
-    await bufferInfo.allocationComplete;
-    const { numFrames: frames, numChannels: channels, sampleRate: sr } = bufferInfo;
-    return {
-      bufnum,
-      hash: bufferInfo.hash,
-      source: typeof source === 'string' ? source : null,
-      numFrames: frames,
-      numChannels: channels,
-      sampleRate: sr,
-      duration: sr > 0 ? frames / sr : 0,
+      root: rootRaw ? byId.get(rootRaw.id).tree : null,
     };
   }
 
   getLoadedBuffers() {
-    this.#ensureInitialized("get loaded buffers");
-
     const buffers = this.#bufferManager?.getAllocatedBuffers() || [];
     return buffers.map(({ bufnum, numFrames, numChannels, sampleRate, source, hash }) => ({
       bufnum,
       hash: hash || null,
       source: source?.path || source?.name || null,
-      numFrames,
-      numChannels,
-      sampleRate,
+      numFrames, numChannels, sampleRate,
       duration: sampleRate > 0 ? numFrames / sampleRate : 0,
     }));
   }
 
+  /** Read a file's shape without loading it into the engine. */
   async sampleInfo(source, startFrame = 0, numFrames = 0) {
-    this.#ensureInitialized("get sample info");
-
-    let resolvedSource;
-    if (typeof source === 'string') {
-      resolvedSource = source;
-    } else if (source instanceof ArrayBuffer || ArrayBuffer.isView(source)) {
-      resolvedSource = source;
-    } else if (source instanceof Blob) {
-      resolvedSource = await source.arrayBuffer();
-    } else {
-      throw new Error('sampleInfo source must be a path/URL string, ArrayBuffer, TypedArray, or File/Blob');
-    }
-
-    return this.#bufferManager.sampleInfo({ source: resolvedSource, startFrame, numFrames });
-  }
-
-  async sync(syncId = Math.floor(Math.random() * 2147483647)) {
-    this.#ensureInitialized("sync");
-
-    // Drain pending buffer alloc commands so they reach scsynth before /sync
-    await this.#drainBufferQueue();
-
-    const syncPromise = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.#syncListeners?.delete(syncId);
-        reject(new Error("Timeout waiting for /synced response"));
-      }, SYNC_TIMEOUT_MS);
-
-      const messageHandler = () => {
-        clearTimeout(timeout);
-        this.#syncListeners.delete(syncId);
-        resolve();
-      };
-
-      if (!this.#syncListeners) this.#syncListeners = new Map();
-      this.#syncListeners.set(syncId, messageHandler);
-    });
-
-    this.send("/sync", syncId);
-    await syncPromise;
-
-    if (this.#config.mode === 'postMessage') {
-      await new Promise(r => setTimeout(r, this.#config.snapshotIntervalMs * 2));
-    }
-  }
-
-  // ============================================================================
-  // INFO API
-  // ============================================================================
-
-  getInfo() {
-    this.#ensureInitialized("get info");
-
-    return {
-      sampleRate: this.#audioContext.sampleRate,
-      numBuffers: this.#config.worldOptions.numBuffers,
-      totalMemory: this.#config.memory.totalMemory,
-      wasmHeapSize: this.#config.memory.wasmHeapSize,
-      bufferPoolSize: this.#config.memory.bufferPoolSize,
-      bootTimeMs: this.bootStats.initDuration,
-      capabilities: { ...this.#capabilities },
-      version: this.#version,
-    };
-  }
-
-  // ============================================================================
-  // LIFECYCLE API
-  // ============================================================================
-
-  async shutdown() {
-    if (!this.#initialized && !this.#initializing) return;
-
-    this.#eventEmitter.emit("shutdown");
-    this.#superClock?.stopDriftTimer();
-    this.#audioHealthMonitor?.reset();
-    this.#audioHealthMonitor = null;
-    this.#syncListeners?.clear();
-    this.#syncListeners = null;
-
-    if (this.#osc) {
-      this.#osc.dispose();
-      this.#osc = null;
-    }
-    // Stop forwarding worklet debug batches — the transport is gone. A live
-    // handler here would deref the null #osc when a late batch arrives.
-    this.#debugRawHandler = null;
-
-    if (this.#workletNode) {
-      this.#workletNode.disconnect();
-      this.#workletNode = null;
-    }
-
-    if (this.#audioContext) {
-      await this.#audioContext.close();
-      this.#audioContext = null;
-    }
-
-    if (this.#bufferManager) {
-      this.#bufferManager.destroy();
-      this.#bufferManager = null;
-    }
-
-    this.#oscRewriter = null;
-    this.#oscChannel = null;
-    this.#bufferQueue = Promise.resolve();
-    this.#initialized = false;
-    this.#scopeViews = null;
-    this.loadedSynthDefs.clear();
-    this.#initPromise = null;
-    this.#wasmMemory = null;
-    this.#superClock?.reset();
-    this.bootStats = { initStartTime: null, initDuration: null };
-  }
-
-  async destroy() {
-    this.#eventEmitter.emit("destroy");
-    await this.shutdown();
-    this.#cachedWasmBytes = null;
-    this.#eventEmitter.removeAllListeners();
-  }
-
-  async reset() {
-    await this.shutdown();
-    await this.init();
-  }
-
-  // ============================================================================
-  // PRIVATE: INITIALIZATION HELPERS
-  // ============================================================================
-
-  #setAndValidateCapabilities() {
-    this.#capabilities = {
-      audioWorklet: typeof AudioWorklet !== "undefined",
-      sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
-      crossOriginIsolated: window.crossOriginIsolated === true,
-      atomics: typeof Atomics !== "undefined",
-      webWorker: typeof Worker !== "undefined",
-      playbackStats: typeof AudioContext !== "undefined" && 'playbackStats' in AudioContext.prototype,
-    };
-
-    const mode = this.#config.mode;
-    const required = ["audioWorklet", "webWorker"];
-
-    if (mode === 'sab') {
-      required.push("sharedArrayBuffer", "crossOriginIsolated", "atomics");
-    }
-
-    const missing = required.filter((f) => !this.#capabilities[f]);
-
-    if (missing.length > 0) {
-      const error = new Error(`Missing required features for ${mode} mode: ${missing.join(", ")}`);
-      if (mode === 'sab' && !this.#capabilities.crossOriginIsolated) {
-        error.message += "\n\nConsider using mode: 'postMessage' which doesn't require COOP/COEP headers.";
-      }
-      throw error;
-    }
-
-    if (mode !== 'sab' && mode !== 'postMessage') {
-      throw new Error(`Invalid mode: '${mode}'. Use 'sab' or 'postMessage'.`);
-    }
-  }
-
-  #initializeMemory() {
-    const memConfig = this.#config.memory;
-    const mode = this.#config.mode;
-
-    if (mode === 'sab') {
-      // Initial pages must be at least the compile-time minimum (WASM binary constraint).
-      // User overrides that increase bufferPoolSize will increase initial; decreases are clamped.
-      const minPages = MemoryLayout.totalPages;
-      const totalPages = Math.max(Math.ceil(memConfig.totalMemory / 65536), minPages);
-      // For shared WASM memory, maximum must match the compile-time cap.
-      const maxPages = Math.ceil(memConfig.maxTotalMemory / 65536);
-      this.#wasmMemory = new WebAssembly.Memory({
-        initial: totalPages,
-        maximum: maxPages,
-        shared: true,
-      });
-    } else {
-      this.#wasmMemory = null;
-    }
-  }
-
-  #initializeAudioContext() {
-    if (this.#config.audioContext) {
-      this.#audioContext = this.#config.audioContext;
-    } else {
-      this.#audioContext = new AudioContext(this.#config.audioContextOptions);
-    }
-
-    this.#audioContext.addEventListener('statechange', () => {
-      const state = this.#audioContext?.state;
-      if (!state) return;
-
-      const previousState = this.#previousAudioContextState;
-      this.#previousAudioContextState = state;
-
-      if (state === 'running' && (previousState === 'suspended' || previousState === 'interrupted')) {
-        this.#superClock?.resync();
-      }
-
-      this.#eventEmitter.emit('audiocontext:statechange', { state });
-      if (state === 'suspended') {
-        this.#eventEmitter.emit('audiocontext:suspended');
-        this.#audioHealthMonitor?.reset();
-      } else if (state === 'running') {
-        this.#eventEmitter.emit('audiocontext:resumed');
-        this.#audioHealthMonitor?.reset();
-      } else if (state === 'interrupted') {
-        this.#eventEmitter.emit('audiocontext:interrupted');
-        this.#audioHealthMonitor?.reset();
-      }
-    });
-
-    this.#audioHealthMonitor = new AudioHealthMonitor({ audioContext: this.#audioContext });
-  }
-
-  #initializeBufferManager() {
-    const sharedBuffer = this.#config.mode === 'sab' ? this.#wasmMemory.buffer : null;
-
-    this.#bufferManager = new BufferManager({
-      mode: this.#config.mode,
-      audioContext: this.#audioContext,
-      sharedBuffer: sharedBuffer,
-      bufferPoolConfig: {
-        start: this.#config.memory.bufferPoolOffset,
-        size: this.#config.memory.bufferPoolSize,
-        maxSize: this.#config.effectiveMaxBufferMemory,
-      },
-      sampleBaseURL: this.#sampleBaseURL,
-      maxBuffers: this.#config.worldOptions.numBuffers,
-      assetLoader: this.#assetLoader,
-      wasmMemory: this.#wasmMemory,
-      maxBufferMemory: this.#config.effectiveMaxBufferMemory,
-      bufferGrowIncrement: this.#config.bufferGrowIncrement,
-      growFn: this.#config.mode === 'postMessage' ? (pages) => this.#growWorkletMemory(pages) : null,
-      onBufferPoolGrowth: (info) => {
-        if (__DEV__) console.log(`[Dbg-SuperSonic] Buffer pool grew: pool #${info.poolIndex}, +${(info.newBytes / (1024 * 1024)).toFixed(0)}MB, total ${(info.totalCapacity / (1024 * 1024)).toFixed(0)}MB`);
-        this.#eventEmitter.emit('buffer:pool:grown', info);
-      },
-    });
-  }
-
-  #initializeOSCRewriter() {
-    this.#oscRewriter = new OSCRewriter({
-      bufferManager: this.#bufferManager,
-      getDefaultSampleRate: () => this.#audioContext?.sampleRate || 44100,
-    });
-  }
-
-  async #loadWasm() {
-    if (this.#cachedWasmBytes) return this.#cachedWasmBytes;
-
-    const wasmName = this.#config.wasmUrl.split('/').pop();
-
-    // If caller provided pre-fetched WASM bytes, use them directly
-    if (this.#config.wasmBytes) {
-      const wasmBytes = this.#config.wasmBytes;
-      this.#eventEmitter.emit('loading:start', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
-      this.#eventEmitter.emit('loading:complete', { type: 'wasm', name: wasmName, size: wasmBytes.byteLength });
-      this.#cachedWasmBytes = wasmBytes;
-      return wasmBytes;
-    }
-    const wasmBytes = await this.#assetLoader.fetch(this.#config.wasmUrl, { type: 'wasm', name: wasmName });
-    this.#cachedWasmBytes = wasmBytes;
-
-    return wasmBytes;
-  }
-
-  async #initializeAudioWorklet(wasmBytes) {
-    await addWorkletModule(this.#audioContext.audioWorklet, this.#config.workletUrl);
-
-    const numOutputChannels = this.#config.worldOptions.numOutputBusChannels;
-    this.#workletNode = new AudioWorkletNode(this.#audioContext, "scsynth-processor", {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-      outputChannelCount: [numOutputChannels],
-    });
-
-    if (this.#config.autoConnect) {
-      const dest = this.#audioContext.destination;
-      if (numOutputChannels > 2) {
-        dest.channelCount = Math.min(numOutputChannels, dest.maxChannelCount);
-        dest.channelInterpretation = 'discrete';
-      }
-      this.#workletNode.connect(dest);
-    }
-
-    this.#node = this.#createNodeWrapper();
-    this.#workletNode.port.start();
-    this.#setupMessageHandlers();
-
-    const mode = this.#config.mode;
-    const sharedBuffer = mode === 'sab' ? this.#wasmMemory.buffer : null;
-
-    this.#workletNode.port.postMessage({
-      type: "init",
-      mode: mode,
-      sharedBuffer: sharedBuffer,
-      snapshotIntervalMs: this.#config.snapshotIntervalMs,
-    });
-
-    const loadWasmMsg = {
-      type: "loadWasm",
-      wasmBytes: wasmBytes,
-      worldOptions: {
-        ...this.#config.worldOptions,
-        rtPoolOffset: this.#config.memory.rtPoolOffset,
-      },
-      sampleRate: this.#audioContext.sampleRate,
-    };
-
-    if (mode === 'sab') {
-      loadWasmMsg.wasmMemory = this.#wasmMemory;
-    } else {
-      const minPages = MemoryLayout.totalPages;
-      loadWasmMsg.memoryPages = Math.max(Math.ceil(this.#config.memory.totalMemory / 65536), minPages);
-      loadWasmMsg.maxMemoryPages = Math.ceil(this.#config.memory.maxTotalMemory / 65536);
-    }
-
-    this.#workletNode.port.postMessage(loadWasmMsg);
-
-    await this.#waitForWorkletInit();
-    this.#bufferManager.setWorkletPort(this.#workletNode.port);
-  }
-
-  #createNodeWrapper() {
-    const worklet = this.#workletNode;
-    return Object.freeze({
-      connect: (...args) => worklet.connect(...args),
-      disconnect: (...args) => worklet.disconnect(...args),
-      get context() { return worklet.context; },
-      get numberOfOutputs() { return worklet.numberOfOutputs; },
-      get numberOfInputs() { return worklet.numberOfInputs; },
-      get channelCount() { return worklet.channelCount; },
-      // Expose AudioWorkletNode as input for connecting external sources
-      get input() { return worklet; },
-    });
-  }
-
-  async #initializeOSC() {
-    const mode = this.#config.mode;
-    const bc = this.#metricsReader.bufferConstants;
-    const ringBufferBase = this.#metricsReader.ringBufferBase;
-    const sharedBuffer = this.#metricsReader.sharedBuffer;
-
-    // Create transport based on mode
-    const transportConfig = {
-      workerBaseURL: this.#config.workerBaseURL,
-      snapshotIntervalMs: this.#config.snapshotIntervalMs,
-      bypassLookaheadS: this.#config.bypassLookaheadMs / 1000,
-      getAudioContextTime: () => this.#audioContext?.currentTime ?? 0,
-      getNTPStartTime: () => this.#superClock?.getNTPStartTime() ?? 0,
-    };
-
-    if (mode === 'sab') {
-      transportConfig.sharedBuffer = sharedBuffer;
-      transportConfig.ringBufferBase = ringBufferBase;
-      transportConfig.bufferConstants = bc;
-
-      // Initialize node ID counter in shared memory.
-      // Starts at 1000 following sclang convention — 0 is the root group,
-      // 1 is the default group, and 2–999 are left free for manual use.
-      if (bc?.NODE_ID_COUNTER_START !== undefined) {
-        const counterBase = ringBufferBase + bc.NODE_ID_COUNTER_START;
-        const counterView = new Int32Array(sharedBuffer, counterBase, 1);
-        Atomics.store(counterView, 0, 1000);
-      }
-    } else {
-      // PM mode: provide a node ID source function
-      this.#nodeIdCounter = 1000;
-      transportConfig.nodeIdSource = (rangeSize) => {
-        const from = this.#nodeIdCounter;
-        this.#nodeIdCounter += rangeSize;
-        return { from, to: from + rangeSize };
-      };
-
-      // PM mode: provision the AudioWorklet with its own node ID range
-      // for the C++ UUID rewriter (same protocol as OscChannel workers)
-      const workletNodeIdRangeSize = 10000;
-      const workletRange = transportConfig.nodeIdSource(workletNodeIdRangeSize);
-      const nodeIdChannel = new MessageChannel();
-      const nodeIdSource = transportConfig.nodeIdSource;
-      nodeIdChannel.port1.onmessage = (e) => {
-        if (e.data.type === 'requestNodeIdRange') {
-          const r = nodeIdSource(workletNodeIdRangeSize);
-          nodeIdChannel.port1.postMessage({ type: 'nodeIdRange', from: r.from, to: r.to });
-        }
-      };
-      this.#workletNode.port.postMessage(
-        { type: 'nodeIdRange', from: workletRange.from, to: workletRange.to },
-        [nodeIdChannel.port2]
-      );
-    }
-
-    this.#osc = createTransport(mode, transportConfig);
-
-    // Handle raw OSC replies - parse and dispatch
-    this.#osc.onReply((oscData, sequence, timestamp) => {
-      // Emit raw message event with timing info
-      const scheduledTime = oscFast.getBundleTimeTag(oscData) || null;
-      this.#eventEmitter.emit('in:osc', { oscData, sequence, timestamp, scheduledTime });
-
-      // Parse OSC and emit parsed message
-      try {
-        const msg = oscFast.decodePacket(oscData);
-
-        // Handle special messages (msg is [address, ...args])
-        const address = msg[0];
-        const args = msg.slice(1);
-        if (address === "/supersonic/debug") {
-          // Debug log lines ride the egress as /supersonic/debug — surface them on
-          // the 'debug' event, not the regular OSC-in stream.
-          const eventMaxLen = this.#config.activityEvent.scsynthMaxLineLength ?? this.#config.activityEvent.maxLineLength;
-          let text = args[0] ?? '';
-          if (eventMaxLen > 0 && text.length > eventMaxLen) text = text.slice(0, eventMaxLen) + '...';
-          this.#eventEmitter.emit('debug', { text, sequence, timestamp });
-          return;
-        } else if (address === "/supersonic/buffer/freed") {
-          this.#bufferManager?.handleBufferFreed(args);
-        } else if (address === "/supersonic/buffer/allocated") {
-          this.#bufferManager?.handleBufferAllocated(args);
-        } else if (address === "/synced" && args.length > 0) {
-          const syncId = args[0];
-          if (this.#syncListeners?.has(syncId)) {
-            this.#syncListeners.get(syncId)(msg);
-          }
-        }
-
-        this.#eventEmitter.emit('in', msg);
-
-        if (this.#eventEmitter.hasListeners('in:text') || this.#config.debug || this.#config.debugOscIn) {
-          const maxLen = this.#config.activityEvent.oscInMaxLineLength ?? this.#config.activityEvent.maxLineLength;
-          const argsStr = args.map(a => formatOscArg(a, maxLen)).join(', ') || '';
-          const text = `${address}${argsStr ? ' ' + argsStr : ''}`;
-          this.#eventEmitter.emit('in:text', { text, sequence, timestamp });
-        }
-
-        if (this.#eventEmitter.hasListeners('in:html')) {
-          const html = formatOscLineHtml(msg, sequence, timestamp, this.initTime);
-          this.#eventEmitter.emit('in:html', { html, sequence, timestamp });
-        }
-      } catch (e) {
-        console.error('[SuperSonic] Failed to decode OSC message:', e);
-      }
-    });
-
-    // Debug arrives as /supersonic/debug on the OSC-in path above.
-
-    // Handle errors
-    this.#osc.onError((error, workerName) => {
-      console.error(`[SuperSonic] ${workerName} error:`, error);
-      this.#eventEmitter.emit('error', new Error(`${workerName}: ${error}`));
-    });
-
-    // Handle centralized OSC out logging (from worklet)
-    this.#osc.onOscLog((entries) => {
-      for (const entry of entries) {
-        const scheduledTime = oscFast.getBundleTimeTag(entry.oscData) || null;
-        this.#eventEmitter.emit('out:osc', {
-          oscData: entry.oscData,
-          sourceId: entry.sourceId,
-          sequence: entry.sequence,
-          timestamp: entry.timestamp,
-          scheduledTime,
-        });
-
-        const needsDecode = this.#eventEmitter.hasListeners('out') ||
-          this.#eventEmitter.hasListeners('out:text') ||
-          this.#eventEmitter.hasListeners('out:html') ||
-          this.#config.debug || this.#config.debugOscOut;
-        if (needsDecode) {
-          try {
-            const msg = oscFast.decodePacket(entry.oscData);
-            this.#eventEmitter.emit('out', msg);
-
-            if (this.#eventEmitter.hasListeners('out:text') || this.#config.debug || this.#config.debugOscOut) {
-              const maxLen = this.#config.activityEvent.oscOutMaxLineLength ?? this.#config.activityEvent.maxLineLength;
-              const outAddr = msg[0];
-              const outArgs = msg.slice(1);
-              const argsStr = outArgs.map(a => formatOscArg(a, maxLen)).join(', ');
-              const text = `${outAddr}${argsStr ? ' ' + argsStr : ''}`;
-              this.#eventEmitter.emit('out:text', { text, sequence: entry.sequence, timestamp: entry.timestamp });
-            }
-
-            if (this.#eventEmitter.hasListeners('out:html')) {
-              const html = formatBundleHtml(msg, entry.sequence, entry.timestamp, this.initTime, entry.sourceId);
-              this.#eventEmitter.emit('out:html', { html, sequence: entry.sequence, timestamp: entry.timestamp });
-            }
-          } catch (e) { /* skip decoded events on decode failure */ }
-        }
-      }
-    });
-
-    // Internal console debug listeners
-    if (this.#config.debug || this.#config.debugOscIn) {
-      this.on('in:text', ({ text }) => console.log(`[← OSC] ${text}`));
-    }
-    if (this.#config.debug || this.#config.debugOscOut) {
-      this.on('out:text', ({ text }) => console.log(`[OSC →] ${text}`));
-    }
-    if (this.#config.debug || this.#config.debugScsynth) {
-      this.on('debug', (msg) => console.log(`[synth] ${msg.text}`));
-    }
-
-    // Initialize transport
-    if (mode === 'sab') {
-      await this.#osc.initialize();
-    } else {
-      await this.#osc.initialize(this.#workletNode.port);
-
-      // PM mode: pass bufferConstants to transport for decoder worker
-      this.#osc.setBufferConstants(bc);
-
-      // Handle early debug messages that arrived before transport was ready
-      if (this.#earlyDebugMessages?.length > 0) {
-        for (const data of this.#earlyDebugMessages) {
-          this.#osc.handleDebugRaw(data);
-        }
-      }
-      // Optional-chain #osc: a debugRawBatch queued from the old worklet can
-      // be dispatched during reload()/teardown after #osc has been nulled.
-      this.#debugRawHandler = (data) => this.#osc?.handleDebugRaw(data);
-      this.#earlyDebugMessages = [];
-    }
-
-    // Create main-thread OscChannel for sendOSC()
-    // Main thread uses sourceId 0, workers get 1+
-    this.#oscChannel = this.#osc.createOscChannel({ sourceId: 0 });
-  }
-
-  async #finishInitialization() {
-    this.#initialized = true;
-    this.#initializing = false;
-    this.bootStats.initDuration = performance.now() - this.bootStats.initStartTime;
-
-    await this.#eventEmitter.emitAsync('setup');
-    this.#eventEmitter.emit('ready', { capabilities: this.#capabilities, bootStats: this.bootStats });
-
-    // TODO(v1): Consider whether to keep this dev console helper.
-    // It auto-registers instances to window.__supersonic__ for quick debugging (ss.metrics(), ss.tree(), etc.)
-    // Unusual pattern - most libs expect devs to do `window.sonic = sonic` themselves.
-    // Useful but the `instances` array for multiple engines is over-engineered.
-    if (__DEV__ && typeof window !== 'undefined') {
-      if (!window.__supersonic__) {
-        const ss = window.__supersonic__ = { instances: [] };
-        Object.defineProperties(ss, {
-          primary: { get: () => ss.instances[0] },
-          layout: { get: () => ss.primary?.bufferConstants },
-        });
-        ss.metrics = () => ss.primary?.getMetrics();
-        ss.tree = () => ss.primary?.getTree();
-        ss.rawTree = () => ss.primary?.getRawTree();
-        ss.snapshot = () => ss.primary?.getSnapshot();
-      }
-      window.__supersonic__.instances.push(this);
-    }
-  }
-
-  #waitForWorkletInit() {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error("AudioWorklet initialization timeout"));
-      }, WORKLET_INIT_TIMEOUT_MS);
-
-      const messageHandler = async (event) => {
-        if (event.data.type === "error") {
-          clearTimeout(timeout);
-          this.#workletNode.port.removeEventListener("message", messageHandler);
-          reject(new Error(event.data.error || "AudioWorklet error"));
-          return;
-        }
-
-        if (event.data.type === "initialized") {
-          clearTimeout(timeout);
-          this.#workletNode.port.removeEventListener("message", messageHandler);
-
-          if (event.data.success) {
-            const ringBufferBase = event.data.ringBufferBase ?? 0;
-            const bufferConstants = event.data.bufferConstants;
-            const sharedBuffer = this.#config.mode === 'sab' ? this.#wasmMemory.buffer : null;
-
-            // Initialize metrics reader
-            this.#metricsReader.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
-
-            // Warn if maxNodes exceeds mirror capacity
-            const maxNodes = this.#config.worldOptions?.maxNodes ?? 1024;
-            const mirrorMax = bufferConstants?.NODE_TREE_MIRROR_MAX_NODES ?? 1024;
-            if (maxNodes > mirrorMax) {
-              console.warn(
-                `SuperSonic: maxNodes (${maxNodes}) exceeds NODE_TREE_MIRROR_MAX_NODES (${mirrorMax}). ` +
-                `The node tree mirror will not show all nodes. Rebuild with NODE_TREE_MIRROR_MAX_NODES=${maxNodes} to fix.`
-              );
-            }
-
-            // Initialize NTP timing
-            this.#superClock = new SuperClock({
-              mode: this.#config.mode,
-              audioContext: this.#audioContext,
-              workletPort: this.#workletNode.port,
-            });
-            this.#superClock.initSharedViews(sharedBuffer, ringBufferBase, bufferConstants);
-            await this.#superClock.initialize();
-            this.#superClock.startDriftTimer();
-
-            // Initialize audio capture (SAB mode only)
-            if (this.#config.mode === 'sab') {
-              this.#audioCapture.update(sharedBuffer, ringBufferBase, bufferConstants);
-            }
-
-            // PostMessage mode: set initial snapshot
-            if (this.#config.mode === 'postMessage' && event.data.initialSnapshot) {
-              this.#metricsReader.updateSnapshot(event.data.initialSnapshot);
-            }
-
-            resolve();
-          } else {
-            reject(new Error(event.data.error || "AudioWorklet initialization failed"));
-          }
-        }
-      };
-
-      this.#workletNode.port.addEventListener("message", messageHandler);
-      this.#workletNode.port.start();
-    });
-  }
-
-  /** Ask the worklet to grow its WASM memory (postMessage mode only) */
-  #growWorkletMemory(pages) {
-    return new Promise((resolve) => {
-      const growId = crypto.randomUUID();
-      const handler = (event) => {
-        if (event.data.type === 'memoryGrown' && event.data.growId === growId) {
-          this.#workletNode.port.removeEventListener('message', handler);
-          resolve(event.data.success);
-        }
-      };
-      this.#workletNode.port.addEventListener('message', handler);
-      this.#workletNode.port.postMessage({ type: 'growMemory', growId, pages });
-    });
-  }
-
-  #setupMessageHandlers() {
-    this.#workletNode.port.addEventListener('message', (event) => {
-      const { data } = event;
-
-      switch (data.type) {
-        case "error":
-          console.error("[Worklet] Error:", data.error);
-          this.#eventEmitter.emit('error', new Error(data.error));
-          break;
-
-        case "version":
-          this.#version = data.version;
-          break;
-
-        case "snapshot":
-          if (data.buffer) {
-            this.#metricsReader.updateSnapshot(data.buffer);
-            this.#snapshotsSent = data.snapshotsSent;
-          }
-          break;
-
-        case "debugRawBatch":
-          if (this.#debugRawHandler) {
-            this.#debugRawHandler(data);
-          } else if (this.#earlyDebugMessages) {
-            this.#earlyDebugMessages.push(data);
-          }
-          break;
-
-        // Note: oscLog is handled directly by the PM transport's #handleWorkletMessage
-        // and by the SAB transport's osc_out_log_sab_worker — no forwarding needed here.
-      }
-    });
-  }
-
-  // ============================================================================
-  // PRIVATE: METRICS
-  // ============================================================================
-
-  #metricsContext() {
-    return {
-      transportMetrics: this.#osc?.getMetrics(),
-      driftOffsetMs: this.#superClock?.getDriftOffset() ?? 0,
-      ntpStartTime: this.#superClock?.getNTPStartTime() ?? 0,
-      clockOffsetMs: this.#superClock?.getClockOffset() ?? 0,
-      audioContextState: this.#audioContext?.state || "unknown",
-      bufferPoolStats: this.#bufferManager?.getStats(),
-      bufferPoolGrowthStats: this.#bufferManager?.getGrowthStats(),
-      loadedSynthDefsCount: this.loadedSynthDefs?.size || 0,
-      audioHealthPct: this.#audioHealthMonitor?.update() ?? 100,
-      playbackStats: this.#capabilities.playbackStats ? this.#audioContext?.playbackStats : null,
-    };
-  }
-
-  #gatherMetrics() {
-    return this.#metricsReader.gatherMetrics(this.#metricsContext());
-  }
-
-  #updateMergedArray() {
-    this.#metricsReader.updateMergedArray(this.#metricsContext());
-  }
-
-  // ============================================================================
-  // PRIVATE: UTILITIES
-  // ============================================================================
-
-  #readProcessCount() {
-    if (this.#config.mode === 'sab') {
-      const view = this.#metricsReader.getMetricsView();
-      return view ? view[0] : null;
-    }
-    const buffer = this.#metricsReader.getSnapshotBuffer();
-    if (!buffer) return null;
-    return new Uint32Array(buffer, 0, 1)[0];
-  }
-
-  #ensureInitialized(actionDescription = "perform this operation") {
-    if (!this.#initialized) {
-      throw new Error(`SuperSonic not initialized. Call init() before attempting to ${actionDescription}.`);
-    }
-  }
-
-  #looksLikePathOrURL(str) {
-    return str.includes("/") || str.includes("://");
-  }
-
-  #toUint8Array(data) {
-    if (data instanceof Uint8Array) return data;
-    if (data instanceof ArrayBuffer) return new Uint8Array(data);
-    throw new Error("oscData must be ArrayBuffer or Uint8Array");
-  }
-
-  #sendPreparedOSC(preparedData) {
-    // A message larger than the IN ring can never be delivered — fail loudly
-    // rather than dropping it silently in the ring writer.
-    const bc = this.#metricsReader?.bufferConstants;
-    const maxSize = bc?.IN_BUFFER_SIZE;
-    if (maxSize && preparedData.length > maxSize - 16 /* Message header */) {
-      throw new Error(
-        `OSC message too large to send (${preparedData.length} > ${maxSize - 16} bytes)`
-      );
-    }
-
-    // Dumb send: frame the bytes onto the IN ring (SAB) or postMessage them (PM).
-    // The audio thread classifies + schedules (OscIngress + BundleScheduler).
-    // A SAB write that loses the lock race / hits a full ring is dropped and
-    // counted as ringBufferDirectWriteFails (no fallback) — not silent.
-    this.#oscChannel.send(preparedData);
-  }
-
-  #validateBufferCommand(address, args) {
-    const requireInt = (idx, msg) => {
-      const v = args[idx];
-      if (!Number.isFinite(v)) throw new Error(msg);
-    };
-    const requireString = (idx, msg) => {
-      if (typeof args[idx] !== 'string') throw new Error(msg);
-    };
-    const requireBlob = (idx, msg) => {
-      const v = args[idx];
-      if (!(v instanceof Uint8Array || v instanceof ArrayBuffer)) throw new Error(msg);
-    };
-
-    switch (address) {
-      case '/b_alloc':
-        requireInt(0, '/b_alloc requires a buffer number');
-        requireInt(1, '/b_alloc requires a frame count');
-        break;
-      case '/b_allocRead':
-        requireInt(0, '/b_allocRead requires a buffer number');
-        requireString(1, '/b_allocRead requires a file path');
-        break;
-      case '/b_allocReadChannel':
-        requireInt(0, '/b_allocReadChannel requires a buffer number');
-        requireString(1, '/b_allocReadChannel requires a file path');
-        break;
-      case '/b_allocFile':
-        requireInt(0, '/b_allocFile requires a buffer number');
-        requireBlob(1, '/b_allocFile requires audio file data as blob');
-        break;
-    }
-  }
-
-  #enqueueBufferCommand(address, args) {
-    this.#bufferQueue = this.#bufferQueue.then(async () => {
-      const message = [address, ...args];
-      const { packet } = await this.#oscRewriter.rewritePacket(message);
-      const oscData = SuperSonic.osc.encodeMessage(packet[0], packet.slice(1));
-      this.#sendPreparedOSC(oscData);
-    }).catch((error) => {
-      console.error(`[SuperSonic] Buffer command ${address} failed:`, error);
-      this.#eventEmitter.emit('error', error);
-    });
-  }
-
-  #drainBufferQueue() {
-    return this.#bufferQueue;
+    const src = (typeof Blob !== "undefined" && source instanceof Blob)
+      ? await source.arrayBuffer() : source;
+    return this.#buffers().sampleInfo({ source: src, startFrame, numFrames });
   }
 }
 
-// Re-export curated osc utilities for direct use in workers (zero-allocation OSC encoding)
+/*
+ * The OSC codec, re-exported.
+ *
+ * Clockwork publishes it (`export const osc` in js/clockwork.js) and upstream
+ * SuperSonic published it too, as `SuperSonic.osc`. This client extends
+ * Clockwork rather than re-declaring its surface, and a `class ... extends`
+ * inherits STATICS but says nothing about MODULE exports — so `osc` silently
+ * stopped being importable from the product's entry point while remaining
+ * importable from the substrate's.
+ *
+ * Anything importing it from here got `undefined` and failed at first use,
+ * far from the missing line: the demo's scheduler worker builds every note
+ * with osc.encodeMessage, so the whole page loaded, reported "engine ready",
+ * and made no sound at all.
+ */
 export const osc = SuperSonic.osc;
+
+export default SuperSonic;

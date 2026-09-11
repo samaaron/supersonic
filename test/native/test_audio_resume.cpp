@@ -208,11 +208,11 @@ TEST_CASE("AudioResume: LATE count does not spike after short pause",
 // all, and reading the shared output bus while that driver writes it is a data
 // race (TSan reports it under clang; gcc's libtsan did not).
 //
-// manualAudioPump starts no audio source (see SupersonicEngine::startAudioSource),
+// manualAudioPump starts no audio source (see ClockworkEngine::startAudioSource),
 // leaving the test thread the sole caller of process_audio() and of the callback,
 // which is what makes the buffers below safe to read.
 
-static SupersonicEngine::Config manualPumpConfig() {
+static ClockworkEngine::Config manualPumpConfig() {
     auto cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     return cfg;
@@ -220,7 +220,7 @@ static SupersonicEngine::Config manualPumpConfig() {
 
 // One simulated device callback into caller-owned buffers. Inputs are declared
 // absent (nullptr, 0 channels) so the callback skips its input accumulator. A
-// default context carries hostTimeNs == nullptr, selecting the SuperClock host
+// default context carries hostTimeNs == nullptr, selecting the ClockworkClock host
 // time fallback, which is what a backend that supplies no timestamp produces.
 static void driveCallback(JuceAudioCallback& cb,
                           float* left, float* right, int numSamples) {

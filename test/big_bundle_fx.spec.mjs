@@ -25,7 +25,7 @@ test.describe("Big bundle FX setup", () => {
       await sonic.init();
       await sonic.sync();
 
-      // Create base group 100 (tau-cam does this at boot via send())
+      // Create base group 100 (clockwork-cam does this at boot via send())
       await sonic.send("/g_new", 100, 0, 0);
       await sonic.sync();
 
@@ -95,7 +95,7 @@ test.describe("Big bundle FX setup", () => {
       // Wrap all 24 packets into one timed bundle — scheduling in audio
       // time so headless test environments where AudioContext lags wall
       // clock still reliably reach the timestamp.
-      const ntpNow = sonic.superClock.now() + 0.05;
+      const ntpNow = sonic.clock.now() + 0.05;
       const bundle = osc.encodeBundle(ntpNow, packets);
 
       // Send the bundle. Use sonic.sendOSC which takes raw bytes
@@ -127,8 +127,8 @@ test.describe("Big bundle FX setup", () => {
       return {
         sent, bundleSize: bundle.byteLength, messageCount: packets.length,
         nodeCount: tree.nodeCount, droppedCount: tree.droppedCount,
-        processed: metrics.scsynthMessagesProcessed,
-        dropped: metrics.scsynthMessagesDropped,
+        processed: metrics.engineMessagesProcessed,
+        dropped: metrics.engineMessagesDropped,
         ringFails: metrics.ringBufferDirectWriteFails || 0,
         nodes,
       };

@@ -14,7 +14,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
-#include "src/shared_memory.h"
+#include "shared_memory.h"
 
 // Defined in audio_processor.cpp (global namespace). Defaults live on the
 // declaration there; this extern lists every parameter explicitly.

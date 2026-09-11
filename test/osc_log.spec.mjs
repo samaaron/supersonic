@@ -1001,7 +1001,7 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
     });
   });
 
-  test("in:html emits HTML with supersonic-scsynth CSS classes", async ({ page, sonicConfig }) => {
+  test("in:html emits HTML with clockwork-osc CSS classes", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -1032,11 +1032,11 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
     expect(typeof timestamp).toBe("number");
 
     // Should contain CSS class spans
-    expect(html).toContain('supersonic-scsynth-seq');
-    expect(html).toContain('supersonic-scsynth-address');
+    expect(html).toContain('clockwork-osc-seq');
+    expect(html).toContain('clockwork-osc-address');
   });
 
-  test("out:html emits HTML with supersonic-scsynth CSS classes", async ({ page, sonicConfig }) => {
+  test("out:html emits HTML with clockwork-osc CSS classes", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -1068,9 +1068,9 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
     expect(typeof timestamp).toBe("number");
 
     // Should contain CSS class spans
-    expect(html).toContain('supersonic-scsynth-seq');
-    expect(html).toContain('supersonic-scsynth-source');
-    expect(html).toContain('supersonic-scsynth-address');
+    expect(html).toContain('clockwork-osc-seq');
+    expect(html).toContain('clockwork-osc-source');
+    expect(html).toContain('clockwork-osc-address');
   });
 
   test("in:html colorizes args with correct type classes", async ({ page, sonicConfig }) => {
@@ -1099,8 +1099,8 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
 
     expect(result.html).not.toBeNull();
     // /status.reply has int args (like ugen count, synth count, etc.)
-    expect(result.html).toContain('supersonic-scsynth-int');
-    expect(result.html).toContain('supersonic-scsynth-address');
+    expect(result.html).toContain('clockwork-osc-int');
+    expect(result.html).toContain('clockwork-osc-address');
   });
 
   test("out:html includes time span when initTime is available", async ({ page, sonicConfig }) => {
@@ -1125,7 +1125,7 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
     }, sonicConfig);
 
     expect(result.html).not.toBeNull();
-    expect(result.html).toContain('supersonic-scsynth-time');
+    expect(result.html).toContain('clockwork-osc-time');
   });
 
   test("no in:html emitted when no listeners attached", async ({ page, sonicConfig }) => {

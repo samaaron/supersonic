@@ -1,6 +1,6 @@
 /*
  * test_gamepad.cpp — the /gamepad/ subsystem routed through the engine ingress
- * (sendOSC -> ingest -> GamepadControl -> Rust ss_gamepad subsystem -> egress).
+ * (sendOSC -> ingest -> GamepadControl -> Rust clockwork_gamepad subsystem -> egress).
  *
  * No controller hardware required: these pin that /gamepad commands reach the
  * subsystem and that its replies/pushes come back through the egress, that
@@ -14,37 +14,37 @@
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
 
-#ifdef SUPERSONIC_GAMEPAD
+#ifdef CLOCKWORK_GAMEPAD
 
-TEST_CASE("/gamepad/devices/list replies through the engine", "[gamepad]") {
+TEST_CASE("/clockwork/gamepad/devices/list replies through the engine", "[gamepad]") {
     EngineFixture fx;
     fx.clearReplies();
-    fx.send(osc_test::message("/gamepad/devices/list"));
+    fx.send(osc_test::message("/clockwork/gamepad/devices/list"));
 
     OscReply r;
-    REQUIRE(fx.waitForReply("/gamepad/devices.reply", r));
+    REQUIRE(fx.waitForReply("/clockwork/gamepad/devices.reply", r));
     // First arg is the pad count: ≥ 0 even with no controllers attached.
     CHECK(r.parsed().argInt(0) >= 0);
 }
 
-TEST_CASE("/gamepad/notify/subscribe pushes a devices snapshot", "[gamepad]") {
+TEST_CASE("/clockwork/gamepad/notify/subscribe pushes a devices snapshot", "[gamepad]") {
     EngineFixture fx;
     fx.clearReplies();
-    fx.send(osc_test::message("/gamepad/notify/subscribe"));
+    fx.send(osc_test::message("/clockwork/gamepad/notify/subscribe"));
 
     OscReply r;
-    CHECK(fx.waitForReply("/gamepad/devices.reply", r));
+    CHECK(fx.waitForReply("/clockwork/gamepad/devices.reply", r));
 }
 
-TEST_CASE("/gamepad/refresh broadcasts a devices update", "[gamepad]") {
+TEST_CASE("/clockwork/gamepad/refresh broadcasts a devices update", "[gamepad]") {
     EngineFixture fx;
     // A subscriber is needed for the broadcast to have an in-process audience.
-    fx.send(osc_test::message("/gamepad/notify/subscribe"));
+    fx.send(osc_test::message("/clockwork/gamepad/notify/subscribe"));
     fx.clearReplies();
-    fx.send(osc_test::message("/gamepad/refresh"));
+    fx.send(osc_test::message("/clockwork/gamepad/refresh"));
 
     OscReply r;
-    CHECK(fx.waitForReply("/gamepad/devices", r));
+    CHECK(fx.waitForReply("/clockwork/gamepad/devices", r));
 }
 
 TEST_CASE("/gamepad rumble + enable dispatch is robust with no pads", "[gamepad]") {
@@ -53,25 +53,25 @@ TEST_CASE("/gamepad rumble + enable dispatch is robust with no pads", "[gamepad]
     // None of these have a connected target, so they are no-ops — but must not
     // crash the subsystem or the engine.
     osc_test::Builder rumble;
-    rumble.begin("/gamepad/out/rumble")
+    rumble.begin("/clockwork/gamepad/out/rumble")
         << "*" << 1.0f << 0.5f << static_cast<osc::int32>(100);
     fx.send(rumble.end());
 
-    fx.send(osc_test::message("/gamepad/out/rumble_stop", "*"));
+    fx.send(osc_test::message("/clockwork/gamepad/out/rumble_stop", "*"));
 
     osc_test::Builder disable;
-    disable.begin("/gamepad/enable") << "*" << static_cast<osc::int32>(0);
+    disable.begin("/clockwork/gamepad/enable") << "*" << static_cast<osc::int32>(0);
     fx.send(disable.end());
 
     osc_test::Builder enable;
-    enable.begin("/gamepad/enable") << "*" << static_cast<osc::int32>(1);
+    enable.begin("/clockwork/gamepad/enable") << "*" << static_cast<osc::int32>(1);
     fx.send(enable.end());
 
     // The engine is still alive and serving /gamepad afterwards.
     fx.clearReplies();
-    fx.send(osc_test::message("/gamepad/devices/list"));
+    fx.send(osc_test::message("/clockwork/gamepad/devices/list"));
     OscReply r;
-    CHECK(fx.waitForReply("/gamepad/devices.reply", r));
+    CHECK(fx.waitForReply("/clockwork/gamepad/devices.reply", r));
 }
 
-#endif // SUPERSONIC_GAMEPAD
+#endif // CLOCKWORK_GAMEPAD

@@ -55,8 +55,8 @@ test.describe("NTP timing SAB safety", () => {
       const metrics = sonic.getMetrics();
       return {
         mode: config.mode,
-        messagesProcessed: metrics?.scsynthMessagesProcessed || 0,
-        schedulerDropped: metrics?.scsynthSchedulerDropped || 0,
+        messagesProcessed: metrics?.engineMessagesProcessed || 0,
+        schedulerDropped: metrics?.engineSchedulerDropped || 0,
       };
     }, sonicConfig);
 

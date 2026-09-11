@@ -7,12 +7,12 @@
 // Windows: CreateProcess + anonymous pipe + TerminateProcess +
 //          WaitForSingleObject.
 //
-// Only available on builds with SUPERSONIC_LINK; the peer binary itself
-// is gated on SUPERSONIC_ENABLE_LINK in CMakeLists.txt.
+// Only available on builds with CLOCKWORK_LINK; the peer binary itself
+// is gated on CLOCKWORK_ENABLE_LINK in CMakeLists.txt.
 
 #pragma once
 
-#ifdef SUPERSONIC_LINK
+#ifdef CLOCKWORK_LINK
 
 #include <chrono>
 #include <cstdint>
@@ -62,4 +62,4 @@ private:
     bool    mReady        = false;
 };
 
-#endif  // SUPERSONIC_LINK
+#endif  // CLOCKWORK_LINK
