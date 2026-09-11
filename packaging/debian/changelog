@@ -4,7 +4,7 @@ supersonic (0.80.0-1) unstable; urgency=medium
     transports, clock and Link now come from the clockwork submodule,
     archived into the orig tarball under clockwork/.
 
- -- Sam Aaron <sam@sonic-pi.net>  Fri, 11 Sep 2026 12:00:00 +0000
+ -- Sam Aaron <sam@sonic-pi.net>  Thu, 10 Sep 2026 23:00:00 +0000
 
 supersonic (0.71.0-1) unstable; urgency=medium
 
