@@ -123,8 +123,9 @@ jobs:
 
       - name: Replace symlinks with actual files for distribution
         run: |
-          echo "Removing symlinks and copying actual files..."
-          rm -f dist/synthdefs dist/samples
+          # build-web.sh copies these in as real directories now; upstream's
+          # symlinked them. Either way, replace them with the packages' files.
+          rm -rf dist/synthdefs dist/samples
 
           echo "Copying all synthdefs..."
           mkdir -p dist/synthdefs

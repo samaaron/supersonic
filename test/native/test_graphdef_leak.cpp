@@ -35,6 +35,12 @@ extern "C" {
                        uint32_t active_input_channels);
 }
 
+#if defined(_WIN32)
+#  include <windows.h>
+#  include <psapi.h>
+#  pragma comment(lib, "psapi.lib")
+#endif
+
 namespace {
 
 std::vector<uint8_t> readSynthDef(const char* name) {
@@ -64,6 +70,11 @@ long resident_kb() {
                   reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
         return 0;
     return static_cast<long>(info.resident_size / 1024);
+#elif defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc{};
+    pmc.cb = sizeof(pmc);
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) return 0;
+    return static_cast<long>(pmc.WorkingSetSize / 1024);
 #else
     std::ifstream f("/proc/self/statm");
     long total = 0, resident = 0;
@@ -71,6 +82,19 @@ long resident_kb() {
     return resident * (sysconf(_SC_PAGESIZE) / 1024);
 #endif
 }
+
+// Under AddressSanitizer the resident set is not the engine's: the allocator
+// quarantines freed blocks and pads every allocation, so 400 rounds of
+// alloc-and-free grow it by megabytes with nothing leaked. The suite's
+// sanitizer job is for races and UB; the leak question is answered by the
+// uninstrumented matrix.
+#if defined(__SANITIZE_ADDRESS__)
+#  define GRAPHDEF_LEAK_UNDER_ASAN 1
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define GRAPHDEF_LEAK_UNDER_ASAN 1
+#  endif
+#endif
 
 void pump(int blocks, double& ntp) {
     constexpr double blockSecs = 128.0 / 48000.0;
@@ -83,6 +107,9 @@ void pump(int blocks, double& ntp) {
 } // namespace
 
 TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
+#ifdef GRAPHDEF_LEAK_UNDER_ASAN
+    SKIP("resident set is the sanitizer's under ASan, not the engine's");
+#endif
     EngineFixture fx;
     auto bytes = readSynthDef("sonic-pi-beep");
     REQUIRE(!bytes.empty());
