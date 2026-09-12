@@ -151,7 +151,13 @@ export class SuperSonic extends Clockwork {
     // deliberately guest-agnostic — it cannot know what its guest compiled to —
     // so naming the file is SuperSonic's job, the same way declaring the
     // vocabulary is.
+    // Same precedence as clockwork's own: the core package's directory
+    // (coreBaseURL) holds the wasm; baseURL only stands in for it when no
+    // core directory was named. Ignoring coreBaseURL here sent a CDN boot to
+    // <client package>/dist/wasm/, which ships no wasm — every documented
+    // CDN configuration 404'd at init (0.81.0).
     const wasmBase = options.wasmBaseURL
+      || (options.coreBaseURL ? `${options.coreBaseURL}wasm/` : null)
       || (options.baseURL ? `${options.baseURL}wasm/` : null);
     const wasmUrl = options.wasmUrl
       || (wasmBase ? `${wasmBase}scsynth-nrt.wasm` : undefined);

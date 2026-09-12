@@ -12,50 +12,40 @@ There are a few ways to add SuperSonic to your website:
 
 ## CDN
 
-This is the simplest way to get started as there's nothing to install or configure. Just import SuperSonic directly from a CDN:
-
-**unpkg**
-```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
-```
-
-**jsDelivr**
-```javascript
-import { SuperSonic } from "https://cdn.jsdelivr.net/npm/supersonic-scsynth@latest";
-```
-
-This loads the client API and sets up paths to fetch assets from CDN. The WASM engine and workers are fetched when you call `init()`. Synthdefs and samples are fetched on demand when you call `loadSynthDef()` or `loadSample()`.
-
-For production, consider pinning to a specific version:
-```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.81.0";
-```
-
-
-## npm
-
-If you're working within a JavaScript project that uses a bundler or Node.js tooling, you can install SuperSonic via npm:
-
-```bash
-npm install supersonic-scsynth
-```
-
-Then import it as you would any other module:
+Nothing to install: import the client from a CDN and tell it where the
+packages live. The engine, the AudioWorklet and the workers are fetched when
+you call `init()`; synthdefs and samples on demand.
 
 ```javascript
-import { SuperSonic } from "supersonic-scsynth";
-```
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.81.0/dist/supersonic.js";
 
-When using a bundler, you'll likely need to configure where assets are loaded from. See the [Self-Hosted](#self-hosted) section below for configuration options, or point to CDN explicitly:
-
-```javascript
+const CDN = "https://unpkg.com/";   // or "https://cdn.jsdelivr.net/npm/"
 const supersonic = new SuperSonic({
-  baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
-  coreBaseURL: "https://unpkg.com/supersonic-scsynth-core@latest/",
-  synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
-  sampleBaseURL: "https://unpkg.com/supersonic-scsynth-samples@latest/samples/"
+  mode: "postMessage",   // a CDN cannot send the COOP/COEP headers the SAB transport needs
+  baseURL:         CDN + "supersonic-scsynth@0.81.0/dist/",              // client, workers
+  coreBaseURL:     CDN + "supersonic-scsynth-core@0.81.0/",              // engine wasm, AudioWorklet
+  wasmBaseURL:     CDN + "supersonic-scsynth-core@0.81.0/wasm/",         // needed up to 0.81.0, see below
+  synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.81.0/synthdefs/",
+  sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.81.0/samples/",
 });
+await supersonic.init();
 ```
+
+Three things this recipe gets right that a shorter one does not:
+
+- **Name the file, not the package.** jsDelivr serves a bare package URL's
+  entry file without redirecting to its path, so the client's own relative
+  imports (the lazily loaded chunks under `dist/chunks/`) resolve against
+  the wrong base and 404. unpkg redirects, so either form works there; the
+  full path works on both.
+- **`coreBaseURL` is not optional on a CDN.** The client package ships no
+  wasm; the engine lives in `supersonic-scsynth-core`.
+- **`wasmBaseURL`, up to 0.81.0.** Those releases derive the wasm URL from
+  `baseURL` and ignore `coreBaseURL`, so without it a CDN boot fails at
+  `init()` with a 404 on `scsynth-nrt.wasm`. Later releases honour
+  `coreBaseURL`; passing `wasmBaseURL` as well is harmless there.
+
+Pin a version for anything you deploy; `@latest` moves.
 
 ### Package Options
 

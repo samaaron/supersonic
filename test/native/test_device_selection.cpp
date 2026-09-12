@@ -17,8 +17,29 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include <string>
+#include <thread>
+#include <chrono>
+#include <utility>
 
 // ── Rate memory bound (32 entries) ───────────────────────────────────────────
+
+namespace {
+// switchDevice() is non-blocking by design: while a swap's tail is still
+// releasing the gate it answers "swap already in progress", and the engine's
+// own callers (the debounced switch) retry that for up to ~3 s. A test that
+// fires swaps back to back does the same — on a slow runner the previous
+// swap's tail is still there when the next request lands.
+template <typename... Args>
+SwapResult swap(EngineFixture& fix, Args&&... args) {
+    SwapResult r;
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        r = fix.engine().switchDevice(std::forward<Args>(args)...);
+        if (r.success || r.error != "swap already in progress") break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return r;
+}
+} // namespace
 
 TEST_CASE("DeviceSelection: rate memory caps at 32 entries",
           "[DeviceSelection]") {
@@ -32,7 +53,7 @@ TEST_CASE("DeviceSelection: rate memory caps at 32 entries",
         std::string name = "test-device-" + std::to_string(i);
         // Alternate rates so every swap is a cold swap and populates the map
         double rate = (i % 2 == 0) ? 44100.0 : 48000.0;
-        auto r = fix.engine().switchDevice(name, rate);
+        auto r = swap(fix, name, rate);
         INFO("switchDevice said: " << r.error);
         INFO("engine log:\n" << fix.debugMessagesDump());
         REQUIRE(r.success);
@@ -49,17 +70,17 @@ TEST_CASE("DeviceSelection: rate memory restores per-device rate",
     EngineFixture fix;
 
     // Cold swap with an explicit rate — remembers "device-A" → 44100
-    auto r1 = fix.engine().switchDevice("device-A", 44100);
+    auto r1 = swap(fix, "device-A", 44100);
     REQUIRE(r1.success);
     REQUIRE(r1.type == SwapType::Cold);
 
     // Move rate elsewhere
-    auto r2 = fix.engine().switchDevice("device-B", 48000);
+    auto r2 = swap(fix, "device-B", 48000);
     REQUIRE(r2.success);
     REQUIRE(r2.type == SwapType::Cold);
 
     // Switch back to "device-A" with no explicit rate — should restore 44100
-    auto r3 = fix.engine().switchDevice("device-A");
+    auto r3 = swap(fix, "device-A");
     REQUIRE(r3.success);
     REQUIRE(r3.type == SwapType::Cold);
     REQUIRE(static_cast<int>(r3.sampleRate) == 44100);
@@ -76,17 +97,17 @@ TEST_CASE("DeviceSelection: switchDevice with empty name preserves preferred out
           "[DeviceSelection]") {
     EngineFixture fix;
 
-    auto r1 = fix.engine().switchDevice("my-device", 44100);
+    auto r1 = swap(fix, "my-device", 44100);
     REQUIRE(r1.success);
     REQUIRE(fix.engine().preferredOutputDevice() == "my-device");
 
     // Rate/buffer tweaks (empty deviceName) MUST NOT wipe the user's
     // device preference.
-    auto r2 = fix.engine().switchDevice("", 0, 256);
+    auto r2 = swap(fix, "", 0, 256);
     REQUIRE(r2.success);
     REQUIRE(fix.engine().preferredOutputDevice() == "my-device");
 
-    auto r3 = fix.engine().switchDevice("", 44100);
+    auto r3 = swap(fix, "", 44100);
     REQUIRE(r3.success);
     REQUIRE(fix.engine().preferredOutputDevice() == "my-device");
 }
@@ -96,12 +117,12 @@ TEST_CASE("DeviceSelection: __none__ input sentinel clears preferred input",
     EngineFixture fix;
 
     // Pin an input device
-    auto r1 = fix.engine().switchDevice("out-dev", 44100, 0, false, "in-dev");
+    auto r1 = swap(fix, "out-dev", 44100, 0, false, "in-dev");
     REQUIRE(r1.success);
     REQUIRE(fix.engine().preferredInputDevice() == "in-dev");
 
     // __none__ should clear it — user intent: "I want no input"
-    auto r2 = fix.engine().switchDevice("", 0, 0, false, "__none__");
+    auto r2 = swap(fix, "", 0, 0, false, "__none__");
     REQUIRE(r2.success);
     REQUIRE(fix.engine().preferredInputDevice().empty());
 }
@@ -117,13 +138,13 @@ TEST_CASE("DeviceSelection: internal switch does not stomp preferred output",
           "[DeviceSelection]") {
     EngineFixture fix;
 
-    auto r1 = fix.engine().switchDevice("user-picked-device", 44100);
+    auto r1 = swap(fix, "user-picked-device", 44100);
     REQUIRE(r1.success);
     REQUIRE(fix.engine().preferredOutputDevice() == "user-picked-device");
 
     // Engine-internal fallback (e.g. recovery reopening the system
     // default after a failed swap) must leave the user's pick intact.
-    auto r2 = fix.engine().switchDevice("fallback-device", 48000, 0, false,
+    auto r2 = swap(fix, "fallback-device", 48000, 0, false,
                                         "", SwapOrigin::Internal);
     REQUIRE(r2.success);
     REQUIRE(fix.engine().preferredOutputDevice() == "user-picked-device");
@@ -133,13 +154,13 @@ TEST_CASE("DeviceSelection: internal switch does not touch preferred input",
           "[DeviceSelection]") {
     EngineFixture fix;
 
-    auto r1 = fix.engine().switchDevice("out-dev", 44100, 0, false, "user-mic");
+    auto r1 = swap(fix, "out-dev", 44100, 0, false, "user-mic");
     REQUIRE(r1.success);
     REQUIRE(fix.engine().preferredInputDevice() == "user-mic");
 
     // An internal swap passing __none__ is the engine dropping the input
     // to survive, not the user asking for no input.
-    auto r2 = fix.engine().switchDevice("out-dev", 48000, 0, false,
+    auto r2 = swap(fix, "out-dev", 48000, 0, false,
                                         "__none__", SwapOrigin::Internal);
     REQUIRE(r2.success);
     REQUIRE(fix.engine().preferredInputDevice() == "user-mic");

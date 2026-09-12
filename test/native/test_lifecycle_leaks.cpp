@@ -118,32 +118,45 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
     REQUIRE(baselineFds > 0);
     REQUIRE(baselineThreads > 0);
 
-    INFO("baseline rss=" << baselineRss << "kb fds=" << baselineFds
-                          << " threads=" << baselineThreads);
+    auto cycles = [&] {
+        for (int i = 0; i < kCycles; ++i) {
+            ClockworkEngine engine;
+            engine.init(cfg);
+            REQUIRE(engine.isRunning());
+            engine.shutdown();
+            REQUIRE_FALSE(engine.isRunning());
+        }
+    };
 
-    for (int i = 0; i < kCycles; ++i) {
-        ClockworkEngine engine;
-        engine.init(cfg);
-        REQUIRE(engine.isRunning());
-        engine.shutdown();
-        REQUIRE_FALSE(engine.isRunning());
-    }
+    // Two rounds. A leak grows the second round as much as the first; what
+    // is not a leak — glibc keeping the arenas the engine's threads opened,
+    // heap fragmentation — grows the first round and then plateaus. One
+    // round against a fixed fraction of the baseline could not tell the two
+    // apart: the Debian build measured 65 MB over one round on a run that
+    // leaked nothing (2026-09-12), and passed the next.
+    cycles();
+    const long midRss = readRssKb();
+    cycles();
 
     const long finalRss     = readRssKb();
     const int  finalFds     = countFds();
     const int  finalThreads = settleThreadCount();
 
-    INFO("after " << kCycles << " cycles: rss=" << finalRss << "kb fds="
+    INFO("baseline rss=" << baselineRss << "kb fds=" << baselineFds
+                          << " threads=" << baselineThreads);
+    INFO("after " << kCycles << " cycles: rss=" << midRss << "kb; after "
+                  << 2 * kCycles << ": rss=" << finalRss << "kb fds="
                   << finalFds << " threads=" << finalThreads);
 
     // FDs and threads must return to baseline exactly.
     CHECK(finalFds     == baselineFds);
     CHECK(finalThreads == baselineThreads);
 
-    // RSS may drift from heap fragmentation; 50% of baseline is a generous
-    // ceiling that a real leak would blow past within a few cycles.
-    const long rssBudget = baselineRss / 2;
-    CHECK(finalRss - baselineRss < rssBudget);
+    // The second round may grow at most half of what the first did, plus a
+    // little drift; a leak of even 1 MB a cycle is 20 MB a round and fails.
+    const long firstRound  = midRss - baselineRss;
+    const long secondRound = finalRss - midRss;
+    CHECK(secondRound < firstRound / 2 + 8 * 1024);
 }
 
 TEST_CASE("Shutdown without init is safe", "[lifecycle]") {
