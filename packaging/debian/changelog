@@ -1,3 +1,13 @@
+supersonic (0.81.0-1) unstable; urgency=medium
+
+  * New upstream release. The engine logs through one channel on every
+    platform, held through boot so nothing is lost; a subsystem the platform
+    refuses (no Web MIDI backend) no longer fails the boot; synthdefs are
+    handed to the engine one per block, paced by its replies; release
+    binaries are stripped, with debug info split out.
+
+ -- Sam Aaron <sam@sonic-pi.net>  Sat, 12 Sep 2026 17:58:00 +0000
+
 supersonic (0.80.0-1) unstable; urgency=medium
 
   * New upstream release: scsynth on clockwork. The engine, device layer,
