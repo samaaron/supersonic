@@ -17,6 +17,7 @@
  * is done before the commit is even sent.
  */
 #include "EngineFixture.h"
+#include "BlockBudget.h"
 #include "TestPid.h"
 #include "SampleLane.h"
 #include "clockwork_audio_file.h"
@@ -89,54 +90,54 @@ TEST_CASE("a sample enters through the lane: no audio block carries the decode",
     if (decodeMs <= 1.0)
         WARN("decode took " << decodeMs << " ms: too quick for a block to be caught carrying it");
 
-    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
-    cfg.manualAudioPump = true;   // this thread IS the audio thread
-    EngineFixture fx(cfg);
-    REQUIRE(fx.engine().guestInboxBytes() >= 6u * 1024u * 1024u);
-
-    // Render blocks one at a time, timing each. The client's work — decode,
-    // free, stage — happens between blocks on this thread and is not timed;
-    // the commit is one message, and the blocks that carry it ARE timed:
-    // binding a pointer is all the audio thread does.
-    double maxBlockMs = 0.0;
-    auto pumpTimed = [&](int n) {
-        for (int i = 0; i < n; ++i) {
-            const auto t0 = std::chrono::steady_clock::now();
-            fx.pumpBlock();
-            const double ms = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - t0).count();
-            if (ms > maxBlockMs) maxBlockMs = ms;
-        }
-    };
-    pumpTimed(20);
-    const sample_lane::Staged st = sample_lane::stage(fx, 0, path);
-    REQUIRE(st.ok);
-    fx.send(st.commit);
-    pumpTimed(200);
-    OscReply committed;
-    REQUIRE(fx.waitForReply("/clockwork/asset/committed", committed));
-    std::filesystem::remove(path);
-
     // The bar: well under the decode, and in any case within one block's
     // budget — a plain WAV decodes in a couple of milliseconds on a fast
     // machine, and a block that stays inside its 128-frame budget has carried
     // no decode either way.
-    const double budgetMs = 128.0 / 48000.0 * 1000.0;
-    const double bar = decodeMs * 0.5 > budgetMs ? decodeMs * 0.5 : budgetMs;
-    INFO("longest block: " << maxBlockMs << " ms; decode: " << decodeMs << " ms; bar: " << bar << " ms");
-    CHECK(maxBlockMs < bar);
+    const double bar = decodeMs * 0.5 > block_budget::kBlockMs ? decodeMs * 0.5 : block_budget::kBlockMs;
+    INFO("decode: " << decodeMs << " ms; bar: " << bar << " ms");
+    block_budget::requireWithin(bar, [&] {
+        ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+        cfg.manualAudioPump = true;   // this thread IS the audio thread
+        EngineFixture fx(cfg);
+        REQUIRE(fx.engine().guestInboxBytes() >= 6u * 1024u * 1024u);
 
-    // And the sample is really there, at the file's length.
-    fx.clearReplies();
-    fx.send(osc_test::message("/b_query", int32_t{0}));
-    OscReply info;
-    REQUIRE(fx.waitForReply("/b_info", info));
-    CHECK(info.parsed().argInt(1) == 15 * 48000);
+        // Render blocks one at a time, timing each. The client's work — decode,
+        // free, stage — happens between blocks on this thread and is not timed;
+        // the commit is one message, and the blocks that carry it ARE timed:
+        // binding a pointer is all the audio thread does.
+        double maxBlockMs = 0.0;
+        auto pumpTimed = [&](int n) {
+            for (int i = 0; i < n; ++i) {
+                const auto t0 = std::chrono::steady_clock::now();
+                fx.pumpBlock();
+                const double ms = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - t0).count();
+                if (ms > maxBlockMs) maxBlockMs = ms;
+            }
+        };
+        pumpTimed(20);
+        const sample_lane::Staged st = sample_lane::stage(fx, 0, path);
+        REQUIRE(st.ok);
+        fx.send(st.commit);
+        pumpTimed(200);
+        OscReply committed;
+        REQUIRE(fx.waitForReply("/clockwork/asset/committed", committed));
 
-    // Freed, the asset comes back to the client.
-    fx.clearReplies();
-    fx.send(osc_test::message("/b_free", int32_t{0}));
-    OscReply rel;
-    REQUIRE(fx.waitForReply("/clockwork/asset/released", rel));
-    CHECK(rel.parsed().argInt(0) == 0);
+        // And the sample is really there, at the file's length.
+        fx.clearReplies();
+        fx.send(osc_test::message("/b_query", int32_t{0}));
+        OscReply info;
+        REQUIRE(fx.waitForReply("/b_info", info));
+        CHECK(info.parsed().argInt(1) == 15 * 48000);
+
+        // Freed, the asset comes back to the client.
+        fx.clearReplies();
+        fx.send(osc_test::message("/b_free", int32_t{0}));
+        OscReply rel;
+        REQUIRE(fx.waitForReply("/clockwork/asset/released", rel));
+        CHECK(rel.parsed().argInt(0) == 0);
+        return maxBlockMs;
+    });
+    std::filesystem::remove(path);
 }

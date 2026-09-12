@@ -35,7 +35,6 @@ bool isMessage(const uint8_t* data, uint32_t size, const char* address) {
 // The gap between one /d_recv and the next: a block drains everything that
 // arrived since the last one, and each synthdef is parsed on the audio
 // thread when it does, so this is what bounds how many a block parses.
-constexpr auto kDefRecvGap = std::chrono::milliseconds(1);
 
 // `*` and `?` in a file name, the way scsynth's glob read them.
 bool wildcardMatch(const char* pat, const char* str) {
@@ -421,7 +420,13 @@ void SuperSonicFront::encode(const Job& job) {
     finish(job.token, "/b_write", job.bufnum, job.completion);
 }
 
-// /d_load, /d_loadDir: read the synthdefs, hand each over as /d_recv.
+// /d_load, /d_loadDir: read the synthdefs, hand each over as /d_recv — one
+// at a time, the next only once the engine has answered the last. The engine
+// parses a definition on its audio thread (scsynth's stage 2, on the one
+// thread there is), so what keeps a block from carrying the whole directory
+// is that no block ever sees more than one: a pace the engine sets, not a
+// sleep guessed here, which stacked definitions into one block whenever the
+// audio thread ran slower than the guess.
 void SuperSonicFront::loadDefs(const Job& job) {
     const char* cmd = job.kind == Kind::SynthDefDir ? "/d_loadDir" : "/d_load";
     std::vector<std::vector<uint8_t>> defs;
@@ -436,18 +441,41 @@ void SuperSonicFront::loadDefs(const Job& job) {
     {
         std::lock_guard<std::mutex> lock(mMut);
         const auto n = static_cast<uint32_t>(defs.size());
-        mDefLoads.push_back({ job.token, cmd, job.path, n, n, 0, job.completion });
+        DefLoad load{ job.token, cmd, job.path, n, n, 0, job.completion, {}, false };
+        for (auto& d : defs) load.pending.push_back(std::move(d));
+        mDefLoads.push_back(std::move(load));
     }
-    std::vector<char> buf;
-    for (size_t i = 0; i < defs.size(); ++i) {
-        buf.resize(defs[i].size() + 64);
-        osc::OutboundPacketStream p(buf.data(), buf.size());
-        p << osc::BeginMessage("/d_recv")
-          << osc::Blob(defs[i].data(), static_cast<osc::osc_bundle_element_size_t>(defs[i].size()))
-          << osc::EndMessage;
-        mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), job.token);
-        if (i + 1 < defs.size()) std::this_thread::sleep_for(kDefRecvGap);
+    // The first goes now; egress() sends each next one on the reply to it. A
+    // load queued behind another for the same token waits its turn.
+    std::vector<uint8_t> first;
+    bool go;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        go = takeNextDef(job.token, first);
     }
+    if (go) sendDef(job.token, first);
+}
+
+bool SuperSonicFront::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
+    for (auto& load : mDefLoads) {
+        if (load.token != token) continue;
+        if (load.inFlight) return false;          // the oldest is busy: wait for its reply
+        if (load.pending.empty()) continue;       // fully handed over, replies outstanding
+        out = std::move(load.pending.front());
+        load.pending.pop_front();
+        load.inFlight = true;
+        return true;
+    }
+    return false;
+}
+
+void SuperSonicFront::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
+    std::vector<char> buf(bytes.size() + 64);
+    osc::OutboundPacketStream p(buf.data(), buf.size());
+    p << osc::BeginMessage("/d_recv")
+      << osc::Blob(bytes.data(), static_cast<osc::osc_bundle_element_size_t>(bytes.size()))
+      << osc::EndMessage;
+    mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), token);
 }
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
@@ -491,17 +519,22 @@ bool SuperSonicFront::egress(uint32_t token, const uint8_t* data, uint32_t size)
         return false;
     }
 
-    // /d_recv replies: a load in flight for that token, oldest first.
+    // /d_recv replies: the definition in flight for that token, oldest load
+    // first — and the reply is what sends the next one.
     if ((kind == Done || kind == Fail) && cmd == "/d_recv") {
         DefLoad finished;
         bool last = false;
+        std::vector<uint8_t> next;
+        bool sendNext = false;
         {
             std::lock_guard<std::mutex> lock(mMut);
             auto it = mDefLoads.begin();
-            for (; it != mDefLoads.end(); ++it) if (it->token == token) break;
+            for (; it != mDefLoads.end(); ++it) if (it->token == token && it->inFlight) break;
             if (it == mDefLoads.end()) return false;
+            it->inFlight = false;
             if (kind == Fail) ++it->failed;
             if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
+            sendNext = takeNextDef(token, next);
         }
         if (last) {
             if (finished.failed == finished.total) {
@@ -512,6 +545,7 @@ bool SuperSonicFront::egress(uint32_t token, const uint8_t* data, uint32_t size)
                 sendDoneCmd(token, finished.cmd.c_str());
             }
         }
+        if (sendNext) sendDef(token, next);
         return true;
     }
 

@@ -28,7 +28,10 @@
 #include <algorithm>
 #include <cmath>
 #include "TestPid.h"
+#include "BlockBudget.h"
 #include <chrono>
+#include <functional>
+#include <fstream>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -279,27 +282,27 @@ TEST_CASE("front: everything else passes through untouched", "[front]") {
 
 TEST_CASE("front: the audio thread never carries the decode", "[front][load_sample][realtime]") {
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
-    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
-    cfg.manualAudioPump = true;   // this thread IS the audio thread
-    Rig rig(cfg);
+    block_budget::requireWithin(block_budget::kBlockMs, [&] {
+        ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+        cfg.manualAudioPump = true;   // this thread IS the audio thread
+        Rig rig(cfg);
 
-    double maxBlockMs = 0.0;
-    auto pump = [&] {
-        const auto t0 = std::chrono::steady_clock::now();
-        rig.fx.pumpBlock();
-        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        if (ms > maxBlockMs) maxBlockMs = ms;
-    };
-    for (int i = 0; i < 20; ++i) pump();
-    REQUIRE(rig.ingress(allocRead(4, samplePath("bd_haus.flac"))));
-    // The front decodes on its own thread while this one keeps rendering.
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000, pump));
-    for (int i = 0; i < 50; ++i) pump();
+        double maxBlockMs = 0.0;
+        auto pump = [&] {
+            const auto t0 = std::chrono::steady_clock::now();
+            rig.fx.pumpBlock();
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            if (ms > maxBlockMs) maxBlockMs = ms;
+        };
+        for (int i = 0; i < 20; ++i) pump();
+        REQUIRE(rig.ingress(allocRead(4, samplePath("bd_haus.flac"))));
+        // The front decodes on its own thread while this one keeps rendering.
+        REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000, pump));
+        for (int i = 0; i < 50; ++i) pump();
 
-    const double budgetMs = 128.0 / 48000.0 * 1000.0;
-    INFO("longest block: " << maxBlockMs << " ms; budget: " << budgetMs << " ms");
-    CHECK(maxBlockMs < budgetMs);
-    CHECK(rig.queryFrames(4) > 0);
+        CHECK(rig.queryFrames(4) > 0);
+        return maxBlockMs;
+    });
 }
 
 // ── The synthdef verbs: /d_loadDir and /d_load read files too ───────────────
@@ -307,8 +310,9 @@ TEST_CASE("front: the audio thread never carries the decode", "[front][load_samp
 // Sonic Pi's boot sends /d_loadDir for its 122 synthdefs, and the engine read
 // them all inside one render callback: 24 ms, the one overrun left after
 // samples moved to the lane. The front reads the files on its thread and
-// hands each to the engine as /d_recv, paced so no block parses more than a
-// few; the asker hears one /done, in scsynth's words.
+// hands each to the engine as /d_recv, the next only on the reply to the
+// last, so no block parses more than one; the asker hears one /done, in
+// scsynth's words.
 
 namespace {
 // Whether `name` can be played: /s_new of an unknown synthdef fails.
@@ -326,36 +330,86 @@ bool synthKnown(Rig& rig, const char* name, uint32_t token) {
 }
 } // namespace
 
-TEST_CASE("front: /d_loadDir reads the synthdefs on its own thread; no block carries the read",
-          "[front][synthdef][realtime]") {
-    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+namespace {
+// The longest block rendered while `body` runs, with `pump` handed to it.
+struct BlockTimer {
+    double maxMs = 0.0;
+    std::function<void()> pumpOf(Rig& rig) {
+        return [this, &rig] {
+            const auto t0 = std::chrono::steady_clock::now();
+            rig.fx.pumpBlock();
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            if (ms > maxMs) maxMs = ms;
+        };
+    }
+};
+
+std::filesystem::path biggestSynthDef(const std::filesystem::path& dir) {
+    std::filesystem::path best;
+    uintmax_t bestSize = 0;
+    for (auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() != ".scsyndef") continue;
+        if (e.file_size() > bestSize) { bestSize = e.file_size(); best = e.path(); }
+    }
+    return best;
+}
+
+// The platform's price for one definition: the longest block while the
+// engine parses the biggest synthdef in the directory, handed to it directly.
+// /d_recv parses on the audio thread by design here (scsynth's stage 2, on
+// the one thread there is), so a runner where a single parse runs past one
+// block's budget has not caught the front carrying anything. A front that
+// carried the read would cost the whole directory in one block.
+double singleDefBlockMs(const std::filesystem::path& def) {
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     Rig rig(cfg);
-    REQUIRE_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
+    std::vector<uint8_t> bytes;
+    {
+        std::ifstream f(def, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }
+    REQUIRE(!bytes.empty());
+    BlockTimer timer;
+    const auto pump = timer.pumpOf(rig);
+    for (int i = 0; i < 20; ++i) pump();
+    const auto pkt = osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size());
+    rig.fx.engine().ingest(pkt.ptr(), pkt.size(), kSpider);
+    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_recv", nullptr, 5000, pump));
+    return timer.maxMs;
+}
+} // namespace
 
-    double maxBlockMs = 0.0;
-    auto pump = [&] {
-        const auto t0 = std::chrono::steady_clock::now();
-        rig.fx.pumpBlock();
-        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-        if (ms > maxBlockMs) maxBlockMs = ms;
-    };
-    rig.sink.sent.clear();
-    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
-    OscReply done;
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", &done, 30000, pump));
-    for (int i = 0; i < 50; ++i) pump();
+TEST_CASE("front: /d_loadDir reads the synthdefs on its own thread; no block carries the read",
+          "[front][synthdef][realtime]") {
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    const double oneDefMs = singleDefBlockMs(biggestSynthDef(CLOCKWORK_SYNTHDEFS_DIR));
+    // Within a block's budget, or within twice what this machine pays for
+    // its biggest single definition — whichever is more.
+    const double bar = std::max(block_budget::kBlockMs, 2.0 * oneDefMs);
+    INFO("one definition costs " << oneDefMs << " ms in a block here; bar " << bar << " ms");
+    block_budget::requireWithin(bar, [&] {
+        ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+        cfg.manualAudioPump = true;
+        Rig rig(cfg);
+        REQUIRE_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
 
-    const double budgetMs = 128.0 / 48000.0 * 1000.0;
-    INFO("longest block: " << maxBlockMs << " ms; budget: " << budgetMs << " ms");
-    CHECK(maxBlockMs < budgetMs);
-    // One /done for the whole directory — the /d_recv replies stayed behind
-    // the front — and the synthdefs are really there.
-    CHECK(rig.sink.count("/done", kSpider) == 1);
-    CHECK(rig.sink.count("/fail", kSpider) == 0);
-    CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
-    CHECK(synthKnown(rig, "sonic-pi-piano", kSpider));
+        BlockTimer timer;
+        const auto pump = timer.pumpOf(rig);
+        rig.sink.sent.clear();
+        REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+        OscReply done;
+        REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", &done, 30000, pump));
+        for (int i = 0; i < 50; ++i) pump();
+
+        // One /done for the whole directory — the /d_recv replies stayed behind
+        // the front — and the synthdefs are really there.
+        CHECK(rig.sink.count("/done", kSpider) == 1);
+        CHECK(rig.sink.count("/fail", kSpider) == 0);
+        CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
+        CHECK(synthKnown(rig, "sonic-pi-piano", kSpider));
+        return timer.maxMs;
+    });
 }
 
 TEST_CASE("front: /d_load loads what its pattern matches, and says so in scsynth's words when nothing does",

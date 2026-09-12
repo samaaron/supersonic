@@ -104,15 +104,21 @@ private:
         std::vector<uint8_t> completion;
         Job                  job;         // Write: carried through to the encode
     };
-    struct DefLoad {              // /d_recv messages in flight for one /d_load or /d_loadDir
+    struct DefLoad {              // the /d_recv messages of one /d_load or /d_loadDir
         uint32_t             token;
         std::string          cmd;
         std::string          path;
         uint32_t             total;
-        uint32_t             remaining;
+        uint32_t             remaining;   // replies still to come
         uint32_t             failed;      // a def the engine refused is skipped, as the engine's own
         std::vector<uint8_t> completion;  // directory load skipped it; only nothing at all is a failure
+        std::deque<std::vector<uint8_t>> pending;   // defs not yet handed over, in order
+        bool                 inFlight = false;       // one is with the engine, unanswered
     };
+    // The next definition to hand over for `token`, if one is waiting and
+    // none is in flight: the oldest load's, marked in flight. Under mMut.
+    bool takeNextDef(uint32_t token, std::vector<uint8_t>& out);
+    void sendDef(uint32_t token, const std::vector<uint8_t>& bytes);
 
     void run();
     void loadSample(const Job& job);
