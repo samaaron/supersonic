@@ -7,6 +7,7 @@
  * in the WASM build.  Tests simply send OSC and waitForReply().
  */
 #include "EngineFixture.h"
+#include "DebugTail.h"
 #include "JuceAudioCallback.h"
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
@@ -70,6 +71,7 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg) {
     };
 
     mEngine.onDebug = [this](const std::string& msg) {
+        debug_tail::push(msg);
         std::lock_guard<std::mutex> lk(mDebugMutex);
         mDebugMessages.push_back(msg);
     };
@@ -257,8 +259,15 @@ void EngineFixture::stopHeadlessDriver() {
 }
 
 void EngineFixture::pumpBlock(uint32_t n) {
-    for (uint32_t i = 0; i < n; ++i)
-        mEngine.pumpAudioBlock();
+    if (mManualPump) {
+        for (uint32_t i = 0; i < n; ++i) mEngine.pumpAudioBlock();
+        return;
+    }
+    // A driver thread is rendering: a block pumped here would be a second
+    // renderer, which the engine refuses. What a test means by "pump n" with
+    // a driver running is "let n blocks pass" — so wait for the driver's.
+    if (!waitForBlocks(n))
+        WARN("pumpBlock(" << n << "): the driver rendered no block within the wait");
 }
 
 // ── Synthdef helpers ─────────────────────────────────────────────────────────

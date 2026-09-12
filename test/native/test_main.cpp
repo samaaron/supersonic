@@ -12,6 +12,7 @@
  * failing — catalogues offenders without breaking the suite.
  */
 #include "rt_alloc.h"
+#include "DebugTail.h"
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_case_info.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
@@ -50,6 +51,9 @@ struct RTAllocListener : Catch::EventListenerBase {
 CATCH_REGISTER_LISTENER(RTAllocListener)
 
 int main(int argc, char* argv[]) {
+    // A fatal signal prints the last engine debug lines and a backtrace
+    // (DebugTail.h); Catch2 reports first, then hands the signal back here.
+    debug_tail::installFatalHandlers();
     juce::ScopedJuceInitialiser_GUI juceInit;
     return Catch::Session().run(argc, argv);
 }
