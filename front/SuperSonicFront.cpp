@@ -5,6 +5,7 @@
 
 #include "IOscTransport.h"
 #include "ClockworkEngine.h"
+#include "clockwork_config.h"   // clockwork_log
 #include "buffer_commands.h"
 #include "clockwork_asset_pool.h"
 #include "clockwork_audio_file.h"
@@ -673,7 +674,7 @@ bool SuperSonicFront::recordVerb(const uint8_t* data, uint32_t size, uint32_t to
     p << osc::BeginMessage(start ? "/clockwork/record/start.reply" : "/clockwork/record/stop.reply")
       << static_cast<int32_t>(ok ? 1 : 0) << (ok ? path.c_str() : err.c_str()) << osc::EndMessage;
     reply(token, reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()));
-    if (ok) fprintf(stderr, "[recording] %s: %s\n", start ? "started" : "stopped", path.c_str());
+    if (ok) clockwork_log("[recording] %s: %s", start ? "started" : "stopped", path.c_str());
     return true;
 }
 

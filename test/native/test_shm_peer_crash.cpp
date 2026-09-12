@@ -90,8 +90,10 @@ struct AttachServer {
     AttachServer(EngineFixture& fx, unsigned port)
         : endpoint(shm_attach::default_endpoint(port)) {
         std::string err;
-        REQUIRE(server.start(endpoint, fx.engine().shmNativeHandle(),
-                             fx.engine().shmSegmentSize(), &err));
+        const bool started = server.start(endpoint, fx.engine().shmNativeHandle(),
+                                          fx.engine().shmSegmentSize(), &err);
+        INFO("attach server at " << endpoint << " said: " << err);
+        REQUIRE(started);
     }
 };
 

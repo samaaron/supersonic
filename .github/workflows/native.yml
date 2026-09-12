@@ -64,6 +64,20 @@ jobs:
             echo "$hits"
             exit 1
           fi
+
+      - name: Forbid raw stdio logging in the front
+        run: |
+          set -uo pipefail
+          # The front runs in the engine's process beside clockwork's engine and
+          # logs the way it does: through clockwork_log, onto the debug ring.
+          # (host/ is the process main; its stderr is its own.)
+          hits=$(grep -RnE '^[^/]*\b(printf|fprintf|vprintf|vfprintf|puts|fputs)[[:space:]]*\(' front \
+            --include='*.cpp' --include='*.h' || true)
+          if [ -n "$hits" ]; then
+            echo "Raw stdio logging found in the front. Use clockwork_log."
+            echo "$hits"
+            exit 1
+          fi
           echo "scsynth core is clean: all logging flows through the egress funnel."
 
   # ── Native executable + test suite ──────────────────────────────────────────
@@ -167,17 +181,44 @@ jobs:
             echo "artifact=supersonic-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
           fi
 
+      # Release builds compile with debug info so a crash dump can be
+      # symbolicated (clockwork's CMakeLists, "Release debug symbols"). The
+      # binary a user downloads must not carry it: on Linux the DWARF for
+      # clockwork, scsynth and the Rust std made an 11 MB server 87 MB. So the
+      # debug info is split off beside the binary and uploaded with it —
+      # a .debug file with a debuglink on Linux, a dSYM on macOS, the PDB on
+      # Windows — and the binary itself is stripped.
       - name: Prepare release artifact
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
-        run: cp "${{ steps.binary.outputs.path }}" "${{ steps.binary.outputs.artifact }}"
+        run: |
+          src="${{ steps.binary.outputs.path }}"
+          out="${{ steps.binary.outputs.artifact }}"
+          mkdir -p release
+          cp "$src" "release/$out"
+          case "$RUNNER_OS" in
+            Linux)
+              objcopy --only-keep-debug "release/$out" "release/$out.debug"
+              strip --strip-debug --strip-unneeded "release/$out"
+              objcopy --add-gnu-debuglink="release/$out.debug" "release/$out"
+              ;;
+            macOS)
+              dsymutil "release/$out" -o "release/$out.dSYM"
+              strip -x "release/$out"
+              (cd release && zip -qr "$out.dSYM.zip" "$out.dSYM" && rm -rf "$out.dSYM")
+              ;;
+            Windows)
+              cp "${src%.exe}.pdb" "release/${out%.exe}.pdb" 2>/dev/null || true
+              ;;
+          esac
+          ls -la release
 
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.binary.outputs.artifact }}
-          path: ${{ steps.binary.outputs.artifact }}
+          path: release/
 
   # ── Native executable, 32-bit x86 ───────────────────────────────────────────
   # i686 is the one desktop target where the engine's lock-free assumptions can

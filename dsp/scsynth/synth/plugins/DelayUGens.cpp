@@ -4545,7 +4545,7 @@ void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
         static int warned = 0;
         if (warned++ < 3) {
             DEV_LOG("[scope-diag] ScopeOut2_next: slot released mid-life "
-                    "(internalData=%p) — scope write skipped\n",
+                    "(internalData=%p) — scope write skipped",
                     unit->m_buffer.internalData);
         }
         return;
@@ -4577,7 +4577,7 @@ void ScopeOut2_Ctor(ScopeOut2* unit) {
     bool ok = (*ft->fGetScopeBuffer)(unit->mWorld, scopeNum, numChannels, maxFrames, &unit->m_buffer);
 
     DEV_LOG("[scope-diag] ScopeOut2_Ctor: unit=%p scopeNum=%u ch=%u "
-            "result=%s slot=%p\n",
+            "result=%s slot=%p",
             (void*)unit, scopeNum, numChannels,
             ok ? "OK" : "FAIL",
             unit->m_buffer.internalData);
@@ -4596,7 +4596,7 @@ void ScopeOut2_Ctor(ScopeOut2* unit) {
 }
 
 void ScopeOut2_Dtor(ScopeOut2* unit) {
-    DEV_LOG("[scope-diag] ScopeOut2_Dtor: unit=%p internalData=%p data=%p\n",
+    DEV_LOG("[scope-diag] ScopeOut2_Dtor: unit=%p internalData=%p data=%p",
             (void*)unit, unit->m_buffer.internalData, unit->m_buffer.data);
     if (unit->m_buffer)
         (*ft->fReleaseScopeBuffer)(unit->mWorld, &unit->m_buffer);

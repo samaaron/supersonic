@@ -27,13 +27,19 @@ OUT="$ROOT/dist/wasm"
 DSP="scsynth"
 SCHEDULER="${CLOCKWORK_SCHEDULER:-1}"
 OPT="${CLOCKWORK_OPT:--O3}"
+# The JavaScript half's build mode. A development build keeps __DEV__ true
+# (the client's console diagnostics stay in) and the bundles readable; a
+# release build (--release, what CI and npm publish use) compiles the
+# diagnostics out and minifies, with a source map beside each bundle.
+JS_DEV=true
+JS_MINIFY=""
 
 for arg in "$@"; do
     case "$arg" in
         --no-scheduler) SCHEDULER=0 ;;
         --dsp=*)        DSP="${arg#--dsp=}" ;;
         --debug)        OPT="-O0 -g" ;;
-        --release)      OPT="-O3" ;;
+        --release)      OPT="-O3"; JS_DEV=false; JS_MINIFY="--minify --sourcemap" ;;
         *) echo "unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
@@ -226,9 +232,6 @@ SOURCES=(
     "$CLOCKWORK/src/clock/MidiClockOut.cpp"
     # Audio files (clockwork/src/clockwork_audio_file.h): the same formats on
     # every platform, including the AIFF a browser's own decoder refuses.
-    "$CLOCKWORK/src/clockwork_audio_file.cpp"
-    "$CLOCKWORK/src/flac_encoder.cpp"
-    "$CLOCKWORK/src/vendor/stb/stb_vorbis.c"
     "$GUEST/scsynth_dsp.cpp"
     "$GUEST/piano_wavetable.cpp"
     # NOT SampleLoader.cpp: it needs JUCE, and there is no such host on the web
@@ -238,6 +241,22 @@ SOURCES=(
     $SCSYNTH_SOURCES
     $SCSYNTH_C_SOURCES
 )
+
+# The audio file codecs (dr_wav, dr_flac, dr_mp3, stb_vorbis, the FLAC
+# encoder) are a native concern: the sample loader and the recorder. On the
+# web, samples arrive already decoded through the browser's own decoder and
+# nothing records to a file, so nothing calls them — they were 200 kB of
+# wasm nobody reached. Opt in with CLOCKWORK_WEB_AUDIO_FILES=1 for a build
+# whose client decodes in the module.
+AUDIO_FILE_EXPORTS=""
+if [ "${CLOCKWORK_WEB_AUDIO_FILES:-0}" = "1" ]; then
+    SOURCES+=("$CLOCKWORK/src/clockwork_audio_file.cpp" "$CLOCKWORK/src/flac_encoder.cpp" "$CLOCKWORK/src/vendor/stb/stb_vorbis.c")
+    AUDIO_FILE_EXPORTS=",'_clockwork_audio_probe_memory','_clockwork_audio_decode_memory',\
+'_clockwork_audio_free','_clockwork_audio_duration',\
+'_clockwork_audio_can_write','_clockwork_audio_writer_open_memory',\
+'_clockwork_audio_writer_write','_clockwork_audio_writer_frames',\
+'_clockwork_audio_writer_close'"
+fi
 
 INCLUDES=(-I"$ROOT" -I"$CLOCKWORK" -I"$CLOCKWORK/src" -I"$CLOCKWORK/src/vendor/oscpack"
           -I"$GUEST" -I"$GUEST/synth/include/common" -I"$GUEST/synth/include/plugin_interface"
@@ -268,12 +287,7 @@ EXPORTS="['___wasm_call_ctors','_clockwork_init','_get_ring_buffer_base',\
 '_clockwork_client_tap_open_in','_clockwork_client_tap_close',\
 '_clockwork_client_tap_poll','_clockwork_client_tap_missed',\
 '_clockwork_client_scope_open','_clockwork_client_scope_valid',\
-'_clockwork_client_scope_audible_end','_clockwork_client_scope_read',\
-'_clockwork_audio_probe_memory','_clockwork_audio_decode_memory',\
-'_clockwork_audio_free','_clockwork_audio_duration',\
-'_clockwork_audio_can_write','_clockwork_audio_writer_open_memory',\
-'_clockwork_audio_writer_write','_clockwork_audio_writer_frames',\
-'_clockwork_audio_writer_close']"
+'_clockwork_client_scope_audible_end','_clockwork_client_scope_read'"$AUDIO_FILE_EXPORTS"]"
 
 # The engine's own web defines. NO_LIBSNDFILE is the one that matters: there is
 # no libsndfile in a browser, and SC_SndFileHelpers.hpp has a whole alternative
@@ -344,16 +358,18 @@ fi
 export NODE_PATH="$NODE_PATHS"
 echo "bundling the client and workers..."
 # The client. --external on the wasm keeps esbuild from trying to inline it.
-# SuperSonic's client — clockwork's class plus what scsynth means — is the
-# entry point. clockwork.js is bundled too, for anything that wants the substrate
-# bare.
-"$ESBUILD" "$ROOT/js/supersonic.js" --bundle --format=esm --define:__DEV__=true \
-    --outfile="$OUT/../supersonic.js" --external:./scsynth-nrt.wasm >/dev/null
-"$ESBUILD" "$JS/clockwork.js" --bundle --format=esm --define:__DEV__=true \
-    --outfile="$OUT/../clockwork.js" --external:./scsynth-nrt.wasm >/dev/null
+# SuperSonic's client — clockwork's class plus what scsynth means — is the one
+# entry point; clockwork is absorbed into it, not offered beside it.
+# --splitting: what the client imports on demand (clockwork's MIDI and
+# gamepad managers, with their wasm-bindgen glue) becomes a chunk under
+# dist/chunks/, fetched only by a page that enables them.
+rm -rf "$OUT/../chunks"
+"$ESBUILD" "$ROOT/js/supersonic.js" --bundle --format=esm --splitting --define:__DEV__=$JS_DEV $JS_MINIFY \
+    --outdir="$OUT/.." --chunk-names="chunks/[name]-[hash]" --external:./scsynth-nrt.wasm >/dev/null
+rm -f "$OUT/../clockwork.js"
 
 for entry in osc_channel.js lib/osc_fast.js lib/metrics_component.js; do
-    "$ESBUILD" "$JS/$entry" --bundle --format=esm --define:__DEV__=true \
+    "$ESBUILD" "$JS/$entry" --bundle --format=esm --define:__DEV__=$JS_DEV $JS_MINIFY \
         --outfile="$OUT/../$(basename "$entry")" >/dev/null
 done
 cp "$JS"/lib/metrics-*.css "$OUT/.." 2>/dev/null || true
@@ -361,16 +377,21 @@ cp "$JS"/lib/metrics-*.css "$OUT/.." 2>/dev/null || true
 # Workers are iife: a worker has no module loader to hand them to.
 rm -rf "$OUT/../workers"; mkdir -p "$OUT/../workers"
 for worker in "$JS/workers/"*.js; do
-    "$ESBUILD" "$worker" --bundle --format=iife --define:__DEV__=true \
+    "$ESBUILD" "$worker" --bundle --format=iife --define:__DEV__=$JS_DEV $JS_MINIFY \
         --outfile="$OUT/../workers/$(basename "$worker")" >/dev/null
 done
 
 # The subsystem modules ride along in dist/ so the exported site and the
-# distribution zip carry them; the client imports them from clockwork's own
-# dist at bundle time.
+# distribution zip carry them; the client imports their glue from clockwork's
+# own dist at bundle time. Their wasm goes into dist/wasm/ — and from there
+# into the core package — because that is where the client looks for it:
+# wasmBaseURL + clockwork_midi_bg.wasm (host_front.js). 0.80.0 shipped
+# without them, and a page enabling MIDI or gamepad from the CDN got a 404.
 for sub in midi gamepad; do
     rm -rf "$OUT/../$sub"
     [ -d "$ROOT/clockwork/dist/$sub" ] && cp -r "$ROOT/clockwork/dist/$sub" "$OUT/../$sub"
+    [ -f "$ROOT/clockwork/dist/$sub/clockwork_${sub}_bg.wasm" ] \
+        && cp "$ROOT/clockwork/dist/$sub/clockwork_${sub}_bg.wasm" "$OUT/"
 done
 
 # Assets the suite loads by URL.

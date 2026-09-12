@@ -33,6 +33,8 @@ TEST_CASE("DeviceSelection: rate memory caps at 32 entries",
         // Alternate rates so every swap is a cold swap and populates the map
         double rate = (i % 2 == 0) ? 44100.0 : 48000.0;
         auto r = fix.engine().switchDevice(name, rate);
+        INFO("switchDevice said: " << r.error);
+        INFO("engine log:\n" << fix.debugMessagesDump());
         REQUIRE(r.success);
     }
 
@@ -155,6 +157,8 @@ TEST_CASE("DeviceSelection: input channel 2 → 4 forces cold swap",
 
     // Default fixture has 2 inputs. Go to 4.
     auto r = fix.engine().enableInputChannels(4);
+    INFO("switchDevice said: " << r.error);
+        INFO("engine log:\n" << fix.debugMessagesDump());
     REQUIRE(r.success);
     REQUIRE(r.type == SwapType::Cold);
     REQUIRE(fix.engine().configuredInputChannels() == 2); // boot value unchanged

@@ -63,10 +63,10 @@ SuperSonic is split into several packages to give you control over what you incl
 
 | Package | Contains | License |
 |---------|----------|---------|
-| `supersonic-scsynth` | Client API + workers + metrics component | MIT |
-| `supersonic-scsynth-core` | WASM engine + AudioWorklet | GPL-3.0 |
-| `supersonic-scsynth-synthdefs` | 127 synth definitions | MIT |
-| `supersonic-scsynth-samples` | 206 audio samples | CC0 |
+| `supersonic-scsynth` | Client API + workers + metrics component | AGPL-3.0-or-later |
+| `supersonic-scsynth-core` | WASM engine + AudioWorklet | AGPL-3.0-or-later |
+| `supersonic-scsynth-synthdefs` | 119 Sonic Pi synth definitions, plus 11 test ones | MIT |
+| `supersonic-scsynth-samples` | 207 audio samples | CC0 |
 | `supersonic-scsynth-bundle` | All of the above | Mixed |
 
 When importing from CDN, most users just need `supersonic-scsynth` as the other packages are loaded from CDN automatically. When using npm with a bundler, you'll need to configure the asset URLs explicitly (see above).
@@ -97,8 +97,8 @@ supersonic/
 ├── supersonic.js      # Main library
 ├── wasm/              # WebAssembly binaries
 ├── workers/           # Web Workers
-├── synthdefs/         # 127 synth definitions
-└── samples/           # 206 audio samples
+├── synthdefs/         # 130 synth definitions
+└── samples/           # 207 audio samples
 ```
 
 Then import from your local path:

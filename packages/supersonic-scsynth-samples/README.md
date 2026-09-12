@@ -1,6 +1,6 @@
 # SuperSonic Samples
 
-All 206 audio samples from Sonic Pi in one convenient package.
+All 207 audio samples from Sonic Pi in one convenient package.
 
 ## Installation
 
@@ -31,7 +31,7 @@ SuperSonic works directly from CDN with zero configuration.
 
 ## Available Samples
 
-This package includes all 206 samples organized by category:
+This package includes all 207 samples organized by category:
 
 ### Ambient (11 samples)
 `ambi_choir`, `ambi_dark_woosh`, `ambi_drone`, `ambi_glass_hum`, `ambi_glass_rub`, `ambi_haunted_hum`, `ambi_lunar_land`, `ambi_piano`, `ambi_sauna`, `ambi_soft_buzz`, `ambi_swoosh`

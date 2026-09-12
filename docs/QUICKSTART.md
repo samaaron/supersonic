@@ -75,7 +75,7 @@ await supersonic.loadSynthDef("sonic-pi-prophet");
 
 Before you can play a synth, you need to send its design to scsynth. This design is called a **synth definition** (or "synthdef") and is a recipe that describes a synth's audio graph - what oscillators, filters, and effects it uses and how they're connected.
 
-SuperSonic comes with 127 ready-to-use synthdefs from [Sonic Pi](https://sonic-pi.net). Here we're loading `sonic-pi-prophet`, a warm polyphonic synth inspired by the Prophet-5.
+SuperSonic comes with 119 ready-to-use synthdefs from [Sonic Pi](https://sonic-pi.net). Here we're loading `sonic-pi-prophet`, a warm polyphonic synth inspired by the Prophet-5.
 
 __Note: you can also use SuperCollider's Desktop app to design your own synthdefs and directly import them live at runtime into your SuperSonic session.__
 

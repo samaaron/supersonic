@@ -270,7 +270,10 @@ IOscTransport* CommandTransports::select(const Options& o, std::atomic<ShmPeerPl
         }
     });
     mUdp.initialise(cfg.udpPort, cfg.bindAddress);
-    if (cfg.udpPort > 0) mUdp.start();
+    if (cfg.udpPort > 0 && !mUdp.start()) {
+        fprintf(stderr, CLOCKWORK_LOG_PREFIX "failed to bind control port %d\n", cfg.udpPort);
+        fflush(stderr);
+    }
     mStart = [this] {
         std::lock_guard<std::mutex> lk(mPendingMut);
         for (auto& p : mPending) mIngest(p.first.data(), static_cast<uint32_t>(p.first.size()), p.second);
@@ -609,7 +612,6 @@ std::string applyMicPermissionGuard(Options& o) {
     // non-foreground processes without showing the prompt. The GUI requests
     // on our behalf; TCC attributes the permission to the responsible
     // process, so we inherit whatever the user granted.
-    MicPermission::logDiagnostics();
     const std::string status = MicPermission::status();
     if (status == "denied") {
         fprintf(stderr, "[mic-permission] WARNING: mic access DENIED. live_audio will be silent. "

@@ -70,6 +70,9 @@ jobs:
           test -f dist/midi/clockwork_midi.js || { echo "Error: dist/midi/clockwork_midi.js not found (MIDI wasm build was skipped)"; exit 1; }
           test -f dist/gamepad/clockwork_gamepad.js || { echo "Error: dist/gamepad/clockwork_gamepad.js not found (gamepad wasm build was skipped)"; exit 1; }
           test -f packages/supersonic-scsynth-core/wasm/scsynth-nrt.wasm || { echo "Error: core package has no wasm"; exit 1; }
+          for m in midi gamepad; do
+            test -f "packages/supersonic-scsynth-core/wasm/clockwork_${m}_bg.wasm" || { echo "Error: core package is missing clockwork_${m}_bg.wasm (the client fetches it from wasmBaseURL)"; exit 1; }
+          done
           echo "Build verification passed!"
 
       - name: Run type tests

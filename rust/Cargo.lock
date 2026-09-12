@@ -96,6 +96,7 @@ version = "0.1.0"
 name = "clockwork-comms"
 version = "0.1.0"
 dependencies = [
+ "clockwork-log",
  "clockwork-osc",
  "clockwork-osc-net",
  "libc",
@@ -121,6 +122,10 @@ name = "clockwork-heap"
 version = "0.1.0"
 
 [[package]]
+name = "clockwork-log"
+version = "0.1.0"
+
+[[package]]
 name = "clockwork-midi"
 version = "0.1.0"
 dependencies = [
@@ -141,6 +146,7 @@ version = "0.1.0"
 name = "clockwork-osc-net"
 version = "0.1.0"
 dependencies = [
+ "clockwork-log",
  "clockwork-osc",
  "libc",
  "socket2",
@@ -181,6 +187,7 @@ dependencies = [
 name = "clockwork-sinks"
 version = "0.1.0"
 dependencies = [
+ "clockwork-log",
  "clockwork-midi",
  "clockwork-osc-net",
  "clockwork-slots",

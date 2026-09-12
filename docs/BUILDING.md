@@ -106,7 +106,7 @@ rustup toolchain install nightly-2026-07-02 --component rust-src \
   --target wasm32-unknown-emscripten --target wasm32-unknown-unknown
 npm install
 scripts/build-web.sh             # development build
-scripts/build-web.sh --release   # what CI and npm publish use
+scripts/build-web.sh --release   # what CI and npm publish use: __DEV__ off, minified, source maps
 ```
 
 This will:
@@ -153,7 +153,6 @@ After a web build, `dist/` holds:
 ```
 dist/
 ├── supersonic.js                 # The client (ES module) — SuperSonic on clockwork's Clockwork class
-├── clockwork.js                  # clockwork's client on its own
 ├── osc_channel.js, osc_fast.js   # OSC channel for workers, fast OSC codec
 ├── metrics_component.js, metrics-*.css
 ├── wasm/

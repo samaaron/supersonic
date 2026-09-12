@@ -6,10 +6,10 @@ Complete SuperSonic bundle with everything included.
 
 This is a convenience meta-package that includes:
 
-- **[supersonic-scsynth](https://www.npmjs.com/package/supersonic-scsynth)** - MIT-licensed client API (~50KB)
-- **[supersonic-scsynth-core](https://www.npmjs.com/package/supersonic-scsynth-core)** - GPL-licensed WASM engine + workers (~450KB)
-- **[supersonic-scsynth-synthdefs](https://www.npmjs.com/package/supersonic-scsynth-synthdefs)** - All 120 Sonic Pi synthdefs (~67KB)
-- **[supersonic-scsynth-samples](https://www.npmjs.com/package/supersonic-scsynth-samples)** - All 206 Sonic Pi samples (~34MB)
+- **[supersonic-scsynth](https://www.npmjs.com/package/supersonic-scsynth)** - the client API (AGPL-3.0-or-later)
+- **[supersonic-scsynth-core](https://www.npmjs.com/package/supersonic-scsynth-core)** - the WASM engine and its AudioWorklet (AGPL-3.0-or-later)
+- **[supersonic-scsynth-synthdefs](https://www.npmjs.com/package/supersonic-scsynth-synthdefs)** - All 119 Sonic Pi synthdefs (~67KB)
+- **[supersonic-scsynth-samples](https://www.npmjs.com/package/supersonic-scsynth-samples)** - All 207 Sonic Pi samples (~34MB)
 
 ## Installation
 
@@ -17,7 +17,7 @@ This is a convenience meta-package that includes:
 npm install supersonic-scsynth-bundle
 ```
 
-This installs all three packages as dependencies.
+This installs all four packages as dependencies.
 
 ## Usage
 
@@ -46,10 +46,10 @@ SuperSonic works directly from CDN with zero configuration using the default `po
 
 | Package | Size | License | Contains |
 |---------|------|---------|----------|
-| `supersonic-scsynth` | ~50KB | MIT | Client API |
-| `supersonic-scsynth-core` | ~450KB | GPL-3.0 | WASM engine + workers |
-| `supersonic-scsynth-synthdefs` | ~67KB | MIT | 120 Sonic Pi synthdefs |
-| `supersonic-scsynth-samples` | ~34MB | CC0 | 206 Sonic Pi samples |
+| `supersonic-scsynth` | ~140KB (~40KB gzipped) | AGPL-3.0-or-later | Client API, OSC workers, metrics component |
+| `supersonic-scsynth-core` | ~1.9MB | AGPL-3.0-or-later | WASM engine + AudioWorklet |
+| `supersonic-scsynth-synthdefs` | ~67KB | MIT | 119 Sonic Pi synthdefs |
+| `supersonic-scsynth-samples` | ~34MB | CC0 | 207 Sonic Pi samples |
 | `supersonic-scsynth-bundle` | ~2KB | Mixed | Meta-package (depends on all four) |
 
 ## Documentation
@@ -59,6 +59,6 @@ See the main [SuperSonic repository](https://github.com/samaaron/supersonic) for
 ## License
 
 Mixed - see individual packages:
-- `supersonic-scsynth` - GPL-3.0-or-later (engine) / MIT (client API)
+- `supersonic-scsynth` and `supersonic-scsynth-core` - AGPL-3.0-or-later (scsynth on clockwork)
 - `supersonic-scsynth-synthdefs` - MIT
 - `supersonic-scsynth-samples` - CC0

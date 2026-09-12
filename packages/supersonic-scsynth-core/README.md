@@ -1,15 +1,11 @@
 # supersonic-scsynth-core
 
-The SuperCollider scsynth WebAssembly engine and AudioWorklet processor for [SuperSonic](https://github.com/samaaron/supersonic).
+The SuperSonic engine for the browser: SuperCollider's scsynth synthesis engine compiled to WebAssembly, running on the clockwork substrate inside an AudioWorklet. It takes OSC in, renders audio out, and answers the scsynth command set. The client that talks to it is [`supersonic-scsynth`](https://www.npmjs.com/package/supersonic-scsynth), which loads this package from a CDN or from a path you give it.
 
-## Overview
+## Contents
 
-This package contains only the copyleft runtime components (AGPL-3.0-or-later as a whole: clockwork is AGPL, scsynth GPL):
-
-- `wasm/scsynth-nrt.wasm` - The scsynth engine compiled to WebAssembly
-- `workers/clockwork_audio_worklet.js` - AudioWorklet processor (clockwork's)
-
-The OSC workers (osc_in, osc_out_log) are distributed with the main `supersonic-scsynth` package.
+- `wasm/scsynth-nrt.wasm` - the engine
+- `workers/clockwork_audio_worklet.js` - the AudioWorklet processor that runs it on the audio thread
 
 ## Usage
 
@@ -40,17 +36,15 @@ const supersonic = new SuperSonic({
 npm install supersonic-scsynth-core
 ```
 
-Then serve the `wasm/` directory and `workers/scsynth_audio_worklet.js` from your static file server.
+Then serve the `wasm/` directory and `workers/clockwork_audio_worklet.js` from your static file server.
 
 ## License
 
-GPL-3.0-or-later
-
-This package is derived from [SuperCollider](https://supercollider.github.io/) by James McCartney and the SuperCollider community.
+AGPL-3.0-or-later. The engine is scsynth (GPL-3.0-or-later, derived from [SuperCollider](https://supercollider.github.io/) by James McCartney and the SuperCollider community) running on clockwork (AGPL-3.0-or-later), and the combined work is AGPL.
 
 ## Related Packages
 
-- [`supersonic-scsynth`](https://www.npmjs.com/package/supersonic-scsynth) - MIT-licensed client API
-- [`supersonic-scsynth-synthdefs`](https://www.npmjs.com/package/supersonic-scsynth-synthdefs) - Synth definitions (MIT)
-- [`supersonic-scsynth-samples`](https://www.npmjs.com/package/supersonic-scsynth-samples) - Audio samples (CC0)
-- [`supersonic-scsynth-bundle`](https://www.npmjs.com/package/supersonic-scsynth-bundle) - Everything together
+- [`supersonic-scsynth`](https://www.npmjs.com/package/supersonic-scsynth) - the client API (AGPL-3.0-or-later)
+- [`supersonic-scsynth-synthdefs`](https://www.npmjs.com/package/supersonic-scsynth-synthdefs) - synth definitions (MIT)
+- [`supersonic-scsynth-samples`](https://www.npmjs.com/package/supersonic-scsynth-samples) - audio samples (CC0)
+- [`supersonic-scsynth-bundle`](https://www.npmjs.com/package/supersonic-scsynth-bundle) - everything together

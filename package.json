@@ -59,7 +59,6 @@
   },
   "files": [
     "dist/supersonic.js",
-    "dist/clockwork.js",
     "supersonic.d.ts",
     "dist/osc_channel.js",
     "dist/osc_fast.js",
@@ -68,6 +67,7 @@
     "dist/metrics-light.css",
     "dist/workers/osc_in_worker.js",
     "dist/workers/osc_out_log_sab_worker.js",
+    "dist/chunks/*.js",
     "README.md",
     "LICENSE"
   ],

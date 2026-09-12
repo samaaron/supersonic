@@ -19,7 +19,7 @@ Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated
 
 ### Why it matters
 
-- SuperSonic's own code (ingress/egress, SuperClock, scheduler, MIDI, the JS platform layer) is **`MIT OR GPL-3.0-or-later`** — deliberately permissive, so it can be embedded and redistributed without network-copyleft obligations.
+- SuperSonic as a whole is **AGPL-3.0-or-later**: the substrate it runs on, clockwork (ingress/egress, the clock, scheduler, MIDI, the JS client and workers), is AGPL-3.0-or-later or commercially licensed, and the combined program takes the AGPL side. What is SuperSonic's own — the scsynth glue, the host, the client layer over clockwork's — is GPL-3.0-or-later, with a few older client files still carrying `MIT OR GPL-3.0-or-later` headers; none of that is offered permissively as a product any more.
 - The forked scsynth *core* is **GPL-3.0-or-later** (inherited from upstream). This is the expected licence to keep syncing.
 - Upstream's **WASM port** ([PR #7428](https://github.com/supercollider/supercollider/pull/7428), `wasm-audio-worklet`) is licensed **GNU Affero GPL v3 (AGPL-3.0-or-later)**, which is broader than the GPL-3.0 core.
 
