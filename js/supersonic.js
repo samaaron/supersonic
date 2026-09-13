@@ -99,7 +99,7 @@ export class SuperSonic extends Clockwork {
    * reports without booting one — the suite does exactly that.
    */
   static getMetricsSchema() {
-    return Clockwork.mergeGuestMetrics(scsynthProfile);
+    return Clockwork.mergeGuestMetrics(scsynthProfile.metrics, scsynthProfile.metricsPanels);
   }
 
   #synthdefBaseURL;
@@ -198,7 +198,8 @@ export class SuperSonic extends Clockwork {
     memory.maxInboxSize = memory.maxInboxSize ?? bufMax;
 
     super({
-      dsp: scsynthProfile,
+      guestMetrics: scsynthProfile.metrics,
+      guestMetricsPanels: scsynthProfile.metricsPanels,
       ...options,
       memory,
       // Opaque to clockwork; this class encodes it in encodeGuestConfig.
@@ -389,6 +390,11 @@ export class SuperSonic extends Clockwork {
    * their pointers. The queue keeps them in the order the caller wrote them.
    */
   send(address, ...args) {
+    // Nothing is refused here. Until 2026-09-13 eight verbs were — the
+    // file-path loads the browser cannot serve, /clearSched, /error — with a
+    // friendlier message than the engine's. The engine's own /fail is the
+    // honest answer for the seven, and /error -1/-2 is a standard way to
+    // quiet a bundle's failures that a blanket refusal forbade.
     // The definition verbs, tracked on the way past.
     //
     // Not intercepted — every one of these still goes to the engine exactly as
@@ -522,6 +528,14 @@ export class SuperSonic extends Clockwork {
   async sync(...args) {
     await this.#bufferQueue;
     return super.sync(...args);
+  }
+
+  /**
+   * clockwork's request(), with scsynth's word for a refusal filled in:
+   * `/fail` rejects unless the caller names another.
+   */
+  request(address, args = [], options = {}) {
+    return super.request(address, args, { error: "/fail", ...options });
   }
 
   /**

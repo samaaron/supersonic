@@ -29,26 +29,6 @@ export const scsynthProfile = Object.freeze({
   nameOf: extractSynthDefName,
   forgetVerb: "/d_free",
   forgetAllVerb: "/d_freeAll",
-  syncVerb: "/sync",
-  syncedVerb: "/synced",
-  /*
-   * Verbs the engine would take literally, refused client-side.
-   *
-   * Each names a file or a scheduler the browser does not have, or a setting
-   * this product deliberately fixes. Refusing them here, with the alternative
-   * in the message, is better than letting them reach an engine that will
-   * either fail obscurely or quietly do nothing.
-   */
-  blockedVerbs: Object.freeze({
-    "/d_load":        "Use loadSynthDef() or send /d_recv with synthdef bytes instead.",
-    "/d_loadDir":     "Use loadSynthDef() or send /d_recv with synthdef bytes instead.",
-    "/b_read":        "Use loadSample() to load audio into a buffer.",
-    "/b_readChannel": "Use loadSample() to load audio into a buffer.",
-    "/b_write":       "Writing audio files is not available in the browser.",
-    "/b_close":       "Writing audio files is not available in the browser.",
-    "/clearSched":    "Use purge() to clear both the JS prescheduler and WASM scheduler.",
-    "/error":         "SuperSonic always enables error notifications so you never miss a /fail message.",
-  }),
 
   /*
    * What scsynth exposes that clockwork cannot name.

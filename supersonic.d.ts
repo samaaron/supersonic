@@ -203,8 +203,8 @@ export interface ActivityLineConfig {
 export interface SuperSonicOptions {
   /**
    * Transport mode.
-   * - `'postMessage'` (default) — works everywhere, no special headers needed
-   * - `'sab'` — lowest latency, requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers
+   * - `'postMessage'` — works everywhere, no special headers needed (the default off an isolated page)
+   * - `'sab'` — lowest latency, requires the Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers (the default on a cross-origin isolated page)
    *
    * See docs/MODES.md for a full comparison of communication modes.
    */
@@ -1161,14 +1161,6 @@ export declare const osc: {
 /** Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace */
 export type AddAction = 0 | 1 | 2 | 3 | 4;
 
-/** Commands blocked at runtime — typed as compile-time errors */
-export type BlockedCommand =
-  | '/d_load' | '/d_loadDir'
-  | '/b_read' | '/b_readChannel'
-  | '/b_write' | '/b_close'
-  | '/clearSched' | '/error'
-  | '/quit';
-
 // ============================================================================
 // SuperSonic
 // ============================================================================
@@ -1530,32 +1522,12 @@ export class SuperSonic {
    * sonic.send('/b_alloc', 0, 44100, 1);
    * await sonic.sync(); // waits for buffer allocation to complete
    *
-   * // Blocked commands throw with a helpful message:
-   * sonic.send('/d_load', 'beep');
-   * // Error: /d_load is not supported. Use loadSynthDef() or send /d_recv instead.
    */
 
-  // ── Blocked commands ─────────────────────────────────────────────────
-  // These throw at runtime. Typed as `never` with deprecation hints.
-
-  /** @deprecated Use loadSynthDef() or send('/d_recv', bytes) instead. Filesystem access is not available in the browser. */
-  send(address: '/d_load', ...args: OscArg[]): never;
-  /** @deprecated Use loadSynthDef() or send('/d_recv', bytes) instead. Filesystem access is not available in the browser. */
-  send(address: '/d_loadDir', ...args: OscArg[]): never;
-  /** @deprecated Use loadSample() instead. Filesystem access is not available in the browser. */
-  send(address: '/b_read', ...args: OscArg[]): never;
-  /** @deprecated Use loadSample() instead. Filesystem access is not available in the browser. */
-  send(address: '/b_readChannel', ...args: OscArg[]): never;
-  /** @deprecated File writing is not available in the browser. */
-  send(address: '/b_write', ...args: OscArg[]): never;
-  /** @deprecated File writing is not available in the browser. */
-  send(address: '/b_close', ...args: OscArg[]): never;
-  /** @deprecated Use purge() to clear the WASM BundleScheduler + IN ring. */
-  send(address: '/clearSched', ...args: OscArg[]): never;
-  /** @deprecated SuperSonic always enables error notifications so you never miss a /fail reply. */
-  send(address: '/error', ...args: OscArg[]): never;
-  /** @deprecated Use destroy() to shut down SuperSonic. */
-  send(address: '/quit', ...args: OscArg[]): never;
+  // Nothing is refused client-side: a verb the browser cannot serve (a
+  // file-path load, a file write) gets the engine's own /fail, and /error
+  // and /clearSched do what they do in scsynth. (Eight verbs were typed
+  // `never` and refused in send() until 2026-09-13.)
 
   // ── Top-level commands ─────────────────────────────────────────────
 

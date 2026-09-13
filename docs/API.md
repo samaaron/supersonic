@@ -10,7 +10,7 @@
 
 * **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [ClockworkClock](#clockworkclock) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [NativeStatDefinition](#nativestatdefinition) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
-* **Type Aliases** — [AddAction](#addaction) · [BlockedCommand](#blockedcommand) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
+* **Type Aliases** — [AddAction](#addaction) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
 ## Classes
 
@@ -192,31 +192,31 @@ const sonic = new SuperSonic({
 
 #### Constructor Options
 
-| Property                                                | Type                                        | Description                                                                                                                                                                                                                                                        | Required |
-| ------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
-| <a id="activityevent"></a> `activityEvent?`             | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                       |          |
-| <a id="audiocontext-1"></a> `audioContext?`             | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                            |          |
-| <a id="audiocontextoptions"></a> `audioContextOptions?` | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                     |          |
-| <a id="autoconnect"></a> `autoConnect?`                 | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                  |          |
-| <a id="baseurl"></a> `baseURL?`                         | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                          | Yes\*    |
-| <a id="buffergrowincrement"></a> `bufferGrowIncrement?` | `number`                                    | Bytes to grow the buffer pool per growth event. Default: 32MB.                                                                                                                                                                                                     |          |
-| <a id="corebaseurl"></a> `coreBaseURL?`                 | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                           |          |
-| <a id="debug-1"></a> `debug?`                           | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                  |          |
-| <a id="debugoscin"></a> `debugOscIn?`                   | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
-| <a id="debugoscout"></a> `debugOscOut?`                 | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                              |          |
-| <a id="debugscsynth"></a> `debugScsynth?`               | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                               |          |
-| <a id="fetchmaxretries"></a> `fetchMaxRetries?`         | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                 |          |
-| <a id="fetchretrydelay"></a> `fetchRetryDelay?`         | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                             |          |
-| <a id="maxbuffermemory"></a> `maxBufferMemory?`         | `number`                                    | Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB.                                                                                                                                                                      |          |
-| <a id="mode-5"></a> `mode?`                             | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` (default) — works everywhere, no special headers needed - `'sab'` — lowest latency, requires Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers See docs/MODES.md for a full comparison of communication modes. |          |
-| <a id="samplebaseurl"></a> `sampleBaseURL?`             | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                    |          |
-| <a id="scsynthoptions-1"></a> `scsynthOptions?`         | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                     |          |
-| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`   | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                       |          |
-| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`         | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                    |          |
-| <a id="wasmbaseurl"></a> `wasmBaseURL?`                 | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                      |          |
-| <a id="wasmurl"></a> `wasmUrl?`                         | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                |          |
-| <a id="workerbaseurl"></a> `workerBaseURL?`             | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                               |          |
-| <a id="workleturl"></a> `workletUrl?`                   | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                      |          |
+| Property                                                | Type                                        | Description                                                                                                                                                                                                                                                                                                                                   | Required |
+| ------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| <a id="activityevent"></a> `activityEvent?`             | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                                                                                                  |          |
+| <a id="audiocontext-1"></a> `audioContext?`             | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                                                                                                       |          |
+| <a id="audiocontextoptions"></a> `audioContextOptions?` | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                                                                                                |          |
+| <a id="autoconnect"></a> `autoConnect?`                 | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                                                                                             |          |
+| <a id="baseurl"></a> `baseURL?`                         | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                                                                                                     | Yes\*    |
+| <a id="buffergrowincrement"></a> `bufferGrowIncrement?` | `number`                                    | Bytes to grow the buffer pool per growth event. Default: 32MB.                                                                                                                                                                                                                                                                                |          |
+| <a id="corebaseurl"></a> `coreBaseURL?`                 | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                                                                                                      |          |
+| <a id="debug-1"></a> `debug?`                           | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                                                                                             |          |
+| <a id="debugoscin"></a> `debugOscIn?`                   | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                                                                                                         |          |
+| <a id="debugoscout"></a> `debugOscOut?`                 | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                                                                                                         |          |
+| <a id="debugscsynth"></a> `debugScsynth?`               | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                                                                                                          |          |
+| <a id="fetchmaxretries"></a> `fetchMaxRetries?`         | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                                                                                            |          |
+| <a id="fetchretrydelay"></a> `fetchRetryDelay?`         | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                                                                                                        |          |
+| <a id="maxbuffermemory"></a> `maxBufferMemory?`         | `number`                                    | Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB.                                                                                                                                                                                                                                                 |          |
+| <a id="mode-5"></a> `mode?`                             | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` — works everywhere, no special headers needed (the default off an isolated page) - `'sab'` — lowest latency, requires the Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers (the default on a cross-origin isolated page) See docs/MODES.md for a full comparison of communication modes. |          |
+| <a id="samplebaseurl"></a> `sampleBaseURL?`             | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                                                                                               |          |
+| <a id="scsynthoptions-1"></a> `scsynthOptions?`         | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                                                                                                |          |
+| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`   | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                                                                                                  |          |
+| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`         | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                                                                                               |          |
+| <a id="wasmbaseurl"></a> `wasmBaseURL?`                 | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                                                                                                 |          |
+| <a id="wasmurl"></a> `wasmUrl?`                         | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                                                                                           |          |
+| <a id="workerbaseurl"></a> `workerBaseURL?`             | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                                                                                                          |          |
+| <a id="workleturl"></a> `workletUrl?`                   | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                                                                                                 |          |
 
 *Required unless both `coreBaseURL`/`workerBaseURL` and `wasmBaseURL` are provided.*
 
@@ -1139,177 +1139,6 @@ if (loaded.some(b => b.hash === info.hash)) {
 ```
 
 ##### send()
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/d_load"`            |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-Use loadSynthDef() or send('/d\_recv', bytes) instead. Filesystem access is not available in the browser.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/d_loadDir"`         |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-Use loadSynthDef() or send('/d\_recv', bytes) instead. Filesystem access is not available in the browser.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/b_read"`            |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-Use loadSample() instead. Filesystem access is not available in the browser.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/b_readChannel"`     |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-Use loadSample() instead. Filesystem access is not available in the browser.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/b_write"`           |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-File writing is not available in the browser.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/b_close"`           |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-File writing is not available in the browser.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/clearSched"`        |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-Use purge() to clear the WASM BundleScheduler + IN ring.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/error"`             |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-SuperSonic always enables error notifications so you never miss a /fail reply.
-
-###### Call Signature
-
-> **send**(`address`, ...`args`): `never`
-
-###### Parameters
-
-| Parameter | Type                   |
-| --------- | ---------------------- |
-| `address` | `"/quit"`              |
-| ...`args` | [`OscArg`](#oscarg)\[] |
-
-###### Returns
-
-`never`
-
-###### Deprecated
-
-Use destroy() to shut down SuperSonic.
 
 ###### Call Signature
 
@@ -3627,14 +3456,6 @@ Groups contain children; synths are leaves.
 > **AddAction** = `0` | `1` | `2` | `3` | `4`
 
 Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace
-
-***
-
-### BlockedCommand
-
-> **BlockedCommand** = `"/d_load"` | `"/d_loadDir"` | `"/b_read"` | `"/b_readChannel"` | `"/b_write"` | `"/b_close"` | `"/clearSched"` | `"/error"` | `"/quit"`
-
-Commands blocked at runtime — typed as compile-time errors
 
 ***
 

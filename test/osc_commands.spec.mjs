@@ -119,42 +119,51 @@ test.describe("Top-level Commands", () => {
     expect(result.success).toBe(true);
   });
 
-  test("/error - throws error (unsupported in SuperSonic)", async ({ page, sonicConfig }) => {
+  test("/error 0 silences /fail and /error 1 brings it back — the engine's switch, not the client's", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
-
+      const messages = [];
+      sonic.on('in', (msg) => messages.push(msg));
       await sonic.init();
-      try {
-        await sonic.send("/error", 1);
-        return { threw: false };
-      } catch (e) {
-        return { threw: true, message: e.message };
-      }
+      // A stale reference: freeing a node that never existed is what /fail is for.
+      sonic.send("/error", 0);
+      sonic.send("/n_free", 987654);
+      await sonic.sync();
+      const quiet = messages.filter((m) => m[0] === "/fail").length;
+      sonic.send("/error", 1);
+      sonic.send("/n_free", 987654);
+      await sonic.sync();
+      const loud = messages.filter((m) => m[0] === "/fail");
+      await sonic.destroy();
+      return { quiet, loud: loud.length, what: loud[0]?.[1] ?? null };
     }, sonicConfig);
 
-    expect(result.threw).toBe(true);
-    expect(result.message).toContain("not supported");
+    expect(result.quiet, "with notifications off, no /fail").toBe(0);
+    expect(result.loud, "with them on, the /fail arrives").toBe(1);
+    expect(result.what).toBe("/n_free");
   });
 
-  test("/clearSched - throws error (unsupported in SuperSonic)", async ({ page, sonicConfig }) => {
+  test("/clearSched reaches the engine and the engine goes on answering", async ({ page, sonicConfig }) => {
     await page.goto("/test/harness.html");
 
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
-
+      const messages = [];
+      sonic.on('in', (msg) => messages.push(msg));
       await sonic.init();
-      try {
-        await sonic.send("/clearSched");
-        return { threw: false };
-      } catch (e) {
-        return { threw: true, message: e.message };
-      }
+      let threw = null;
+      try { sonic.send("/clearSched"); } catch (e) { threw = e.message; }
+      sonic.send("/status");
+      await sonic.sync();
+      const status = messages.find((m) => m[0] === "/status.reply");
+      await sonic.destroy();
+      return { threw, answered: !!status };
     }, sonicConfig);
 
-    expect(result.threw).toBe(true);
-    expect(result.message).toContain("not supported");
+    expect(result.threw, "nothing is refused client-side").toBeNull();
+    expect(result.answered).toBe(true);
   });
 
   test("/dumpOSC - enables OSC message dumping to debug output", async ({ page, sonicConfig }) => {

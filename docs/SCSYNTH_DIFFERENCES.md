@@ -121,11 +121,17 @@ These UGens are not currently compiled into SuperSonic:
 
 ---
 
-## Unsupported OSC Commands
+## OSC Commands the Browser Cannot Serve
+
+Nothing is refused by the client: every verb goes to the engine, and the
+engine's own `/fail` is the answer for the ones a browser cannot serve. (Until
+2026-09-13 the client refused these itself with a friendlier message; the
+engine's answer is the honest one, and `/error -1`/`-2` — quieting one
+bundle's failures — is a standard scsynth idiom the refusal forbade.)
 
 ### Filesystem Commands
 
-No filesystem in browser, so file-based commands aren't available:
+No filesystem in the browser, so file-based commands fail:
 
 | Command | Alternative |
 |---------|-------------|
@@ -140,11 +146,11 @@ No filesystem in browser, so file-based commands aren't available:
 
 ### Scheduling and Control Commands
 
-| Command | Reason / Alternative |
-|---------|---------------------|
-| `/clearSched` | Use `purge()` to clear both the JS prescheduler and WASM scheduler |
-| `/error` | SuperSonic always enables error notifications |
-| `/quit` | Use `destroy()` to shut down SuperSonic |
+| Command | Note |
+|---------|------|
+| `/clearSched` | Works as in scsynth. `purge()` additionally clears the client's own queue |
+| `/error` | Works as in scsynth: `/error 0` silences `/fail`, which the client's own waits then time out on |
+| `/quit` | There is no process to quit; `destroy()` shuts the engine down |
 
 ### Plugin Commands
 

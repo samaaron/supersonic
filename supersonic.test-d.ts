@@ -31,7 +31,6 @@ import type {
   OscChannelPMTransferable,
   OscChannelTransferable,
   AddAction,
-  BlockedCommand,
   UUID,
   NodeID,
 } from './supersonic';
@@ -587,7 +586,6 @@ declare const msKey: keyof typeof schema.metrics;
 expectAssignable<keyof SuperSonicMetrics>(msKey);
 
 // ============================================================================
-// Section 11: AddAction & BlockedCommand Types
 // ============================================================================
 
 // AddAction — 0-4 valid
@@ -599,32 +597,9 @@ expectAssignable<AddAction>(4);
 expectNotAssignable<AddAction>(5);
 expectNotAssignable<AddAction>(-1);
 
-// BlockedCommand — all 9
-expectAssignable<BlockedCommand>('/d_load');
-expectAssignable<BlockedCommand>('/d_loadDir');
-expectAssignable<BlockedCommand>('/b_read');
-expectAssignable<BlockedCommand>('/b_readChannel');
-expectAssignable<BlockedCommand>('/b_write');
-expectAssignable<BlockedCommand>('/b_close');
-expectAssignable<BlockedCommand>('/clearSched');
-expectAssignable<BlockedCommand>('/error');
-expectAssignable<BlockedCommand>('/quit');
-expectNotAssignable<BlockedCommand>('/s_new');
-
 // ============================================================================
 // Section 12: Typed send() Overloads
 // ============================================================================
-
-// --- Blocked commands produce `never` ---
-expectType<never>(sonic.send('/d_load', 'beep'));
-expectType<never>(sonic.send('/d_loadDir', '/path'));
-expectType<never>(sonic.send('/b_read', 0, '/file'));
-expectType<never>(sonic.send('/b_readChannel', 0, '/file'));
-expectType<never>(sonic.send('/b_write', 0, '/file'));
-expectType<never>(sonic.send('/b_close', 0));
-expectType<never>(sonic.send('/clearSched'));
-expectType<never>(sonic.send('/error', 1));
-expectType<never>(sonic.send('/quit'));
 
 // --- Top-level commands ---
 expectType<void>(sonic.send('/status'));
