@@ -136,6 +136,8 @@ let analyser = null,
 let trailParticles = [],
   trailActive = false,
   trailReleaseTime = null;
+// The blob and its trail share one frame — see padTick.
+let padFrame = null;
 let fxChainInitialized = false,
   fxChainInitializing = null;
 let synthdefsLoaded = { fx: false, instruments: false };
@@ -667,7 +669,6 @@ function drawScope() {
   scopeCtx.lineTo(scopeW, scopeH / 2);
   scopeCtx.stroke();
 
-  if (trailActive) updateTrail();
   if (nodeTreeVizActive) nodeTreeViz.update();
 }
 
@@ -773,7 +774,10 @@ function spawnTrailParticle() {
 }
 
 function updateTrail() {
-  if (!trailCtx) return;
+  if (!trailCtx) {
+    trailActive = false;
+    return;
+  }
 
   const inRelease = !uiState.padActive && trailReleaseTime !== null;
   const elapsed = inRelease ? (performance.now() - trailReleaseTime) / 1000 : 0;
@@ -829,8 +833,34 @@ function updateTrail() {
 function startTrailAnimation() {
   trailReleaseTime = null;
   trailActive = true;
-  // The path starts where the blob is now, not where the last trail ended.
-  lastSpawnX = lastSpawnY = null;
+  // The path starts where the blob is now, not where the last trail ended —
+  // anchored here, before the blob's next step, so that step is laid too.
+  if (trailCanvas) {
+    lastSpawnX = uiState.padX * trailCanvas.width;
+    lastSpawnY = (1 - uiState.padY) * trailCanvas.height;
+  } else {
+    lastSpawnX = lastSpawnY = null;
+  }
+  requestPadFrame();
+}
+
+// One frame for the pad: the blob steps, then the trail is laid along the
+// path it just took and drawn, so what is on screen each frame is the blob
+// and its trail up to it. They used to be two rAF loops — the blob's own,
+// and the scope's, which drew the trail — and rAF runs callbacks in the
+// order they were registered, the scope's first, so the trail was drawn a
+// frame behind the blob. One frame is up to 50 ms of travel (stepBlob's
+// cap), half the glide: on a slow machine the blob arrived with its trail
+// visibly short of it. The loop runs while either has work and stops itself.
+function padTick(now) {
+  padFrame = null;
+  if (blobMoving()) stepBlob(now);
+  if (trailActive) updateTrail();
+  if (blobMoving() || trailActive) padFrame = requestAnimationFrame(padTick);
+}
+
+function requestPadFrame() {
+  if (padFrame === null) padFrame = requestAnimationFrame(padTick);
 }
 
 function stopTrailAnimation() {
@@ -927,6 +957,7 @@ async function wakeUp() {
 
   if (uiState.padActive || isAutoPlaying) {
     trailActive = true;
+    requestPadFrame();
   }
 
   if (nodeTreeViz) {
@@ -945,6 +976,17 @@ createVisibilityObserver();
 
 // ===== SCHEDULER WORKER =====
 let schedulerWorker = null;
+// Resolves once the worker holds a live OscChannel — the point from which a
+// "start" reaches a scheduler that can send, and the Autoplay button is
+// enabled. Renewed whenever the channel is (a rebuild hands it a new one).
+let schedulerReady = null;
+let resolveSchedulerReady = null;
+
+function renewSchedulerReady() {
+  schedulerReady = new Promise((resolve) => {
+    resolveSchedulerReady = resolve;
+  });
+}
 let schedulerRunning = { arp: false, kick: false, amen: false };
 
 function initSchedulerWorker() {
@@ -954,6 +996,7 @@ function initSchedulerWorker() {
     return;
   }
 
+  renewSchedulerReady();
   schedulerWorker = new Worker("assets/scheduler-worker.js", { type: "module" });
 
   schedulerWorker.onmessage = (e) => {
@@ -978,11 +1021,11 @@ function initSchedulerWorker() {
     } else if (type === "channelReady") {
       if (DEV_MODE) console.log("Scheduler worker has direct worklet connection");
       $("play-toggle")?.classList.remove("disabled");
+      resolveSchedulerReady();
     } else if (type === "started" && e.data.scheduler === "arp") {
       // Sync main thread timing with worker for beat pulse
       playbackStartNTP = e.data.playbackStartNTP;
       startBeatPulse();
-      startTrailAnimation();
     }
   };
 
@@ -1192,6 +1235,7 @@ async function startArpeggiator() {
   if (!synthdefsLoaded.instruments) await loadSynthdefs("instruments");
   if (!fxChainInitialized) await initFXChain();
   if (!schedulerWorker) initSchedulerWorker();
+  await schedulerReady;
   schedulerWorker.postMessage({ type: "start", scheduler: "arp" });
   schedulerRunning.arp = true;
   // Beat pulse is started via worker's "started" message for proper sync
@@ -1221,6 +1265,7 @@ async function startKickLoop() {
     await loadAllKickSamples();
   }
   if (!schedulerWorker) initSchedulerWorker();
+  await schedulerReady;
   schedulerWorker.postMessage({ type: "start", scheduler: "kick" });
   schedulerRunning.kick = true;
 }
@@ -1247,6 +1292,7 @@ async function startAmenLoop() {
   if (!fxChainInitialized) await initFXChain();
   if (!samplesLoaded.loops) await loadAllLoopSamples();
   if (!schedulerWorker) initSchedulerWorker();
+  await schedulerReady;
   schedulerWorker.postMessage({ type: "start", scheduler: "amen" });
   schedulerRunning.amen = true;
 }
@@ -1356,6 +1402,11 @@ async function startAll() {
   if (!samplesLoaded.kick) { await loadAllKickSamples(); if (stale()) return; }
   if (!samplesLoaded.loops) { await loadAllLoopSamples(); if (stale()) return; }
   if (!schedulerWorker) initSchedulerWorker();
+  // A "start" posted before the worker has its channel reaches schedulers
+  // that cannot send, and startAll() used to resolve here with the Autoplay
+  // button still disabled: a press right then was dropped.
+  await schedulerReady;
+  if (stale()) return;
   // Unmute and reset scheduler state before starting
   unmuteOutput();
   schedulerWorker.postMessage({ type: "reset" });
@@ -1427,7 +1478,9 @@ const padYVal = $("pad-y-value");
 // not keep up with a drag: pointer events arrive faster than frames, every
 // event reset its clock, and each frame then advanced by only the few
 // milliseconds since the last event. The lag grew with pointer speed.
-const blob = { x: 0.5, y: 0.5, toX: 0.5, toY: 0.5, vx: 0, vy: 0, last: 0, raf: null };
+const blob = { x: 0.5, y: 0.5, toX: 0.5, toY: 0.5, vx: 0, vy: 0, last: 0 };
+
+const blobMoving = () => blob.vx !== 0 || blob.vy !== 0;
 
 function paintBlob(x, y) {
   uiState.padX = x;
@@ -1457,19 +1510,17 @@ function stepBlob(now) {
   [blob.x, blob.vx] = advance(blob.x, blob.toX, blob.vx, dt);
   [blob.y, blob.vy] = advance(blob.y, blob.toY, blob.vy, dt);
   paintBlob(blob.x, blob.y);
-  blob.raf = blob.vx !== 0 || blob.vy !== 0 ? requestAnimationFrame(stepBlob) : null;
 }
 
 function slideBlobTo(x, y) {
   const ms = FX_SLIDE_S * 1000;
+  const wasMoving = blobMoving();
   blob.toX = x;
   blob.toY = y;
   blob.vx = (x - blob.x) / ms;
   blob.vy = (y - blob.y) / ms;
-  if (blob.raf === null) {
-    blob.last = performance.now();
-    blob.raf = requestAnimationFrame(stepBlob);
-  }
+  if (!wasMoving) blob.last = performance.now();
+  requestPadFrame();
   updateFXParameters(x, y);
 }
 
@@ -1496,6 +1547,7 @@ if (synthPad) {
     padTouch.classList.add("active");
     $("synth-pad-crosshair").classList.add("active");
     updatePadPosition(clientX, clientY);
+    startTrailAnimation();
     startAll(); // Handles wakeUp, re-entrance, and finishing abort
   }
 
@@ -1572,7 +1624,11 @@ $("play-toggle")?.addEventListener("click", async function () {
       slideBlobTo(padding / rect.width, 1 - padding / rect.height);
     }
 
-    // Trail animation starts via "started" message for proper sync
+    // The trail follows the blob from the press. It used to wait for the
+    // worker's "started" reply, a message later: on a slow machine the
+    // blob was some way along before the trail began, and the first
+    // stretch of its path stayed dark.
+    startTrailAnimation();
     startAll();
   } else {
     // Stop playback and remove visual state
@@ -1838,6 +1894,7 @@ $("init-button").addEventListener("click", async () => {
 
       // Re-initialize scheduler worker with new OscChannel after reset
       if (schedulerWorker) {
+        renewSchedulerReady();
         schedulerWorker.postMessage({ type: "reset" });
         const channel = orchestrator.createOscChannel();
         schedulerWorker.postMessage(

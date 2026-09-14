@@ -73,6 +73,17 @@ test("the fx chain's cutoff and mix glide rather than snap", async ({ page }) =>
 // path. Autoplay used to animate the pointer over 1.2 s while the sound had
 // long since arrived; a press used to jump the blob and leave the trail with
 // gaps.
+//
+// Two things this pins were flakes on a loaded CI runner. startAll() used to
+// resolve before the scheduler worker had its channel, with the Autoplay
+// button still disabled, so a press right after it was dropped: the blob
+// stayed put and the cutoff stayed wide open. And the trail was drawn a
+// frame behind the blob (two rAF loops, the scope's — which drew the trail —
+// registered first), so at the moment the blob arrived the trail was short
+// of it by a frame's travel, half the glide on a slow frame; a wall-clock
+// wait for the next frame is not a guarantee. The page now steps the blob
+// and lays its trail in one frame, and that is what is checked, every
+// frame: the path behind the blob has no gap, however fast the frames come.
 test("the blob arrives with the sound and the trail follows its path", async ({ page }) => {
   const errors = watch(page);
   await page.goto("/example/demo.html");
@@ -95,43 +106,80 @@ test("the blob arrives with the sound and the trail follows its path", async ({ 
       o.send("/s_get", node, control);
     });
     await window.startAll();
+    const button = document.getElementById("play-toggle");
+    const disabledAtPress = button.classList.contains("disabled");
 
     const rect = document.getElementById("synth-pad").getBoundingClientRect();
     const target = { x: 60 / rect.width, y: 1 - 60 / rect.height }; // where Autoplay parks
     const start = { x: ui.padX, y: ui.padY };
+    // The trail canvas, read whole once per frame; the path is then walked
+    // pixel by pixel in it. Lit at a point means a particle was drawn over
+    // a 5x5 patch there. The trail is laid as clusters 6 px apart along the
+    // path, so up to a few pixels short of the blob nothing longer than
+    // two spacings may be dark: that is a gap, not a scatter miss.
+    const c = document.getElementById("trail-canvas");
+    const ctx = c.getContext("2d");
+    const sx = start.x * c.width, sy = (1 - start.y) * c.height;
+    const tx = target.x * c.width, ty = (1 - target.y) * c.height;
+    const pathPx = Math.hypot(tx - sx, ty - sy);
+    const litAt = (img, d) => {
+      const px = Math.round(sx + ((tx - sx) * d) / pathPx);
+      const py = Math.round(sy + ((ty - sy) * d) / pathPx);
+      let m = 0;
+      for (let y = py - 2; y <= py + 2; y++) {
+        for (let x = px - 2; x <= px + 2; x++) {
+          const k = (y * img.width + x) * 4;
+          m = Math.max(m, img.data[k], img.data[k + 1], img.data[k + 2]);
+        }
+      }
+      return m;
+    };
+    // Longest dark run, in px, from just past the start to `upto` px along,
+    // and the dimmest point on the way.
+    const longestGap = (img, upto) => {
+      let gap = 0, run = 0, dimmest = 255;
+      for (let d = 6; d <= upto; d++) {
+        const v = litAt(img, d);
+        dimmest = Math.min(dimmest, v);
+        run = v > 30 ? 0 : run + 1;
+        gap = Math.max(gap, run);
+      }
+      return { gap, dimmest };
+    };
+    const along = () => {
+      const bx = ui.padX * c.width, by = (1 - ui.padY) * c.height;
+      return ((bx - sx) * (tx - sx) + (by - sy) * (ty - sy)) / pathPx;
+    };
+    // The last cluster sits under a spacing (6 px) short of the blob, and
+    // its glow reaches a few pixels past it, so this close to the blob the
+    // trail is lit. Tighter than a frame's travel at 120 Hz (23 px): a
+    // trail laid a frame behind the blob shows as a gap here.
+    const BEHIND_PX = 8;
+
     const t0 = performance.now();
-    document.getElementById("play-toggle").click();
+    button.click();
     const atOnce = { x: ui.padX, y: ui.padY };
     const cutoffAtOnce = await get(2000, "cutoff");
 
     let arrivedAt = null;
+    const frames = [];
     while (performance.now() - t0 < 1500) {
       await new Promise((r) => requestAnimationFrame(r));
+      const img = ctx.getImageData(0, 0, c.width, c.height);
+      const at = along();
+      frames.push({ t: Math.round(performance.now() - t0), at: Math.round(at), ...longestGap(img, at - BEHIND_PX) });
       if (Math.abs(ui.padX - target.x) < 0.005 && Math.abs(ui.padY - target.y) < 0.005) {
         arrivedAt = performance.now() - t0;
         break;
       }
     }
-    await new Promise((r) => setTimeout(r, 80));
-
-    // Eight points along the straight path, each read as a 5x5 patch of the
-    // trail canvas: lit means a particle was laid there.
-    const c = document.getElementById("trail-canvas");
-    const ctx = c.getContext("2d");
-    const lit = [];
-    for (let i = 1; i <= 8; i++) {
-      const f = i / 9;
-      const px = Math.round((start.x + (target.x - start.x) * f) * c.width);
-      const py = Math.round((1 - (start.y + (target.y - start.y) * f)) * c.height);
-      const d = ctx.getImageData(px - 2, py - 2, 5, 5).data;
-      let m = 0;
-      for (let k = 0; k < d.length; k += 4) m = Math.max(m, d[k], d[k + 1], d[k + 2]);
-      lit.push(m);
-    }
+    const final = longestGap(ctx.getImageData(0, 0, c.width, c.height), pathPx - BEHIND_PX);
     window.stopAll();
-    return { start, target, atOnce, cutoffAtOnce, expectedCutoff: 30 + target.y * 100, arrivedAt, lit };
+    return { start, target, atOnce, cutoffAtOnce, expectedCutoff: 30 + target.y * 100, arrivedAt, pathPx, frames, final, disabledAtPress };
   });
 
+  // A started page takes the press: the button is live once startAll() is.
+  expect(r.disabledAtPress, "Autoplay button still disabled after startAll()").toBe(false);
   // The sound has its target the moment the button is pressed...
   expect(r.cutoffAtOnce).toBeCloseTo(r.expectedCutoff, 1);
   // ...and the blob has not jumped there: it travels.
@@ -140,8 +188,15 @@ test("the blob arrives with the sound and the trail follows its path", async ({ 
   expect(r.arrivedAt, "the blob never arrived").not.toBeNull();
   expect(r.arrivedAt).toBeGreaterThan(40);
   expect(r.arrivedAt).toBeLessThan(400);
-  // And the trail is a line along the way it came, not a few dots.
-  expect(r.lit.filter((v) => v > 30).length, `trail brightness along the path: ${r.lit}`).toBeGreaterThanOrEqual(7);
+  // And the trail is a line along the way it came, not a few dots — laid
+  // up to the blob in every frame, not a frame behind it.
+  // Clusters are 6 px apart: a dark run longer than that is a gap.
+  const describe = (f) => `${f.t}ms at ${f.at}px gap ${f.gap}px dimmest ${f.dimmest}`;
+  expect(r.frames.length, "no frame was observed").toBeGreaterThan(0);
+  for (const f of r.frames) {
+    expect(f.gap, `trail short of the blob (${describe(f)}); frames: ${r.frames.map(describe).join(", ")}`).toBeLessThanOrEqual(6);
+  }
+  expect(r.final.gap, `gap in the trail along the ${Math.round(r.pathPx)}px path (dimmest ${r.final.dimmest})`).toBeLessThanOrEqual(6);
   expect(errors, "the page reported errors").toEqual([]);
 });
 
