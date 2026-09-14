@@ -31,17 +31,17 @@ SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwo
 - **scsynth compatible** - *full OSC command compatibility with SuperCollider's scsynth. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
 - **Live metrics** - *cheap, zero-copy telemetry in both transport modes: OSC throughput, scheduler depth and lateness, ring buffer fill and a live node-tree mirror. See [metrics](docs/METRICS.md).*
 - **Malloc-free audio path** - *zero allocation or blocking on the audio thread.*
-- **Pre-scheduler** - *dynamically growing holding bay for future OSC bundles with cancellation support.*
-- **Cold-swap recovery** - *multiple restart levels with automatic synthdef and buffer restoration.*
+- **Scheduling in the engine** - *far-future bundles are held by the engine itself, timestamped to the sample; `/clockwork/sched/flush` cancels what is still waiting.*
+- **Cold swap** - *the engine can be rebuilt under a running client, for a device or rate change, with synthdefs and buffers restored by the client.*
 - **Upstream compatible** - *kept in sync with the official SuperCollider scsynth server.*
-- **Tested** - *1700+ tests across web and native targets, plus clockwork's own suite.*
+- **Tested** - *1400+ browser tests, each run in both transport modes, plus clockwork's own 3000+ native cases.*
 
 ### Web
 
 - **Dual transport** - *SharedArrayBuffer for performance, postMessage for zero-config CDN deployment.*
-- **Mobile resilient** - *suspend, resume and worklet death detection with automatic state restoration.*
+- **Mobile resilient** - *suspend and resume, a full reload when resume fails, and the client restores its synthdefs and buffers afterwards.*
 - **Observable** - *real-time telemetry: ring buffer usage, scheduler depth, audio health and glitch detection.*
-- **Multiple clients** - *give any Web Worker its own OscChannel to the AudioWorklet with automatic pre-scheduler routing for far-future events. Each channel carries a source ID visible in the aggregated OSC log.*
+- **Multiple clients** - *give any Web Worker its own OscChannel to the AudioWorklet. Each channel carries a source ID visible in the aggregated OSC log.*
 - **Thread-safe node IDs** - *`nextNodeId()` allocates unique node IDs across any number of threads and workers - guaranteed unique with no clashes.*
 - **Hosted on npm** - *available as `supersonic-scsynth` with separate packages for core, synthdefs and samples.*
 
@@ -50,7 +50,7 @@ SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwo
 - **Ableton Link v4** - *tempo sync across the network plus streaming Link Audio in and out.*
 - **Live device and driver switching** - *hot-swap at runtime with automatic cold swap on rate mismatch.*
 - **Headless mode** - *high-resolution timer-driven processing for CI and containers.*
-- **UDP OSC server** - *drop-in scsynth replacement with `/supersonic/*` device and recording commands.*
+- **UDP OSC server** - *drop-in scsynth replacement, with clockwork's `/clockwork/*` verbs for MIDI, gamepad, the clock, tracks and recording alongside.*
 
 ### NIF
 
