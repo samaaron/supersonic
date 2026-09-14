@@ -131,6 +131,18 @@
 //
 // VERSION IS FIRST because that word is the host's one convention. The rest
 // is ours to order.
+//
+// WHAT THE WINDOW IS, for a client that reads it by hand. The window's layout
+// is ours, so clockwork's arena table cannot describe its inside; it can say
+// whose it is. dsp_describe() declares these two words and clockwork copies
+// them into the table's window entry when the guest binds (clockwork_arena.h,
+// CLOCKWORK_GEOM_WINDOW_MAGIC / _VERSION). A client checks them before it
+// casts a pointer at the record below. Bump the version whenever
+// NodeTreeHeader or NodeEntry change shape; the parsers in
+// js/lib/node_tree_parser.js and rust/supersonic-node-mirror carry the same
+// two numbers.
+constexpr uint32_t NODE_TREE_WINDOW_MAGIC   = 0x53434E54u;   // 'SCNT': scsynth node tree
+constexpr uint32_t NODE_TREE_WINDOW_VERSION = 1u;
 constexpr uint32_t NODE_TREE_HEADER_SIZE   = 16;
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32;
 constexpr uint32_t NODE_TREE_ENTRY_SIZE    = 96;

@@ -14,6 +14,24 @@ export const NODE_TREE_HEADER_SIZE   = 16;
 export const NODE_TREE_ENTRY_SIZE    = 96;
 export const NODE_TREE_DEF_NAME_SIZE = 32;
 
+// What the window is, as the guest declares it and the arena table carries
+// it (the window entry's geometry words 0 and 1). The same two numbers as
+// dsp/scsynth/node_tree.h: check them before parsing a window by hand. Zeros
+// in the table mean the guest has not declared, or has not bound yet.
+export const NODE_TREE_WINDOW_MAGIC = 0x53434E54;   // 'SCNT': scsynth node tree
+export const NODE_TREE_WINDOW_VERSION = 1;
+
+/**
+ * Whether an arena window entry names this parser's layout.
+ * @param {{geom: number[]}} entry the arena's GUEST_WINDOW entry (js/lib/arena.js)
+ * @returns {true|false|null} true: ours; false: another guest or layout; null: not declared
+ */
+export function nodeTreeWindowMatches(entry) {
+  const magic = entry?.geom?.[0] ?? 0, version = entry?.geom?.[1] ?? 0;
+  if (magic === 0 && version === 0) return null;
+  return magic === NODE_TREE_WINDOW_MAGIC && version === NODE_TREE_WINDOW_VERSION;
+}
+
 export function parseNodeTree(buffer, treeOffset, windowBytes) {
 
   // Read header (3 x uint32)

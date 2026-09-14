@@ -167,6 +167,8 @@ Error counters for diagnosing issues.
 
 Beyond numeric metrics, SuperSonic mirrors the entire scsynth node tree to JavaScript via the same shared memory mechanism. This gives you a live view of every synth and group currently running - updated in real-time with zero OSC round-trip latency.
 
+The mirror lives in the guest window, a region clockwork lays out but never interprets, so the arena table also carries **whose** window it is: SuperSonic declares a magic (`'SCNT'`, `0x53434E54`) and a layout version (`1`) from `dsp_describe()`, and clockwork copies them into the table's window entry when the guest binds (`CLOCKWORK_GEOM_WINDOW_MAGIC`, `CLOCKWORK_GEOM_WINDOW_VERSION`). A reader checks them before parsing (`nodeTreeWindowMatches` in `js/lib/node_tree_parser.js`, `WINDOW_MAGIC`/`WINDOW_VERSION` in `supersonic-node-mirror`); zeros mean the guest has not bound yet.
+
 ```javascript
 const tree = supersonic.getTree();
 // {

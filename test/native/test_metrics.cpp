@@ -44,9 +44,15 @@ TEST_CASE("metrics: metricsPtr() matches getMetrics()", "[metrics][api]") {
     CHECK(fx.engine().metricsPtr() == &fx.engine().getMetrics());
 }
 
-TEST_CASE("metrics: METRICS_START offset is contiguous after CONTROL",
+// The arena is two runs per half (clockwork_arena.h, "Audiences"): the
+// metrics open the block's published run, right after the header, and the
+// control block opens the transport run after it. Readers find both by id,
+// never by position — these pin the layout's shape, not a neighbour.
+TEST_CASE("metrics: METRICS_START opens the block's published run, CONTROL the transport run",
           "[metrics][api]") {
-    CHECK(METRICS_START == CONTROL_START + CONTROL_SIZE);
+    CHECK(METRICS_START == ARENA_HEADER_START + ARENA_HEADER_SIZE);
+    CHECK(METRICS_START + METRICS_SIZE <= CLOCKWORK_BLOCK_PUBLISHED_END);
+    CHECK(CONTROL_START == CLOCKWORK_BLOCK_PUBLISHED_END);
 }
 
 // ============================================================================

@@ -243,9 +243,17 @@ void notify_record(NotifyPersist* n, uint32_t origin, bool on) {
 }
 
 const DspInfo kInfo = {
-    /* name            */ "scsynth",
-    /* version         */ "3.14.1",
-    /* holds_schedule  */ 0,          // clockwork holds timed messages for us
+    /* name                    */ "scsynth",
+    /* version                 */ "3.14.1",
+    /* holds_schedule          */ 0,          // clockwork holds timed messages for us
+    /* arena_bytes_wanted      */ 0,          // no claim: allocate from the system, as always
+    /* arena_bulk_bytes_wanted */ 0,
+    /* wants_events            */ 0,          // a client relays a keyboard to us
+    // What our window is: the node tree mirror, so a client reading the
+    // window by hand can check it is ours, and which layout, from the
+    // arena table (node_tree.h).
+    /* window_magic            */ NODE_TREE_WINDOW_MAGIC,
+    /* window_version          */ NODE_TREE_WINDOW_VERSION,
 };
 
 } // namespace

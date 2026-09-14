@@ -39,6 +39,12 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Bytes reserved for a name, terminator included.
 pub const DEF_NAME_SIZE: usize = 32;
+/// What the window is, as `dsp_describe` declares it and the arena table
+/// carries it: the same two numbers as `dsp/scsynth/node_tree.h`. A reader
+/// checks the table's window entry (geometry words 0 and 1) against these
+/// before it walks the record; bump the version with any change of shape.
+pub const WINDOW_MAGIC: u32 = 0x5343_4E54; // 'SCNT': scsynth node tree
+pub const WINDOW_VERSION: u32 = 1;
 
 /// The most entries any build mirrors. The real bound comes from the host and
 /// is never larger; it sizes the indices, which cannot be allocated at run
