@@ -1,16 +1,16 @@
 /*
  * test_lifecycle_leaks.cpp - Detect resource leaks across start/stop cycles.
  *
- * Drives 20 init/shutdown cycles in headless mode and asserts that file
- * descriptors and thread count return to baseline. RSS is permitted mild
- * drift but capped well below what an obvious leak would produce.
+ * Drives 40 init/shutdown cycles in headless mode and asserts that file
+ * descriptors and thread count return to baseline, and that the heap the
+ * allocator has in use does not keep rising (see heapInUseBytes).
  *
  * Scope: catches FD/thread regressions in the graceful no-throw lifecycle.
  * Does NOT exercise partial-init failure (init() throwing partway),
  * which needs a separate test with a failure-injection hook on the engine.
  * Does NOT install the macOS CoreAudio property listener, since the test
- * runs in headless mode. The RSS budget is generous, so small slow leaks
- * may not register.
+ * runs in headless mode. A leak smaller than kHeapDriftBytes over twenty
+ * cycles does not register.
  *
  * Linux-only: reads /proc/self. Test cases are compiled out on other
  * platforms.
@@ -20,15 +20,65 @@
 
 #if defined(__linux__)
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <string>
 #include <thread>
+#include <vector>
+
+// The heap is read from the allocator. Under AddressSanitizer malloc is the
+// sanitizer's and glibc's counters read zero — the sanitizer job runs this
+// test — so the sanitizer's own count is read there.
+#if defined(__SANITIZE_ADDRESS__)
+#  define LEAKS_UNDER_ASAN 1
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define LEAKS_UNDER_ASAN 1
+#  endif
+#endif
+#if defined(LEAKS_UNDER_ASAN)
+#  include <sanitizer/allocator_interface.h>
+#else
+#  include <malloc.h>
+#endif
 
 namespace {
+
+// How far the heap's floor may rise across twenty cycles. Measured on macOS
+// (2026-09-14, same engine, the system allocator's in-use count): the floor
+// rose 25 KB across twenty cycles, identically on two runs — about 1.25 KB a
+// boot. This allows forty times that, and fails a leak of 52 KB a cycle.
+constexpr size_t kHeapDriftBytes = 1024 * 1024;
+
+// Bytes the allocator has handed out and not been given back.
+//
+// Not resident memory. RSS also counts memory that was freed and that the
+// allocator kept, and when glibc keeps another region is its own business: on
+// 2026-09-14 the Debian build grew 0 KB over twenty engine cycles and 32 MB
+// over the next twenty, with file descriptors and threads exactly back, and
+// failed a README commit. In-use bytes rise only when something is allocated
+// and not freed, which is what a leak is.
+size_t heapInUseBytes() {
+#if defined(LEAKS_UNDER_ASAN)
+    return __sanitizer_get_current_allocated_bytes();
+#elif defined(__GLIBC__) && __GLIBC_PREREQ(2, 33)
+    const struct mallinfo2 mi = mallinfo2();
+    return mi.uordblks + mi.hblkhd;
+#else
+    const struct mallinfo mi = mallinfo();
+    return static_cast<size_t>(static_cast<unsigned>(mi.uordblks))
+         + static_cast<size_t>(static_cast<unsigned>(mi.hblkhd));
+#endif
+}
+
+size_t floorOver(const std::vector<size_t>& v, size_t from, size_t to) {
+    return *std::min_element(v.begin() + from, v.begin() + to);
+}
 
 long readRssKb() {
     FILE* f = std::fopen("/proc/self/status", "r");
@@ -94,7 +144,7 @@ int settleThreadCount(std::chrono::milliseconds timeout = std::chrono::milliseco
 }  // namespace
 
 TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][stress]") {
-    constexpr int kCycles = 20;
+    constexpr int kCycles = 40;
 
     ClockworkEngine::Config cfg;
     cfg.headless = true;
@@ -110,53 +160,90 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
         engine.shutdown();
     }
 
-    const long baselineRss      = readRssKb();
-    const int  baselineFds      = countFds();
-    const int  baselineThreads  = settleThreadCount();
+    const size_t baselineHeap    = heapInUseBytes();
+    const long   baselineRss     = readRssKb();
+    const int    baselineFds     = countFds();
+    const int    baselineThreads = settleThreadCount();
 
     REQUIRE(baselineRss > 0);
     REQUIRE(baselineFds > 0);
     REQUIRE(baselineThreads > 0);
 
-    auto cycles = [&] {
-        for (int i = 0; i < kCycles; ++i) {
+    // The heap, read after every cycle, once that cycle's engine is destroyed:
+    // a shut-down engine still owns its arena until then, and the warm-up's
+    // baseline is read the same way. A leak raises the heap's floor every
+    // cycle; something still live at the moment of a reading (a thread's
+    // cache, a buffer on its way to being freed) raises only that reading. So
+    // the rule compares floors: the lowest reading in cycles 30-39 against the
+    // lowest in cycles 10-19, twenty cycles apart. The first ten are left out
+    // for caches that fill on first use. Both vectors are sized before the
+    // first reading, so they add nothing to the heap they measure.
+    std::vector<size_t> heap;
+    std::vector<long>   rss;
+    heap.reserve(kCycles);
+    rss.reserve(kCycles);
+    for (int i = 0; i < kCycles; ++i) {
+        {
             ClockworkEngine engine;
             engine.init(cfg);
             REQUIRE(engine.isRunning());
             engine.shutdown();
             REQUIRE_FALSE(engine.isRunning());
         }
-    };
+        heap.push_back(heapInUseBytes());
+        rss.push_back(readRssKb());
+    }
 
-    // Two rounds. A leak grows the second round as much as the first; what
-    // is not a leak — glibc keeping the arenas the engine's threads opened,
-    // heap fragmentation — grows the first round and then plateaus. One
-    // round against a fixed fraction of the baseline could not tell the two
-    // apart: the Debian build measured 65 MB over one round on a run that
-    // leaked nothing (2026-09-12), and passed the next.
-    cycles();
-    const long midRss = readRssKb();
-    cycles();
+    const int finalFds     = countFds();
+    const int finalThreads = settleThreadCount();
 
-    const long finalRss     = readRssKb();
-    const int  finalFds     = countFds();
-    const int  finalThreads = settleThreadCount();
+    const size_t early = floorOver(heap, 10, 20);
+    const size_t late  = floorOver(heap, 30, 40);
 
-    INFO("baseline rss=" << baselineRss << "kb fds=" << baselineFds
-                          << " threads=" << baselineThreads);
-    INFO("after " << kCycles << " cycles: rss=" << midRss << "kb; after "
-                  << 2 * kCycles << ": rss=" << finalRss << "kb fds="
-                  << finalFds << " threads=" << finalThreads);
+    std::string series;
+    for (int i = 0; i < kCycles; ++i) {
+        series += std::to_string(i) + ":" + std::to_string(heap[i] / 1024) + "/"
+                + std::to_string(rss[i]) + " ";
+    }
+    INFO("baseline heap=" << baselineHeap / 1024 << "kb rss=" << baselineRss
+                          << "kb fds=" << baselineFds << " threads=" << baselineThreads);
+    INFO("per cycle, heap in use kb / rss kb: " << series);
+    INFO("heap floor, cycles 10-19: " << early / 1024 << "kb; cycles 30-39: "
+                                      << late / 1024 << "kb; fds=" << finalFds
+                                      << " threads=" << finalThreads);
 
     // FDs and threads must return to baseline exactly.
     CHECK(finalFds     == baselineFds);
     CHECK(finalThreads == baselineThreads);
 
-    // The second round may grow at most half of what the first did, plus a
-    // little drift; a leak of even 1 MB a cycle is 20 MB a round and fails.
-    const long firstRound  = midRss - baselineRss;
-    const long secondRound = finalRss - midRss;
-    CHECK(secondRound < firstRound / 2 + 8 * 1024);
+    // A leak of 64 KB a cycle is 1.3 MB across the twenty cycles and fails.
+    CHECK(late <= early + kHeapDriftBytes);
+}
+
+// Where the self-check below keeps its blocks. Volatile, so the compiler must
+// treat every store as observable: an allocation whose pointer is only ever
+// written and freed may otherwise be removed outright in an optimised build,
+// and was, in the macOS measurement that set kHeapDriftBytes.
+char* volatile gHeldBlocks[20];
+
+TEST_CASE("The leak test's heap reading sees memory that is not freed", "[lifecycle]") {
+    // The rule above is only as good as heapInUseBytes(). This holds memory the
+    // size of the leak the rule is meant to catch, and requires the reading to
+    // see it: a reading that stays at zero (glibc's counters under a
+    // sanitizer) fails here, instead of passing the rule above for nothing.
+    constexpr size_t kBlock  = 64 * 1024;
+    constexpr int    kBlocks = 20;
+    const size_t before = heapInUseBytes();
+    for (int i = 0; i < kBlocks; ++i) {
+        char* p = static_cast<char*>(std::malloc(kBlock));
+        REQUIRE(p != nullptr);
+        std::memset(p, 0x5a, kBlock);
+        gHeldBlocks[i] = p;
+    }
+    const size_t after = heapInUseBytes();
+    for (int i = 0; i < kBlocks; ++i) std::free(gHeldBlocks[i]);
+    INFO("heap before=" << before << " after=" << after);
+    CHECK(after >= before + kBlocks * kBlock);
 }
 
 TEST_CASE("Shutdown without init is safe", "[lifecycle]") {

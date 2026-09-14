@@ -48,7 +48,9 @@ probe_retry() {
 }
 
 # Medium end-to-end load per transport: enough to exercise the real engine's
-# ring drain + reply path under saturation without dominating CI wall-time.
+# ring drain + reply path without dominating CI wall-time. Stream transports
+# run saturated; datagram transports, which drop what does not fit, run with a
+# bounded window and must lose nothing (transport_probe's dgram_load).
 LOAD_COUNT=5000
 
 check() {
