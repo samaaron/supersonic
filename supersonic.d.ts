@@ -777,7 +777,11 @@ export interface ClockworkClock {
 
   // ── Session mutators ─────────────────────────────────────────────────
 
-  /** @param atNtpSeconds honoured by a Link backing; takes effect now in session-of-one. */
+  /**
+   * Change the tempo without moving the beat playing at the instant it changes.
+   * @param atNtpSeconds the instant the tempo changes (omitted or 0: now). A
+   *   scheduler working ahead gives the time its change will be heard.
+   */
   setBpm(bpm: number, atNtpSeconds?: number): void;
   setIsPlaying(playing: boolean, atNtpSeconds?: number): void;
   /** No-op without a Link backing. */
@@ -791,6 +795,12 @@ export interface ClockworkClock {
   getBpm(): number;
   isPlaying(): boolean;
   getBeatOriginNtp(): number;
+  /**
+   * One more each time the beat grid moves (a tempo change, a new origin), by
+   * any writer. A follower keeping its own copy of the grid reads this, then
+   * the grid, and reads the grid again when it has changed.
+   */
+  getGeneration(): number;
   getIsPlayingAtNtp(): number;
   /** Always `false` on no-Link builds. */
   isLinkEnabled(): boolean;

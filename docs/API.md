@@ -2661,35 +2661,36 @@ Each field is read/written independently — no multi-field coherence
 guarantee. Link-specific methods are no-ops on builds without a Link
 backing (see individual method docs).
 
-| Member                                      | Description                                                       |
-| ------------------------------------------- | ----------------------------------------------------------------- |
-| [`beatAtTime()`](#beatattime)               |                                                                   |
-| [`forceBeatAtTime()`](#forcebeatattime)     | Identical to requestBeatAtTime in session-of-one.                 |
-| [`getBeatOriginNtp()`](#getbeatoriginntp)   |                                                                   |
-| [`getBpm()`](#getbpm)                       |                                                                   |
-| [`getClockOffset()`](#getclockoffset)       |                                                                   |
-| [`getDriftOffset()`](#getdriftoffset)       |                                                                   |
-| [`getIsPlayingAtNtp()`](#getisplayingatntp) |                                                                   |
-| [`getNTPStartTime()`](#getntpstarttime)     |                                                                   |
-| [`initialize()`](#initialize)               |                                                                   |
-| [`isLinkEnabled()`](#islinkenabled)         | Always false on no-Link builds.                                   |
-| [`isPlaying()`](#isplaying)                 |                                                                   |
-| [`now()`](#now)                             | Current NTP time as seen by the audio thread.                     |
-| [`nowAt()`](#nowat)                         | Compute audio-thread NTP for a specific AudioContext.currentTime. |
-| [`numPeers()`](#numpeers)                   | Always 0 on no-Link builds.                                       |
-| [`phaseAtTime()`](#phaseattime)             |                                                                   |
-| [`requestBeatAtTime()`](#requestbeatattime) |                                                                   |
-| [`reset()`](#reset)                         |                                                                   |
-| [`resync()`](#resync)                       |                                                                   |
-| [`setBpm()`](#setbpm)                       |                                                                   |
-| [`setClockOffset()`](#setclockoffset)       |                                                                   |
-| [`setIsPlaying()`](#setisplaying)           |                                                                   |
-| [`setLinkEnabled()`](#setlinkenabled)       | No-op without a Link backing.                                     |
-| [`startDriftTimer()`](#startdrifttimer)     |                                                                   |
-| [`stopDriftTimer()`](#stopdrifttimer)       |                                                                   |
-| [`timeAtBeat()`](#timeatbeat)               |                                                                   |
-| [`updateDriftOffset()`](#updatedriftoffset) |                                                                   |
-| [`wallNow()`](#wallnow)                     | Current NTP time from the system wall clock.                      |
+| Member                                      | Description                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`beatAtTime()`](#beatattime)               |                                                                                       |
+| [`forceBeatAtTime()`](#forcebeatattime)     | Identical to requestBeatAtTime in session-of-one.                                     |
+| [`getBeatOriginNtp()`](#getbeatoriginntp)   |                                                                                       |
+| [`getBpm()`](#getbpm)                       |                                                                                       |
+| [`getClockOffset()`](#getclockoffset)       |                                                                                       |
+| [`getDriftOffset()`](#getdriftoffset)       |                                                                                       |
+| [`getGeneration()`](#getgeneration)         | One more each time the beat grid moves (a tempo change, a new origin), by any writer. |
+| [`getIsPlayingAtNtp()`](#getisplayingatntp) |                                                                                       |
+| [`getNTPStartTime()`](#getntpstarttime)     |                                                                                       |
+| [`initialize()`](#initialize)               |                                                                                       |
+| [`isLinkEnabled()`](#islinkenabled)         | Always false on no-Link builds.                                                       |
+| [`isPlaying()`](#isplaying)                 |                                                                                       |
+| [`now()`](#now)                             | Current NTP time as seen by the audio thread.                                         |
+| [`nowAt()`](#nowat)                         | Compute audio-thread NTP for a specific AudioContext.currentTime.                     |
+| [`numPeers()`](#numpeers)                   | Always 0 on no-Link builds.                                                           |
+| [`phaseAtTime()`](#phaseattime)             |                                                                                       |
+| [`requestBeatAtTime()`](#requestbeatattime) |                                                                                       |
+| [`reset()`](#reset)                         |                                                                                       |
+| [`resync()`](#resync)                       |                                                                                       |
+| [`setBpm()`](#setbpm)                       | Change the tempo without moving the beat playing at the instant it changes.           |
+| [`setClockOffset()`](#setclockoffset)       |                                                                                       |
+| [`setIsPlaying()`](#setisplaying)           |                                                                                       |
+| [`setLinkEnabled()`](#setlinkenabled)       | No-op without a Link backing.                                                         |
+| [`startDriftTimer()`](#startdrifttimer)     |                                                                                       |
+| [`stopDriftTimer()`](#stopdrifttimer)       |                                                                                       |
+| [`timeAtBeat()`](#timeatbeat)               |                                                                                       |
+| [`updateDriftOffset()`](#updatedriftoffset) |                                                                                       |
+| [`wallNow()`](#wallnow)                     | Current NTP time from the system wall clock.                                          |
 
 #### Methods
 
@@ -2753,6 +2754,18 @@ Identical to [requestBeatAtTime](#requestbeatattime) in session-of-one.
 ##### getDriftOffset()
 
 > **getDriftOffset**(): `number`
+
+###### Returns
+
+`number`
+
+##### getGeneration()
+
+> **getGeneration**(): `number`
+
+One more each time the beat grid moves (a tempo change, a new origin), by
+any writer. A follower keeping its own copy of the grid reads this, then
+the grid, and reads the grid again when it has changed.
 
 ###### Returns
 
@@ -2892,12 +2905,14 @@ Always `0` on no-Link builds.
 
 > **setBpm**(`bpm`, `atNtpSeconds?`): `void`
 
+Change the tempo without moving the beat playing at the instant it changes.
+
 ###### Parameters
 
-| Parameter       | Type     | Description                                                     |
-| --------------- | -------- | --------------------------------------------------------------- |
-| `bpm`           | `number` | -                                                               |
-| `atNtpSeconds?` | `number` | honoured by a Link backing; takes effect now in session-of-one. |
+| Parameter       | Type     | Description                                                                                                           |
+| --------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
+| `bpm`           | `number` | -                                                                                                                     |
+| `atNtpSeconds?` | `number` | the instant the tempo changes (omitted or 0: now). A scheduler working ahead gives the time its change will be heard. |
 
 ###### Returns
 
