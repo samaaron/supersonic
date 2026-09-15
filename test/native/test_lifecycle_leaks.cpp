@@ -42,7 +42,10 @@
 #  endif
 #endif
 #if defined(LEAKS_UNDER_ASAN)
-#  include <sanitizer/allocator_interface.h>
+// Declared here, not included: GCC — which the sanitizer job builds with —
+// does not install <sanitizer/allocator_interface.h> (clang does). Both
+// runtimes export the function.
+extern "C" size_t __sanitizer_get_current_allocated_bytes(void);
 #else
 #  include <malloc.h>
 #endif
