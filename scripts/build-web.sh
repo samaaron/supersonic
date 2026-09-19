@@ -50,6 +50,8 @@ command -v emcc >/dev/null || {
 # emsdk ships its own node; prefer it so the build does not depend on a system
 # node that may not exist (this box has none on PATH).
 NODE="$(command -v node || ls -d "${EMSDK:-/nonexistent}"/node/*/bin/node 2>/dev/null | head -1)"
+# The version the engine says under its banner: package.json's, as the npm packages and the client say it.
+PRODUCT_VERSION="$("$NODE" -p "require('$ROOT/package.json').version")"
 [ -x "$NODE" ] || { echo "no node found for the memory config reader" >&2; exit 1; }
 
 # The engine, the same three groups the CMake build compiles.
@@ -303,6 +305,7 @@ emcc "${SOURCES[@]}" "${INCLUDES[@]}" "$RUST_LIB" \
     -DSC_AUDIO_API=3 \
     -DCLOCKWORK_GUEST=1 -DCLOCKWORK_SYNTH=1 -DCLOCKWORK_WORKLET_CLOCK=1 -DNDEBUG \
     -DCLOCKWORK_PRODUCT_NAME='"SuperSonic"' \
+    -DCLOCKWORK_PRODUCT_VERSION="\"$PRODUCT_VERSION\"" \
     -DCLOCKWORK_PRODUCT_HEADER="\"$ROOT/dsp/supersonic_product.h\"" \
     -DCLOCKWORK_AUDIO_NO_STDIO=1 -DSTB_VORBIS_NO_STDIO \
     -DCLOCKWORK_SCHEDULER=$SCHEDULER \
