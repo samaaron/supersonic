@@ -278,9 +278,9 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
         engine.shutdown();
     }
 
-    const long baselineRss     = readRssKb();
-    const int  baselineFds     = countFds();
-    const int  baselineThreads = settleThreadCount();
+    const size_t baselineHeap    = heapInUseBytes();
+    const int    baselineFds     = countFds();
+    const int    baselineThreads = settleThreadCount();
 
     {
         ClockworkEngine engine;
@@ -294,8 +294,12 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
 
     CHECK(countFds()     == baselineFds);
     CHECK(settleThreadCount() == baselineThreads);
-    const long rssBudget = baselineRss / 2;
-    CHECK(readRssKb() - baselineRss < rssBudget);
+    // In-use heap, not RSS, as in the cycle test above: on 2026-09-19 the
+    // Debian build's RSS rose 31 MB across this one failed boot with file
+    // descriptors and threads exactly back — memory glibc freed and kept.
+    const size_t heap = heapInUseBytes();
+    INFO("heap in use: baseline " << baselineHeap << " B, after " << heap << " B");
+    CHECK(heap < baselineHeap + kHeapDriftBytes);
 }
 
 #endif  // __linux__
