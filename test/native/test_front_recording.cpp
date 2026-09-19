@@ -318,18 +318,26 @@ TEST_CASE("recording: three in a row, each the length it was asked for, none emp
         rig.sink.sent.clear();
         osc_test::Builder b;
         b.begin("/clockwork/record/start") << path.c_str() << "wav" << int32_t{16};
+        const auto sentStart = std::chrono::steady_clock::now();
         REQUIRE(rig.ingress(b.end()));
         REQUIRE(rig.expect("/clockwork/record/start.reply").parsed().argInt(0) == 1);
         std::this_thread::sleep_for(std::chrono::milliseconds(lengths[i]));
         rig.sink.sent.clear();
         REQUIRE(rig.ingress(osc_test::message("/clockwork/record/stop")));
         REQUIRE(rig.expect("/clockwork/record/stop.reply").parsed().argInt(0) == 1);
+        // The recording spans start to stop as the engine handled them, which
+        // is at most this long. The sleep is only the least it can be: on
+        // 2026-09-19 a Windows runner asked for 150 ms and recorded 816 ms,
+        // the sleep and the stop round trip having overrun between them.
+        const double spanMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - sentStart).count();
         CHECK(rig.front.recordingFramesLost() == 0);
         // Straight on to the next: no waiting for the guest to see the release.
         const Decoded d = decode(path);
-        INFO("recording " << i << " asked " << lengths[i] << " ms, got " << d.info.frames << " frames");
+        INFO("recording " << i << " asked " << lengths[i] << " ms, took " << spanMs
+             << " ms start to stop reply, got " << d.info.frames << " frames");
         CHECK(d.info.frames > 48000 * (lengths[i] / 1000.0) * 0.5);
-        CHECK(d.info.frames < 48000 * (lengths[i] / 1000.0) * 1.8 + 4800);
+        CHECK(d.info.frames < 48000 * (spanMs / 1000.0) * 1.8 + 4800);
         std::remove(path.c_str());
     }
 }
