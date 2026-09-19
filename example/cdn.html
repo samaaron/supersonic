@@ -12,7 +12,7 @@
       // package URL without redirecting, and the client's chunk imports are
       // relative), say where the core package is (the client package ships
       // no wasm), and — up to 0.81.0 — where its wasm directory is.
-      import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.81.0/dist/supersonic.js";
+      import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.82.0/dist/supersonic.js";
       const CDN = "https://unpkg.com/";
       const button = document.getElementById("play");
       let sonic = null;
@@ -21,11 +21,11 @@
           button.textContent = "Booting scsynth...";
           sonic = new SuperSonic({
             mode: "postMessage",
-            baseURL:         CDN + "supersonic-scsynth@0.81.0/dist/",
-            coreBaseURL:     CDN + "supersonic-scsynth-core@0.81.0/",
-            wasmBaseURL:     CDN + "supersonic-scsynth-core@0.81.0/wasm/",
-            sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.81.0/samples/",
-            synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.81.0/synthdefs/",
+            baseURL:         CDN + "supersonic-scsynth@0.82.0/dist/",
+            coreBaseURL:     CDN + "supersonic-scsynth-core@0.82.0/",
+            wasmBaseURL:     CDN + "supersonic-scsynth-core@0.82.0/wasm/",
+            sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.82.0/samples/",
+            synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.82.0/synthdefs/",
           });
           await sonic.init();
           await sonic.loadSynthDefs(["sonic-pi-basic_stereo_player"]);

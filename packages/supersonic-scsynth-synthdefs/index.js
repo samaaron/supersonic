@@ -15,7 +15,7 @@ export function getSynthDefPath(name) {
 }
 
 // CDN URL for browser usage (unpkg)
-export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.81.0';
+export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.82.0';
 export const SYNTHDEFS_CDN = `${CDN_BASE}/synthdefs`;
 
 export const SYNTHDEF_NAMES = [
@@ -147,7 +147,6 @@ export const SYNTHDEF_NAMES = [
   "sonic-pi-tech_saws",
   "sonic-pi-tri",
   "sonic-pi-zawa",
-  "supersonic-audio-out",
   "test_offset_out",
   "u_cmd_test",
 ];

@@ -1,3 +1,9 @@
+supersonic (0.82.0-1) unstable; urgency=medium
+
+  * Release 0.82.0
+
+ -- Sam Aaron <samaaron@gmail.com>  Sun, 20 Sep 2026 00:03:34 +0100
+
 supersonic (0.81.0-1) unstable; urgency=medium
 
   * New upstream release. The engine logs through one channel on every
