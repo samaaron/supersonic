@@ -99,6 +99,10 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg) {
 
 EngineFixture::~EngineFixture() {
     mEngine.shutdown();
+    // shutdown() has stopped the threads that call these; dropping them says so, and leaves nothing holding this
+    // fixture while the rest of it goes away.
+    mEngine.onReply = nullptr;
+    mEngine.onDebug = nullptr;
 }
 
 // ── OSC send ──────────────────────────────────────────────────────────────────

@@ -124,7 +124,6 @@ public:
 
 private:
     void init(const ClockworkEngine::Config& cfg);
-    ClockworkEngine mEngine;
     bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
     uint64_t         mGeneration = 0;      // unique per fixture (see generation())
 
@@ -134,4 +133,11 @@ private:
 
     mutable std::mutex       mDebugMutex;
     std::vector<std::string> mDebugMessages;
+
+    // Last, so that it is destroyed first. Its onReply and onDebug hold this fixture and lock the mutexes above;
+    // were the engine declared before them it would outlive them, and anything it delivered while it was itself
+    // being destroyed would lock a mutex that no longer exists — which is not an error the standard library
+    // reports politely: pthread_mutex_lock answers EINVAL, std::mutex::lock throws, no engine thread catches it,
+    // and the test binary aborts. Rare, because a reply has to land in that window, and rare is the worst kind.
+    ClockworkEngine  mEngine;
 };
