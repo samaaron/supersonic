@@ -185,8 +185,11 @@ done
 # Debian's changelog takes a new entry, not a rewritten one
 CHANGELOG="$PROJECT_ROOT/packaging/debian/changelog"
 if [ -f "$CHANGELOG" ] && ! head -1 "$CHANGELOG" | grep -q "($NEW_VERSION-1)"; then
-    { printf 'supersonic (%s-1) unstable; urgency=medium\n\n  * Release %s\n\n -- %s <%s>  %s\n\n' \
-        "$NEW_VERSION" "$NEW_VERSION" "$(git config user.name)" "$(git config user.email)" "$(date -R)"; cat "$CHANGELOG"; } > "$CHANGELOG.new"
+    # signed as the package's own Maintainer, byte for byte: anything else and lintian reads the entry as a
+    # non-maintainer upload and the Debian job fails (source-nmu-has-incorrect-version-number)
+    MAINTAINER=$(sed -n 's/^Maintainer: //p' "$PROJECT_ROOT/packaging/debian/control" | head -1)
+    { printf 'supersonic (%s-1) unstable; urgency=medium\n\n  * New upstream release.\n\n -- %s  %s\n\n' \
+        "$NEW_VERSION" "$MAINTAINER" "$(date -R)"; cat "$CHANGELOG"; } > "$CHANGELOG.new"
     mv "$CHANGELOG.new" "$CHANGELOG"
     echo "✓ Added packaging/debian/changelog entry"
 fi
