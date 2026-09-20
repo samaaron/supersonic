@@ -1,8 +1,17 @@
+supersonic (0.83.0-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Sam Aaron <sam@sonic-pi.net>  Sun, 20 Sep 2026 12:40:35 +0100
+
 supersonic (0.82.0-1) unstable; urgency=medium
 
-  * Release 0.82.0
+  * New upstream release. Failures in the client are reported in every build,
+    not only a development one: a call into the engine that throws rejects,
+    and a lost audio worklet warns; the clock's drift is logged when it moves
+    rather than every second.
 
- -- Sam Aaron <samaaron@gmail.com>  Sun, 20 Sep 2026 00:03:34 +0100
+ -- Sam Aaron <sam@sonic-pi.net>  Sun, 20 Sep 2026 00:03:34 +0100
 
 supersonic (0.81.0-1) unstable; urgency=medium
 

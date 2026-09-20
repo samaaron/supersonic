@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth",
-  "version": "0.82.0",
+  "version": "0.83.0",
   "description": "SuperCollider scsynth on clockwork, for the browser as an AudioWorklet and natively as a server",
   "main": "dist/supersonic.js",
   "types": "supersonic.d.ts",

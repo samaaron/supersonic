@@ -12,7 +12,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(SuperSonic
-    VERSION 0.82.0
+    VERSION 0.83.0
     DESCRIPTION "scsynth on the clockwork substrate"
     LANGUAGES C CXX)
 
