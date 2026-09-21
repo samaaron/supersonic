@@ -371,7 +371,7 @@ rm -rf "$OUT/../chunks"
     --outdir="$OUT/.." --chunk-names="chunks/[name]-[hash]" --external:./scsynth-nrt.wasm >/dev/null
 rm -f "$OUT/../clockwork.js"
 
-for entry in osc_channel.js lib/osc_fast.js lib/metrics_component.js; do
+for entry in osc_channel.js lib/osc_fast.js lib/osc_in_pump.js lib/midi_event.js lib/metrics_component.js; do
     "$ESBUILD" "$JS/$entry" --bundle --format=esm --define:__DEV__=$JS_DEV $JS_MINIFY \
         --outfile="$OUT/../$(basename "$entry")" >/dev/null
 done
