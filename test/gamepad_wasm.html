@@ -15,6 +15,7 @@
         gamepad_out_decode,
       } from "/clockwork/dist/gamepad/clockwork_gamepad.js";
       import { GamepadManager } from "/clockwork/js/lib/gamepad_manager.js";
+      import { decodeMessage } from "/clockwork/js/lib/osc_fast.js";
 
       // Minimal OSC message encoder, just for building /gamepad/out test inputs.
       function oscString(s) {
@@ -49,7 +50,7 @@
         return out;
       }
 
-      window.wasmGamepad = { initWasm, normalize_name, assign_handle, WasmPadState, gamepad_button_osc, gamepad_axis_osc, gamepad_out_decode, encodeOsc };
+      window.wasmGamepad = { initWasm, normalize_name, assign_handle, WasmPadState, gamepad_button_osc, gamepad_axis_osc, gamepad_out_decode, encodeOsc, decodeMessage };
       window.GamepadManager = GamepadManager;
       window.gamepadWasmReady = true;
     </script>

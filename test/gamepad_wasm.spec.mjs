@@ -102,9 +102,8 @@ test.describe("WASM gamepad", () => {
       const tick = (ms) => new Promise((res) => setTimeout(res, ms));
       const m = new window.GamepadManager({ pollIntervalMs: 2 });
       const events = [];
-      const messages = [];
       const devices = [];
-      m.onEvent((osc) => events.push(new TextDecoder().decode(osc.subarray(0, osc.indexOf(0)))));
+      m.onEvent((osc) => events.push(window.wasmGamepad.decodeMessage(osc)));
       // The devices push is an OSC packet (/clockwork-sys/gamepad/devices); keep
       // its text, which carries the address and every pad name.
       m.onDevices((osc) => devices.push(new TextDecoder().decode(osc)));
@@ -115,8 +114,6 @@ test.describe("WASM gamepad", () => {
       pad.buttons[0] = { pressed: true, value: 1 };
       await tick(30);
 
-      // structured path takes precedence once registered
-      m.onMessage((fields) => messages.push(fields));
       pad.axes[1] = -1; // full up
       await tick(30);
 
@@ -127,13 +124,14 @@ test.describe("WASM gamepad", () => {
       m.sendOut(window.wasmGamepad.encodeOsc("/clockwork/gamepad/out/rumble_stop", [{ t: "s", v: "*" }]));
 
       m.dispose();
-      return { events, messages, devices, effects };
+      // the address and the fields, without the trailing timetag
+      return { events: events.map((e) => e.slice(0, 4)), devices, effects };
     });
 
     expect(r.devices[0]).toContain("gamepad/devices");
     expect(r.devices[0]).toContain("test_pad");
-    expect(r.events).toContain("/clockwork/gamepad/in/button");
-    expect(r.messages).toContainEqual(["axis", "test_pad", "left_y", 1]);
+    expect(r.events.map((e) => e[0])).toContain("/clockwork/gamepad/in/button");
+    expect(r.events).toContainEqual(["/clockwork/gamepad/in/axis", "test_pad", "left_y", 1]);
     expect(r.effects[0].type).toBe("dual-rumble");
     expect(r.effects[0].strongMagnitude).toBe(1);
     expect(r.effects[0].weakMagnitude).toBe(0.25);
@@ -204,7 +202,7 @@ test.describe("WASM gamepad", () => {
 
       const m = new window.GamepadManager({ pollIntervalMs: 2 });
       const messages = [];
-      m.onMessage((fields) => messages.push(fields));
+      m.onEvent((osc) => messages.push(window.wasmGamepad.decodeMessage(osc).slice(0, 5)));
       await m.init();
       await tick(30);
 
@@ -218,7 +216,7 @@ test.describe("WASM gamepad", () => {
       return { messages };
     });
 
-    expect(r.messages).toContainEqual(["button", "test_pad", "button_17", 1, 1]);
+    expect(r.messages).toContainEqual(["/clockwork/gamepad/in/button", "test_pad", "button_17", 1, 1]);
   });
 
   test("until-stop rumble is retriggered past the 5s effect cap until stopped", async ({ page }) => {
