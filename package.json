@@ -62,6 +62,8 @@
     "supersonic.d.ts",
     "dist/osc_channel.js",
     "dist/osc_fast.js",
+    "dist/osc_in_pump.js",
+    "dist/midi_event.js",
     "dist/metrics_component.js",
     "dist/metrics-dark.css",
     "dist/metrics-light.css",

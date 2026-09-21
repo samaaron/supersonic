@@ -377,6 +377,17 @@ for entry in osc_channel.js lib/osc_fast.js lib/osc_in_pump.js lib/midi_event.js
 done
 cp "$JS"/lib/metrics-*.css "$OUT/.." 2>/dev/null || true
 
+# Every module and stylesheet at dist/'s top level is the client package's, so package.json's "files" must name
+# it: 0.84.1 was published without osc_in_pump.js and midi_event.js, and a page importing them from the CDN got
+# a 404. Checked here because `npm publish` runs this build first (prepublishOnly).
+"$NODE" -e '
+  const fs = require("fs");
+  const [dist, pkg] = process.argv.slice(1);
+  const listed = new Set(require(pkg).files);
+  const missing = fs.readdirSync(dist).filter((f) => /\.(js|css)$/.test(f)).map((f) => `dist/${f}`).filter((f) => !listed.has(f));
+  if (missing.length) { console.error(`package.json "files" leaves out ${missing.join(", ")}: add them, or npm ships without them`); process.exit(1); }
+' "$OUT/.." "$ROOT/package.json"
+
 # Workers are iife: a worker has no module loader to hand them to.
 rm -rf "$OUT/../workers"; mkdir -p "$OUT/../workers"
 for worker in "$JS/workers/"*.js; do
