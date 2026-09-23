@@ -110,6 +110,8 @@ export class SuperSonic extends Clockwork {
   #numBuffers;
   #scsynthOptions;
   #rewriter = null;
+  // the buffer manager's ear on the egress, while there is one (#buffers, shutdown)
+  #onBufferReply = null;
   #bufferQueue = Promise.resolve();
   /*
    * The synthdefs this client has loaded, name → bytes.
@@ -356,15 +358,18 @@ export class SuperSonic extends Clockwork {
       getDefaultSampleRate: () => this.audioContext?.sampleRate || 44100,
     });
 
-    // The engine answers an allocation on the egress rather than with /done,
-    // so the completion has to be picked out of the inbound stream.
-    this.on("in:osc", ({ oscData }) => {
+    // The engine answers an allocation on the egress rather than with /done, so the completion is picked out of the
+    // inbound stream. One listener per manager, taken off with it (shutdown): a listener left from an engine before
+    // would answer every allocation again.
+    const manager = this.#bufferManager;
+    this.#onBufferReply = ({ oscData }) => {
       let msg;
       try { msg = oscFast.decodePacket(oscData); } catch { return; }
       const [address, ...args] = msg;
-      if (address === "/supersonic/buffer/allocated") this.#bufferManager?.handleBufferAllocated(args);
-      else if (address === "/supersonic/buffer/freed") this.#bufferManager?.handleBufferFreed(args);
-    });
+      if (address === "/supersonic/buffer/allocated") manager.handleBufferAllocated(args);
+      else if (address === "/supersonic/buffer/freed") manager.handleBufferFreed(args);
+    };
+    this.on("in:osc", this.#onBufferReply);
 
     return this.#bufferManager;
   }
@@ -473,6 +478,10 @@ export class SuperSonic extends Clockwork {
    * worklet's heap went with the engine.
    */
   async restoreClientState() {
+    // The reload may have made a new audio context (clockwork's own, when it made the last one): the buffers are
+    // decoded, and their default rate read, through the one the engine now plays in.
+    if (this.audioContext) this.#bufferManager?.updateAudioContext(this.audioContext);
+
     // DEFINITIONS FIRST. A buffer is just frames, but a synth made from a
     // definition the rebuilt engine has not been given fails at /s_new — so
     // the definitions go back before anything that might reference them.
@@ -510,6 +519,12 @@ export class SuperSonic extends Clockwork {
    */
   async shutdown(...args) {
     this.#loadedSynthDefs.clear();
+    // and what was allocated: the buffer manager belongs to the engine it was built against (its memory, its pool, its
+    // table of buffers), so the next engine gets a new one, built on first use as the first did
+    if (this.#onBufferReply) this.off("in:osc", this.#onBufferReply);
+    this.#onBufferReply = null;
+    this.#bufferManager = null;
+    this.#rewriter = null;
     return super.shutdown(...args);
   }
 
