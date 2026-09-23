@@ -200,6 +200,9 @@ export interface ActivityLineConfig {
  *   scsynthOptions: { numBuffers: 2048 },
  * });
  */
+/** The engine's lifecycle state: the same words as native's `engineState()`. */
+export type EngineState = 'stopped' | 'booting' | 'running' | 'restarting' | 'error';
+
 export interface SuperSonicOptions {
   /**
    * Transport mode.
@@ -228,7 +231,7 @@ export interface SuperSonicOptions {
   /** Base URL for synthdef files (used by {@link SuperSonic.loadSynthDef}). */
   synthdefBaseURL?: string;
 
-  /** Provide your own AudioContext instead of letting SuperSonic create one. */
+  /** Provide your own AudioContext instead of letting SuperSonic create one. It stays yours: kept across `reload()`, left open by `shutdown()`. */
   audioContext?: AudioContext;
   /** Options passed to `new AudioContext()`. Ignored if `audioContext` is provided. */
   audioContextOptions?: AudioContextOptions;
@@ -240,6 +243,14 @@ export interface SuperSonicOptions {
 
   /** How often to snapshot metrics/tree in postMessage mode (ms). */
   snapshotIntervalMs?: number;
+
+  /**
+   * What the page going away, or out of sight, does to the engine.
+   * `pagehide`: `'shutdown'` (default — an engine left running after its page is audio with no page to stop it) or
+   * `'none'`. `hidden`: `'keep'` (default — a tab behind another plays on) or `'suspend'` (and resume when shown).
+   * After a `'shutdown'`, a page restored from the back/forward cache calls `init()` again.
+   */
+  pageLifecycle?: { pagehide?: 'shutdown' | 'none'; hidden?: 'keep' | 'suspend' };
 
   /** Enable all debug console logging. Default: false. */
   debug?: boolean;
@@ -919,8 +930,14 @@ export interface SuperSonicEventMap {
   /** Full reload started (worklet and WASM will be recreated). */
   'reload:start': () => void;
 
-  /** Full reload completed. */
-  'reload:complete': (data: { success: boolean }) => void;
+  /** Full reload completed, or failed (`success: false`, with the error). */
+  'reload:complete': (data: { success: boolean; error?: Error }) => void;
+
+  /** A reload failed. What it built has been taken down; `reload()` and `recover()` answer false. */
+  'reload:failed': (data: { error: Error }) => void;
+
+  /** The engine's state changed (see `getEngineState()`), as native sends `/clockwork/statechange`. `error` is set on `'error'`. */
+  'statechange': (data: { state: EngineState; previous: EngineState; reason: string; error?: Error }) => void;
 
   /** AudioContext state changed. State is one of: `'running'`, `'suspended'`, `'closed'`, or `'interrupted'`. */
   'audiocontext:statechange': (data: { state: AudioContextState }) => void;
@@ -1488,14 +1505,14 @@ export class SuperSonic {
    * One of:
    *   - `'stopped'` — before `init()` or after `shutdown()`/`destroy()`.
    *   - `'booting'` — while `init()` is in progress.
-   *   - `'running'` — after `init()` resolves and before any teardown.
+   *   - `'running'` — up. Whether the audio itself is running is the AudioContext's (see the `audiocontext:*` events).
+   *   - `'restarting'` — while `reload()` rebuilds the worklet and engine.
+   *   - `'error'` — the last `init()` or `reload()` failed; `init()` or `reset()` tries again.
    *
-   * Mirrors the C++ `SupersonicEngine::engineState()` accessor. The C++
-   * enum also has `'restarting'` and `'error'` states that the web runtime
-   * does not currently distinguish — `recover()` and `resume()` do not
-   * surface a `'restarting'` state from JS.
+   * The same states, in the same words, as the C++ `SupersonicEngine::engineState()`. Every change is emitted as
+   * `statechange`.
    */
-  getEngineState(): 'stopped' | 'booting' | 'running';
+  getEngineState(): EngineState;
 
   // ──────────────────────────────────────────────────────────────────────────
   // OSC Messaging
