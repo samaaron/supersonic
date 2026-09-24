@@ -80,14 +80,14 @@ struct Rig {
     SuperSonicFront  front;
     shm_audio_buffer* slot0 = nullptr;
     Rig() : front(fx.engine(), &sink) {
-        fx.engine().onReplyRouted = [this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
+        fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
             if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
-        };
+        });
         ClockworkRegion taps {};
         REQUIRE(clockwork_client_region(fx.engine().egressClient(), CLOCKWORK_REGION_AUDIO_TAPS, &taps) == CLOCKWORK_OK);
         slot0 = static_cast<shm_audio_buffer*>(taps.base);
     }
-    ~Rig() { fx.engine().onReplyRouted = nullptr; }
+    ~Rig() { fx.setRoutedObserver(nullptr); }   // under the fixture's lock: no call runs after this
     bool ingress(const osc_test::Packet& p) { return front.ingress(p.ptr(), p.size(), kAsker); }
     OscReply expect(const char* addr) {
         OscReply r;

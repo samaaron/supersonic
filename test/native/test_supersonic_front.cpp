@@ -134,11 +134,11 @@ struct Rig {
 
     explicit Rig(ClockworkEngine::Config cfg = EngineFixture::defaultConfig())
         : fx(cfg), front(fx.engine(), &sink) {
-        fx.engine().onReplyRouted = [this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
+        fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
             if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
-        };
+        });
     }
-    ~Rig() { fx.engine().onReplyRouted = nullptr; }
+    ~Rig() { fx.setRoutedObserver(nullptr); }   // under the fixture's lock: no call runs after this
 
     bool ingress(const osc_test::Packet& p, uint32_t token = kSpider) {
         return front.ingress(p.ptr(), p.size(), token);

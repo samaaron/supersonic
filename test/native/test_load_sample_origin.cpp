@@ -8,7 +8,8 @@
  *
  * onReply cannot see which of those happened — in-process a reply and a
  * notification both arrive through it — so these read onReplyRouted, which
- * carries the origin and the route that decided where the message went.
+ * carries the origin and the route that decided where the message went — recorded by
+ * the fixture (EngineFixture::routedReplies), never by a callback over a test's locals.
  *
  * TWO WAYS A SAMPLE ARRIVES, ONE PLACE IT IS DECODED. The client decodes the
  * file (clockwork_audio_file.h), lays the frames out in the INBOX with the
@@ -27,7 +28,6 @@
 
 #include <chrono>
 #include <filesystem>
-#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,12 +39,6 @@
 namespace {
 
 constexpr uint32_t kAsker = 0xA5C1;   // any non-zero token: 0 is the notify audience
-
-struct Routed {
-    uint32_t    origin;
-    uint32_t    route;
-    std::string address;
-};
 
 std::string samplePath(const char* name) {
     return std::string(CLOCKWORK_SAMPLES_DIR) + "/" + name;
@@ -98,13 +92,6 @@ TEST_CASE("/b_allocPtr: a sample handed over through the inbox is answered to th
     std::memcpy(dst + gb * ch, pcm, info.frames * ch * sizeof(float));
     clockwork_audio_free(pcm);
 
-    std::mutex mu;
-    std::vector<Routed> seen;
-    fx.engine().onReplyRouted = [&](uint32_t origin, uint32_t route,
-                                    const uint8_t* d, uint32_t n) {
-        std::lock_guard<std::mutex> lock(mu);
-        seen.push_back({origin, route, osc_test::parseAddress(d, n)});
-    };
 
     osc_test::Builder b;
     auto& m = b.begin("/b_allocPtr");
@@ -119,8 +106,9 @@ TEST_CASE("/b_allocPtr: a sample handed over through the inbox is answered to th
     OscReply done;
     REQUIRE(fx.waitForReply("/done", done));
 
-    std::lock_guard<std::mutex> lock(mu);
-    const Routed* reply = nullptr;
+    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
+    const auto seen = fx.routedReplies();
+    const RoutedReply* reply = nullptr;
     for (const auto& r : seen)
         if (r.address == "/done") { reply = &r; break; }
     REQUIRE(reply != nullptr);
@@ -140,13 +128,6 @@ TEST_CASE("/b_allocPtr: a range that leaves the inbox is refused, to the asker",
     const uint32_t inboxBytes = fx.engine().guestInboxBytes();
     REQUIRE(inboxBytes > 0);
 
-    std::mutex mu;
-    std::vector<Routed> seen;
-    fx.engine().onReplyRouted = [&](uint32_t origin, uint32_t route,
-                                    const uint8_t* d, uint32_t n) {
-        std::lock_guard<std::mutex> lock(mu);
-        seen.push_back({origin, route, osc_test::parseAddress(d, n)});
-    };
 
     osc_test::Builder b;
     auto& m = b.begin("/b_allocPtr");
@@ -158,8 +139,9 @@ TEST_CASE("/b_allocPtr: a range that leaves the inbox is refused, to the asker",
 
     OscReply fail;
     REQUIRE(fx.waitForReply("/fail", fail));
-    std::lock_guard<std::mutex> lock(mu);
-    const Routed* reply = nullptr;
+    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
+    const auto seen = fx.routedReplies();
+    const RoutedReply* reply = nullptr;
     for (const auto& r : seen)
         if (r.address == "/fail") { reply = &r; break; }
     REQUIRE(reply != nullptr);
@@ -172,13 +154,6 @@ TEST_CASE("asset commit: /clockwork/asset/committed is addressed to the client t
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     EngineFixture fx;
 
-    std::mutex mu;
-    std::vector<Routed> seen;
-    fx.engine().onReplyRouted = [&](uint32_t origin, uint32_t route,
-                                    const uint8_t* d, uint32_t n) {
-        std::lock_guard<std::mutex> lock(mu);
-        seen.push_back({origin, route, osc_test::parseAddress(d, n)});
-    };
 
     // Staged by this client; the one message is sent as kAsker.
     const sample_lane::Staged st = sample_lane::stage(fx, 0, samplePath("bd_haus.flac"));
@@ -187,8 +162,9 @@ TEST_CASE("asset commit: /clockwork/asset/committed is addressed to the client t
 
     OscReply done;
     REQUIRE(fx.waitForReply("/clockwork/asset/committed", done));
-    std::lock_guard<std::mutex> lock(mu);
-    const Routed* reply = nullptr;
+    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
+    const auto seen = fx.routedReplies();
+    const RoutedReply* reply = nullptr;
     for (const auto& r : seen)
         if (r.address == "/clockwork/asset/committed") { reply = &r; break; }
     REQUIRE(reply != nullptr);
@@ -200,13 +176,6 @@ TEST_CASE("/b_allocRead: the refusal is addressed to the client that asked",
           "[load_sample][origin]") {
     EngineFixture fx;
 
-    std::mutex mu;
-    std::vector<Routed> seen;
-    fx.engine().onReplyRouted = [&](uint32_t origin, uint32_t route,
-                                    const uint8_t* d, uint32_t n) {
-        std::lock_guard<std::mutex> lock(mu);
-        seen.push_back({origin, route, osc_test::parseAddress(d, n)});
-    };
 
     // The engine reads no files: the command takes its failure branch for any
     // path — which is the half a client most needs to hear about, and the
@@ -217,8 +186,9 @@ TEST_CASE("/b_allocRead: the refusal is addressed to the client that asked",
     OscReply fail;
     REQUIRE(fx.waitForReply("/fail", fail));
 
-    std::lock_guard<std::mutex> lock(mu);
-    const Routed* reply = nullptr;
+    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
+    const auto seen = fx.routedReplies();
+    const RoutedReply* reply = nullptr;
     for (const auto& r : seen)
         if (r.address == "/fail") { reply = &r; break; }
 

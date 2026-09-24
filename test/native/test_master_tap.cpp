@@ -24,10 +24,37 @@ shm_audio_buffer* outTap(EngineFixture& fx) {
     REQUIRE(clockwork_client_region(fx.engine().egressClient(), CLOCKWORK_REGION_AUDIO_TAPS, &taps) == CLOCKWORK_OK);
     return static_cast<shm_audio_buffer*>(taps.base) + CLOCKWORK_TAP_OUT;
 }
-uint64_t framesIn(shm_audio_buffer* slot, int ms) {
-    const uint64_t a = slot->write_position.load();
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-    return slot->write_position.load() - a;
+// Everything here is counted against the engine's own progress, never a sleep: a CI runner that stalls reads, by
+// the wall clock, as a tap that stopped. The macOS arm64 runner did on 2026-09-24 — 1,408 frames in a "100 ms"
+// sleep, its clock a second adrift — and failed a release. What the tap must do is carry every block the engine
+// renders, and that holds however long the blocks took.
+constexpr uint64_t kBlockFrames = 128;   // one rendered block (processCount ticks once per block, headless)
+
+// The engine's rendered blocks and the tap's frames, read as one: the block count unchanged across the read, so
+// the two stand at most the one block being rendered as they are read apart.
+struct Progress { uint32_t blocks; uint64_t frames; };
+Progress progress(EngineFixture& fx, shm_audio_buffer* slot) {
+    auto& cb = fx.engine().audioCallback();
+    for (;;) {
+        const uint32_t before = cb.processCount.load(std::memory_order_acquire);
+        const uint64_t frames = slot->write_position.load();
+        if (cb.processCount.load(std::memory_order_acquire) == before) return {before, frames};
+    }
+}
+
+// What the tap took while the engine rendered at least `blocks` more blocks, and how many it rendered.
+Progress over(EngineFixture& fx, shm_audio_buffer* slot, uint32_t blocks) {
+    const Progress a = progress(fx, slot);
+    REQUIRE(fx.waitForBlocks(blocks, 10000));
+    const Progress b = progress(fx, slot);
+    return {b.blocks - a.blocks, b.frames - a.frames};
+}
+
+// Every block rendered is a block in the tap: no more, no fewer, give or take the one in flight at each end.
+void carriesEveryBlock(const Progress& p) {
+    INFO("rendered " << p.blocks << " blocks; the tap took " << p.frames << " frames");
+    CHECK(p.frames + kBlockFrames >= p.blocks * kBlockFrames);
+    CHECK(p.frames <= (p.blocks + 1) * kBlockFrames);
 }
 }
 
@@ -35,17 +62,12 @@ TEST_CASE("master tap: clockwork's OUT tap flows from boot and carries the guest
           "[tap][guest]") {
     EngineFixture fx;
     shm_audio_buffer* slot = outTap(fx);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Live from boot, at the engine's rate.
+    // Live from boot, at the engine's rate: every block it renders.
     CHECK(slot->enabled.load() == 1);
     CHECK(slot->sample_rate == 48000);
     CHECK(slot->channels >= 2);
-    {
-        const uint64_t written = framesIn(slot, 300);
-        CHECK(written > 48000 * 0.15);
-        CHECK(written < 48000 * 0.7);
-    }
+    carriesEveryBlock(over(fx, slot, 112));   // 0.3 s of blocks
 
     // What plays is what the slot carries.
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
@@ -57,7 +79,7 @@ TEST_CASE("master tap: clockwork's OUT tap flows from boot and carries the guest
                           << "note" << 69.0f << "amp" << 1.0f << "sustain" << 2.0f;
         fx.send(b.end());
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    REQUIRE(fx.waitForBlocks(75, 10000));   // 0.2 s of the note rendered, however long that took
     std::vector<float> buf(4096 * SHM_AUDIO_CHANNELS);
     float peak = 0.f;
     for (int i = 0; i < 8; ++i) {
@@ -70,5 +92,5 @@ TEST_CASE("master tap: clockwork's OUT tap flows from boot and carries the guest
 
     // And it never stops.
     CHECK(slot->enabled.load() == 1);
-    CHECK(framesIn(slot, 100) > 48000 * 0.05);
+    carriesEveryBlock(over(fx, slot, 38));    // 0.1 s of blocks
 }
