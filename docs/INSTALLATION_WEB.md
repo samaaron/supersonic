@@ -55,7 +55,7 @@ SuperSonic is split into several packages to give you control over what you incl
 |---------|----------|---------|
 | `supersonic-scsynth` | Client API + workers + metrics component | AGPL-3.0-or-later |
 | `supersonic-scsynth-core` | WASM engine + AudioWorklet | AGPL-3.0-or-later |
-| `supersonic-scsynth-synthdefs` | 119 Sonic Pi synth definitions, plus 11 test ones | MIT |
+| `supersonic-scsynth-synthdefs` | 120 Sonic Pi synth definitions, plus 11 test ones | MIT |
 | `supersonic-scsynth-samples` | 207 audio samples | CC0 |
 | `supersonic-scsynth-bundle` | All of the above | Mixed |
 

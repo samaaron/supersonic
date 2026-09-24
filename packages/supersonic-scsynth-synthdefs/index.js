@@ -96,6 +96,7 @@ export const SYNTHDEF_NAMES = [
   "sonic-pi-hollow",
   "sonic-pi-hoover",
   "sonic-pi-kalimba",
+  "sonic-pi-link_audio_stereo",
   "sonic-pi-live_audio",
   "sonic-pi-live_audio_mono",
   "sonic-pi-live_audio_stereo",

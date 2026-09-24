@@ -1,6 +1,6 @@
 # supersonic-scsynth-synthdefs
 
-All Sonic Pi synthdefs (119 binary `.scsyndef` files, plus 11 test and utility synthdefs the SuperSonic test suite loads) for [SuperSonic](https://github.com/samaaron/supersonic).
+All Sonic Pi synthdefs (120 binary `.scsyndef` files, plus 11 test and utility synthdefs the SuperSonic test suite loads) for [SuperSonic](https://github.com/samaaron/supersonic).
 
 ## Installation
 
@@ -45,7 +45,7 @@ await supersonic.loadSynthDefs(['sonic-pi-beep']);
 
 ## Included Synthdefs
 
-All 119 Sonic Pi synthdefs including:
+All 120 Sonic Pi synthdefs including:
 
 ### Synths
 - Basic: beep, saw, square, tri, pulse

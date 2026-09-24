@@ -59,12 +59,14 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # --yes: no prompt. --no-build: leave dist to `npm publish` (its prepublishOnly builds --release).
 # --no-commit: edit and stage only, for a repository whose commits are made by hand.
-ASSUME_YES=false; DO_BUILD=true; DO_COMMIT=true
+# --no-synthdef-check: release without checking the synthdefs against Sonic Pi's (below). Say why in the commit.
+ASSUME_YES=false; DO_BUILD=true; DO_COMMIT=true; CHECK_SYNTHDEFS=true
 for arg in "$@"; do
     case "$arg" in
         --yes|-y)    ASSUME_YES=true ;;
         --no-build)  DO_BUILD=false ;;
         --no-commit) DO_COMMIT=false ;;
+        --no-synthdef-check) CHECK_SYNTHDEFS=false ;;
         *) echo "unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
@@ -77,6 +79,21 @@ if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo -e "${RED}Error: Invalid version format${NC}"
     echo "Version must be in format: X.Y.Z (e.g., 0.1.2)"
     exit 1
+fi
+
+# The synthdefs package is a copy of Sonic Pi's compiled set, and nothing else keeps it current: a release is refused
+# while it differs from Sonic Pi's (scripts/sync-synthdefs.sh). SONIC_PI names the checkout to compare with.
+if [ "$CHECK_SYNTHDEFS" = true ]; then
+    if [ -z "$SONIC_PI" ]; then
+        echo -e "${RED}Error: SONIC_PI is not set${NC}: the synthdefs are checked against Sonic Pi's before a release."
+        echo "  SONIC_PI=<sonic-pi checkout> scripts/bump-version.sh $NEW_VERSION   (or --no-synthdef-check)"
+        exit 1
+    fi
+    if ! "$PROJECT_ROOT/scripts/sync-synthdefs.sh" "$SONIC_PI" --check; then
+        echo -e "${RED}Error: the synthdefs are out of date${NC}: sync them, commit, then bump."
+        exit 1
+    fi
+    echo ""
 fi
 
 echo "========================================"
