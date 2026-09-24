@@ -17,16 +17,16 @@ packages live. The engine, the AudioWorklet and the workers are fetched when
 you call `init()`; synthdefs and samples on demand.
 
 ```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.85.0/dist/supersonic.js";
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.86.0/dist/supersonic.js";
 
 const CDN = "https://unpkg.com/";   // or "https://cdn.jsdelivr.net/npm/"
 const supersonic = new SuperSonic({
   mode: "postMessage",   // a CDN cannot send the COOP/COEP headers the SAB transport needs
-  baseURL:         CDN + "supersonic-scsynth@0.85.0/dist/",              // client, workers
-  coreBaseURL:     CDN + "supersonic-scsynth-core@0.85.0/",              // engine wasm, AudioWorklet
-  wasmBaseURL:     CDN + "supersonic-scsynth-core@0.85.0/wasm/",         // needed up to 0.81.0, see below
-  synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.85.0/synthdefs/",
-  sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.85.0/samples/",
+  baseURL:         CDN + "supersonic-scsynth@0.86.0/dist/",              // client, workers
+  coreBaseURL:     CDN + "supersonic-scsynth-core@0.86.0/",              // engine wasm, AudioWorklet
+  wasmBaseURL:     CDN + "supersonic-scsynth-core@0.86.0/wasm/",         // needed up to 0.81.0, see below
+  synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.86.0/synthdefs/",
+  sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.86.0/samples/",
 });
 await supersonic.init();
 ```
