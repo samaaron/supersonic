@@ -407,6 +407,7 @@ declare const channel: OscChannel;
 expectType<boolean>(channel.send(new Uint8Array()));
 expectType<boolean>(channel.sendDirect(new Uint8Array()));
 expectType<number>(channel.nextNodeId());
+expectType<number>(channel.now());
 expectType<OscChannelMetrics>(channel.getMetrics());
 expectType<OscChannelMetrics>(channel.getAndResetMetrics());
 expectType<void>(channel.close());

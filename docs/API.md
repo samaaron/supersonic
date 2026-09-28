@@ -10,7 +10,7 @@
 
 * **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [ClockworkClock](#clockworkclock) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [NativeStatDefinition](#nativestatdefinition) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
-* **Type Aliases** — [AddAction](#addaction) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
+* **Type Aliases** — [AddAction](#addaction) · [EngineState](#enginestate) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
 ## Classes
 
@@ -192,31 +192,34 @@ const sonic = new SuperSonic({
 
 #### Constructor Options
 
-| Property                                                | Type                                        | Description                                                                                                                                                                                                                                                                                                                                   | Required |
-| ------------------------------------------------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
-| <a id="activityevent"></a> `activityEvent?`             | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                                                                                                  |          |
-| <a id="audiocontext-1"></a> `audioContext?`             | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one.                                                                                                                                                                                                                                                                       |          |
-| <a id="audiocontextoptions"></a> `audioContextOptions?` | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                                                                                                |          |
-| <a id="autoconnect"></a> `autoConnect?`                 | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                                                                                             |          |
-| <a id="baseurl"></a> `baseURL?`                         | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                                                                                                     | Yes\*    |
-| <a id="buffergrowincrement"></a> `bufferGrowIncrement?` | `number`                                    | Bytes to grow the buffer pool per growth event. Default: 32MB.                                                                                                                                                                                                                                                                                |          |
-| <a id="corebaseurl"></a> `coreBaseURL?`                 | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                                                                                                      |          |
-| <a id="debug-1"></a> `debug?`                           | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                                                                                             |          |
-| <a id="debugoscin"></a> `debugOscIn?`                   | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                                                                                                         |          |
-| <a id="debugoscout"></a> `debugOscOut?`                 | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                                                                                                         |          |
-| <a id="debugscsynth"></a> `debugScsynth?`               | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                                                                                                          |          |
-| <a id="fetchmaxretries"></a> `fetchMaxRetries?`         | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                                                                                            |          |
-| <a id="fetchretrydelay"></a> `fetchRetryDelay?`         | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                                                                                                        |          |
-| <a id="maxbuffermemory"></a> `maxBufferMemory?`         | `number`                                    | Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB.                                                                                                                                                                                                                                                 |          |
-| <a id="mode-5"></a> `mode?`                             | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` — works everywhere, no special headers needed (the default off an isolated page) - `'sab'` — lowest latency, requires the Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers (the default on a cross-origin isolated page) See docs/MODES.md for a full comparison of communication modes. |          |
-| <a id="samplebaseurl"></a> `sampleBaseURL?`             | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                                                                                               |          |
-| <a id="scsynthoptions-1"></a> `scsynthOptions?`         | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                                                                                                |          |
-| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`   | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                                                                                                  |          |
-| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`         | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                                                                                               |          |
-| <a id="wasmbaseurl"></a> `wasmBaseURL?`                 | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                                                                                                 |          |
-| <a id="wasmurl"></a> `wasmUrl?`                         | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                                                                                           |          |
-| <a id="workerbaseurl"></a> `workerBaseURL?`             | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                                                                                                          |          |
-| <a id="workleturl"></a> `workletUrl?`                   | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                                                                                                 |          |
+| Property                                                | Type                                        | Description                                                                                                                                                                                                                                                                                                                                                                          | Required |
+| ------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
+| <a id="activityevent"></a> `activityEvent?`             | [`ActivityLineConfig`](#activitylineconfig) | Line length limits for activity events emitted to listeners.                                                                                                                                                                                                                                                                                                                         |          |
+| <a id="audiocontext-1"></a> `audioContext?`             | `AudioContext`                              | Provide your own AudioContext instead of letting SuperSonic create one. It stays yours: kept across `reload()`, left open by `shutdown()`.                                                                                                                                                                                                                                           |          |
+| <a id="audiocontextoptions"></a> `audioContextOptions?` | `AudioContextOptions`                       | Options passed to `new AudioContext()`. Ignored if `audioContext` is provided.                                                                                                                                                                                                                                                                                                       |          |
+| <a id="autoconnect"></a> `autoConnect?`                 | `boolean`                                   | Auto-connect the AudioWorkletNode to the AudioContext destination. Default: true.                                                                                                                                                                                                                                                                                                    |          |
+| <a id="baseurl"></a> `baseURL?`                         | `string`                                    | Convenience shorthand when all assets (WASM, workers, synthdefs, samples) are co-located.                                                                                                                                                                                                                                                                                            | Yes\*    |
+| <a id="buffergrowincrement"></a> `bufferGrowIncrement?` | `number`                                    | Bytes to grow the buffer pool per growth event. Default: 32MB.                                                                                                                                                                                                                                                                                                                       |          |
+| <a id="corebaseurl"></a> `coreBaseURL?`                 | `string`                                    | Base URL for GPL assets: WASM and AudioWorklet (supersonic-scsynth-core package). Defaults to `baseURL`.                                                                                                                                                                                                                                                                             |          |
+| <a id="debug-1"></a> `debug?`                           | `boolean`                                   | Enable all debug console logging. Default: false.                                                                                                                                                                                                                                                                                                                                    |          |
+| <a id="debugoscin"></a> `debugOscIn?`                   | `boolean`                                   | Log incoming OSC messages to console. Default: false.                                                                                                                                                                                                                                                                                                                                |          |
+| <a id="debugoscout"></a> `debugOscOut?`                 | `boolean`                                   | Log outgoing OSC messages to console. Default: false.                                                                                                                                                                                                                                                                                                                                |          |
+| <a id="debugscsynth"></a> `debugScsynth?`               | `boolean`                                   | Log scsynth debug output to console. Default: false.                                                                                                                                                                                                                                                                                                                                 |          |
+| <a id="fetchmaxretries"></a> `fetchMaxRetries?`         | `number`                                    | Max fetch retries when loading assets. Default: 3.                                                                                                                                                                                                                                                                                                                                   |          |
+| <a id="fetchretrydelay"></a> `fetchRetryDelay?`         | `number`                                    | Base delay between retries in ms (exponential backoff). Default: 1000.                                                                                                                                                                                                                                                                                                               |          |
+| <a id="maxbuffermemory"></a> `maxBufferMemory?`         | `number`                                    | Maximum buffer pool capacity in bytes. Pool grows on demand up to this limit. Default: 256MB.                                                                                                                                                                                                                                                                                        |          |
+| <a id="mode-5"></a> `mode?`                             | [`TransportMode`](#transportmode)           | Transport mode. - `'postMessage'` — works everywhere, no special headers needed (the default off an isolated page) - `'sab'` — lowest latency, requires the Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy headers (the default on a cross-origin isolated page) See docs/MODES.md for a full comparison of communication modes.                                        |          |
+| <a id="pagelifecycle"></a> `pageLifecycle?`             | `object`                                    | What the page going away, or out of sight, does to the engine. `pagehide`: `'shutdown'` (default — an engine left running after its page is audio with no page to stop it) or `'none'`. `hidden`: `'keep'` (default — a tab behind another plays on) or `'suspend'` (and resume when shown). After a `'shutdown'`, a page restored from the back/forward cache calls `init()` again. |          |
+| `pageLifecycle.hidden?`                                 | `"keep"` \| `"suspend"`                     | -                                                                                                                                                                                                                                                                                                                                                                                    |          |
+| `pageLifecycle.pagehide?`                               | `"shutdown"` \| `"none"`                    | -                                                                                                                                                                                                                                                                                                                                                                                    |          |
+| <a id="samplebaseurl"></a> `sampleBaseURL?`             | `string`                                    | Base URL for audio sample files (used by [SuperSonic.loadSample](#loadsample)).                                                                                                                                                                                                                                                                                                      |          |
+| <a id="scsynthoptions-1"></a> `scsynthOptions?`         | [`ScsynthOptions`](#scsynthoptions)         | Engine options passed to scsynth World\_New().                                                                                                                                                                                                                                                                                                                                       |          |
+| <a id="snapshotintervalms"></a> `snapshotIntervalMs?`   | `number`                                    | How often to snapshot metrics/tree in postMessage mode (ms).                                                                                                                                                                                                                                                                                                                         |          |
+| <a id="synthdefbaseurl"></a> `synthdefBaseURL?`         | `string`                                    | Base URL for synthdef files (used by [SuperSonic.loadSynthDef](#loadsynthdef)).                                                                                                                                                                                                                                                                                                      |          |
+| <a id="wasmbaseurl"></a> `wasmBaseURL?`                 | `string`                                    | Base URL for WASM files. Defaults to `coreBaseURL + 'wasm/'`.                                                                                                                                                                                                                                                                                                                        |          |
+| <a id="wasmurl"></a> `wasmUrl?`                         | `string`                                    | Full URL to the WASM binary. Overrides wasmBaseURL.                                                                                                                                                                                                                                                                                                                                  |          |
+| <a id="workerbaseurl"></a> `workerBaseURL?`             | `string`                                    | Base URL for MIT worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                                                                                                                                                 |          |
+| <a id="workleturl"></a> `workletUrl?`                   | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                                                                                                                                        |          |
 
 *Required unless both `coreBaseURL`/`workerBaseURL` and `wasmBaseURL` are provided.*
 
@@ -478,7 +481,7 @@ Get number of audio frames captured so far.
 
 ##### getEngineState()
 
-> **getEngineState**(): `"running"` | `"stopped"` | `"booting"`
+> **getEngineState**(): [`EngineState`](#enginestate)
 
 Returns the current engine lifecycle state.
 
@@ -486,16 +489,16 @@ One of:
 
 * `'stopped'` — before `init()` or after `shutdown()`/`destroy()`.
 * `'booting'` — while `init()` is in progress.
-* `'running'` — after `init()` resolves and before any teardown.
+* `'running'` — up. Whether the audio itself is running is the AudioContext's (see the `audiocontext:*` events).
+* `'restarting'` — while `reload()` rebuilds the worklet and engine.
+* `'error'` — the last `init()` or `reload()` failed; `init()` or `reset()` tries again.
 
-Mirrors the C++ `SupersonicEngine::engineState()` accessor. The C++
-enum also has `'restarting'` and `'error'` states that the web runtime
-does not currently distinguish — `recover()` and `resume()` do not
-surface a `'restarting'` state from JS.
+The same states, in the same words, as the C++ `SupersonicEngine::engineState()`. Every change is emitted as
+`statechange`.
 
 ###### Returns
 
-`"running"` | `"stopped"` | `"booting"`
+[`EngineState`](#enginestate)
 
 ##### getInfo()
 
@@ -1066,11 +1069,13 @@ Remove all listeners for an event, or all listeners entirely.
 | <a id="outosc"></a> `out:osc`                                   | Raw OSC bytes sent to scsynth. Includes source worker ID, sequence number, and NTP timestamps.                                                                                                                        |
 | <a id="outtext"></a> `out:text`                                 | Pre-formatted text representation of an outgoing OSC message. Only emitted when listeners are attached or debug logging is enabled.                                                                                   |
 | <a id="ready"></a> `ready`                                      | Fired when the engine is fully booted and ready to receive messages. Payload includes browser capabilities and boot timing.                                                                                           |
-| <a id="reloadcomplete"></a> `reload:complete`                   | Full reload completed.                                                                                                                                                                                                |
+| <a id="reloadcomplete"></a> `reload:complete`                   | Full reload completed, or failed (`success: false`, with the error).                                                                                                                                                  |
+| <a id="reloadfailed"></a> `reload:failed`                       | A reload failed. What it built has been taken down; `reload()` and `recover()` answer false.                                                                                                                          |
 | <a id="reloadstart"></a> `reload:start`                         | Full reload started (worklet and WASM will be recreated).                                                                                                                                                             |
 | <a id="resumed"></a> `resumed`                                  | Audio resumed after a suspend (AudioContext was re-started). Emitted after `resume()` succeeds.                                                                                                                       |
 | <a id="setup"></a> `setup`                                      | Fired after init completes, before `'ready'`. Use for setting up groups, FX chains, and bus routing. Can be async — init waits for all setup handlers to resolve. Also fires after `recover()` triggers a `reload()`. |
 | <a id="shutdown-1"></a> `shutdown`                              | Engine is shutting down. Fired by `shutdown()`, `reset()`, and `destroy()`.                                                                                                                                           |
+| <a id="statechange"></a> `statechange`                          | The engine's state changed (see `getEngineState()`), as native sends `/clockwork/statechange`. `error` is set on `'error'`.                                                                                           |
 
 ##### reset()
 
@@ -2352,19 +2357,20 @@ OscChannel — unified dispatch for sending OSC to the AudioWorklet.
 Obtain a channel via [SuperSonic.createOscChannel](#createoscchannel) on the main thread,
 then transfer it to a Web Worker for direct communication with the AudioWorklet.
 
-| Member                                        | Description                                                                                   |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).                    |
-| [`mode`](#mode)                               | Transport mode this channel is using.                                                         |
-| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.                |
-| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list.               |
-| [`close()`](#close)                           | Close the channel and release its ports.                                                      |
-| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                                         |
-| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                                 |
-| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                                  |
-| [`send()`](#send)                             | Send an OSC message: frames it onto the IN ring (SAB) or postMessages it to the worklet (PM). |
-| [`sendDirect()`](#senddirect)                 | Alias of send — kept for callers that used the explicit direct path.                          |
-| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.                     |
+| Member                                        | Description                                                                                                                                                 |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`getCurrentNTP`](#getcurrentntp)             | Set the NTP time source for classification (used in AudioWorklet context).                                                                                  |
+| [`mode`](#mode)                               | Transport mode this channel is using.                                                                                                                       |
+| [`transferable`](#transferable)               | Serializable config for transferring this channel to a worker via postMessage.                                                                              |
+| [`transferList`](#transferlist)               | Array of transferable objects (MessagePorts) for the postMessage transfer list.                                                                             |
+| [`close()`](#close)                           | Close the channel and release its ports.                                                                                                                    |
+| [`getAndResetMetrics()`](#getandresetmetrics) | Get and reset local metrics (for periodic reporting).                                                                                                       |
+| [`getMetrics()`](#getmetrics)                 | Get current metrics snapshot.                                                                                                                               |
+| [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                                                                                                |
+| [`now()`](#now)                               | The engine's clock, in NTP seconds: the time its audio thread has reached, readable on any thread the channel is on — a worker cannot see the AudioContext. |
+| [`send()`](#send)                             | Send an OSC message: frames it onto the IN ring (SAB) or postMessages it to the worklet (PM).                                                               |
+| [`sendDirect()`](#senddirect)                 | Alias of send — kept for callers that used the explicit direct path.                                                                                        |
+| [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.                                                                                   |
 
 #### Example
 
@@ -2513,6 +2519,31 @@ the root group, 1 is the default group, 2–999 are reserved for manual use).
 `number`
 
 A unique node ID (>= 1000)
+
+##### now()
+
+> **now**(): `number`
+
+The engine's clock, in NTP seconds: the time its audio thread has reached, readable on any thread the channel is
+on — a worker cannot see the AudioContext. The clock bundles are stamped on ([SuperSonic.clock](#clock)'s now()),
+taken from the audio thread itself once a block: it stands still while the audio does (suspended, interrupted),
+and after a reload it is the new engine's from its first block. 0 until the engine has rendered one.
+
+SAB mode reads the sample clock the audio thread publishes into shared memory; postMessage mode hears it from the
+audio thread every few blocks and counts on from the last word by the wall clock, a tenth of a second at most.
+
+###### Returns
+
+`number`
+
+NTP seconds, or 0
+
+###### Example
+
+```ts
+// Inside a worker: schedule half a second ahead on the engine's own clock
+channel.send(osc.encodeBundle(channel.now() + 0.5, [["/s_new", "beep", -1, 0, 0]]));
+```
 
 ##### send()
 
@@ -2831,7 +2862,7 @@ independent of any wall-clock-vs-audio-clock skew.
 > **nowAt**(`audioCurrentTime`): `number`
 
 Compute audio-thread NTP for a specific `AudioContext.currentTime`.
-Lower-level than [now](#now) — pass a value obtained from
+Lower-level than [now](#now-1) — pass a value obtained from
 `audioContext.getOutputTimestamp()` for sample-aligned scheduling.
 
 ###### Parameters
@@ -3007,7 +3038,7 @@ No-op without a Link backing.
 > **wallNow**(): `number`
 
 Current NTP time from the system wall clock. Use only when matching
-against external wall-clock events; prefer [now](#now) for scheduling
+against external wall-clock events; prefer [now](#now-1) for scheduling
 engine events.
 
 ###### Returns
@@ -3471,6 +3502,14 @@ Groups contain children; synths are leaves.
 > **AddAction** = `0` | `1` | `2` | `3` | `4`
 
 Node add action: 0=head, 1=tail, 2=before, 3=after, 4=replace
+
+***
+
+### EngineState
+
+> **EngineState** = `"stopped"` | `"booting"` | `"running"` | `"restarting"` | `"error"`
+
+The engine's lifecycle state: the same words as native's `engineState()`.
 
 ***
 

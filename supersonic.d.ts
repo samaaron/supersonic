@@ -1050,6 +1050,23 @@ export class OscChannel {
    */
   nextNodeId(): number;
 
+  /**
+   * The engine's clock, in NTP seconds: the time its audio thread has reached, readable on any thread the channel is
+   * on — a worker cannot see the AudioContext. The clock bundles are stamped on ({@link SuperSonic.clock}'s now()),
+   * taken from the audio thread itself once a block: it stands still while the audio does (suspended, interrupted),
+   * and after a reload it is the new engine's from its first block. 0 until the engine has rendered one.
+   *
+   * SAB mode reads the sample clock the audio thread publishes into shared memory; postMessage mode hears it from the
+   * audio thread every few blocks and counts on from the last word by the wall clock, a tenth of a second at most.
+   *
+   * @example
+   * // Inside a worker: schedule half a second ahead on the engine's own clock
+   * channel.send(osc.encodeBundle(channel.now() + 0.5, [["/s_new", "beep", -1, 0, 0]]));
+   *
+   * @returns NTP seconds, or 0
+   */
+  now(): number;
+
   /** Close the channel and release its ports. */
   close(): void;
 
