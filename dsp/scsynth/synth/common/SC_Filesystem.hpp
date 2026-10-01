@@ -49,7 +49,15 @@
 #pragma once
 
 #ifndef PATH_MAX
-#    define PATH_MAX MAX_PATH
+#    ifdef MAX_PATH
+#        define PATH_MAX MAX_PATH
+#    else
+// Windows, with no windows.h ahead of this header: MAX_PATH's value, rather
+// than the header, which brings min/max macros nothing here wants. The
+// clockwork headers that once included it for every scsynth source are
+// behind the DSP boundary now (dsp_api.h), so nothing is assumed to.
+#        define PATH_MAX 260
+#    endif
 #endif
 
 #ifndef MAXPATHLEN

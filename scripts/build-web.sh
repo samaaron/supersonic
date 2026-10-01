@@ -71,6 +71,7 @@ CMAKE_BUILD_TYPE=Release
 [ "$OPT" = "-O0 -g" ] && CMAKE_BUILD_TYPE=Debug
 echo "SuperSonic → wasm   dsp=$DSP scheduler=$SCHEDULER ($CMAKE_BUILD_TYPE)"
 emcc --version | head -1
+mkdir -p "$ROOT/build"   # the configure log goes beside the build dir, on a fresh checkout too
 emcmake cmake -B "$BUILD_DIR" -S "$ROOT" \
     -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" \
     -DCLOCKWORK_SCHEDULER="$([ "$SCHEDULER" = 1 ] && echo ON || echo OFF)" \
