@@ -1,15 +1,11 @@
 /*
- * engine_api.h — the contract between SuperSonic and its audio engine.
+ * engine_api.h — the seam between the dsp_api.h adapter and scsynth's server.
  *
- * SuperSonic reaches its engine through a small, stable surface: build a
- * world, run a block, hand it OSC, read its buffers. This header states that
- * surface in C so either implementation can stand behind it — scsynth's
- * server, or the Rust graph engine in rust/supersonic-engine.
- *
- * It exists because the declarations were previously spread across scsynth's
- * own headers with C++ linkage, which tied the host to that particular
- * implementation for no reason other than where the prototypes happened to
- * live.
+ * scsynth_dsp.cpp reaches the server through a small surface: build a world,
+ * run a block, hand it OSC, read its buffers. This header states that surface
+ * in C. It dates from when a second engine stood behind it; that engine is
+ * gone, and the header stays because the adapter is easier to read against a
+ * dozen declarations than against the server's own headers.
  */
 #ifndef CLOCKWORK_ENGINE_API_H
 #define CLOCKWORK_ENGINE_API_H

@@ -17,7 +17,7 @@ Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
  component (pristine Ableton Link 4.0 with its asio-standalone submodule;
  clockwork's patches under debian/patches apply to it), and the
  "rust-vendor" component (the output of `cargo vendor` for the committed
- rust/Cargo.lock, which resolves clockwork's crates by path). See
+ clockwork/rust/Cargo.lock, which resolves clockwork's crates by path). See
  debian/README.source.
 
 Files: *
@@ -141,9 +141,9 @@ License: BSL-1.0
 
 Files: rust-vendor/*
 Copyright: various Rust crate authors; see the LICENSE files inside each
- crate directory and rust/Cargo.lock for the exact crate set
+ crate directory and clockwork/rust/Cargo.lock for the exact crate set
 License: Expat or Apache-2.0
-Comment: Output of `cargo vendor` for the committed rust/Cargo.lock. The
+Comment: Output of `cargo vendor` for the committed clockwork/rust/Cargo.lock. The
  licence allow-list is machine-enforced by clockwork's rust/deny.toml (MIT,
  Apache-2.0 with or without LLVM-exception, BSD-2-Clause, BSD-3-Clause, ISC,
  Zlib, Unicode-3.0, Unicode-DFS-2016, CC0-1.0, MPL-2.0); every vendored

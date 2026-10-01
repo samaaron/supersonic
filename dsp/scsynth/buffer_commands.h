@@ -7,9 +7,7 @@
 */
 
 /*
- * The implementation is Rust (rust/supersonic-buffers/src/lib.rs). This header
- * is the C++ declaration of its three entry points; the C++ callers are
- * unchanged.
+ * The three entry points of buffer_commands.cpp.
  *
  * Why these exist at all: /b_alloc allocates a buffer for the engine, and none
  * of these do. On web JavaScript decodes a sample and passes the block in; on
@@ -34,8 +32,8 @@ typedef struct {
     double samplerate;
 } buffer_info_t;
 
-// The guard layout a client allocates around a sample, from the crate that
-// applies it (rust/supersonic-buffers): frames before and after the audio.
+// The guard layout a client allocates around a sample, from the code that
+// applies it (buffer_commands.cpp): frames before and after the audio.
 uint32_t supersonic_buffer_guard_before(void);
 uint32_t supersonic_buffer_guard_after(void);
 

@@ -24,10 +24,10 @@ ClockworkEngine::Config segmentConfig(unsigned port) {
     cfg.sampleRate    = 48000;
     cfg.bufferSize    = 128;
     cfg.udpPort       = port;   // non-zero: the public shm segment exists
-    cfg.numBuffers    = 256;
-    cfg.maxNodes      = 256;
-    cfg.maxGraphDefs  = 64;
-    cfg.maxWireBufs   = 32;
+    setGuestOption(cfg, "numBuffers", 256);
+    setGuestOption(cfg, "maxNodes", 256);
+    setGuestOption(cfg, "maxGraphDefs", 64);
+    setGuestOption(cfg, "maxWireBufs", 32);
     cfg.headless      = true;
     return cfg;
 }
@@ -64,5 +64,5 @@ TEST_CASE("node tree: a client finds the window's identity in the arena table",
     // And the record behind it is the node tree: its version word, the one
     // the host watches, is where the layout says it is.
     const auto* tree = reinterpret_cast<const NodeTreeHeader*>(client.get_base() + w->offset);
-    CHECK(tree->node_count.load() <= NODE_TREE_MIRROR_MAX_NODES);
+    CHECK(tree->node_count.load() <= supersonic_node_tree_capacity());
 }

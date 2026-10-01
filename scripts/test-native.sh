@@ -52,17 +52,18 @@ cmake -B "$BUILD_DIR" \
 
 cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" --parallel
 
-# Run tests — check MSVC multi-config path as fallback (Windows)
+# Run tests the two ways CI does (.github/workflows/native.yml says why):
+# through ctest, every Catch2 case in a process of its own (benchmarks
+# excluded by the discovery) with the guest boundary check; then the binary,
+# every case in one process, in a shuffled order.
+echo ""
+echo "Running native tests, each case on its own..."
+ctest --test-dir "$BUILD_DIR" -C "$BUILD_TYPE" --output-on-failure -j 4 --timeout 300
+
 TEST_BINARY="$BUILD_DIR/test/native/SuperSonicNativeTests"
 if [ ! -f "$TEST_BINARY" ] && [ ! -f "$TEST_BINARY.exe" ]; then
     TEST_BINARY="$BUILD_DIR/test/native/$BUILD_TYPE/SuperSonicNativeTests"
 fi
-
-if [ -f "$TEST_BINARY" ] || [ -f "$TEST_BINARY.exe" ]; then
-    echo ""
-    echo "Running native tests..."
-    "$TEST_BINARY"
-else
-    echo "Error: Test binary not found"
-    exit 1
-fi
+echo ""
+echo "Running native tests, one process, shuffled..."
+"$TEST_BINARY" "~[benchmark]" --order rand

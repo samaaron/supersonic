@@ -74,7 +74,7 @@ Format 3.0 (quilt), three upstream tarballs (see
 - `supersonic_<v>.orig-link.tar.xz` — pristine Link 4.0 **with the
   asio-standalone submodule** (GitHub tag tarballs omit submodules)
 - `supersonic_<v>.orig-rust-vendor.tar.xz` — `cargo vendor` for the
-  committed `rust/Cargo.lock`
+  committed `clockwork/rust/Cargo.lock`
 
 The four Link patches remain single-sourced in `clockwork/external/*.patch`;
 the assembly script path-shifts them under `link/` into `debian/patches/`, so
@@ -93,7 +93,7 @@ the eventual `<v>-1` release.
   (`test/transport-harness/run.sh`) against the *installed*
   `/usr/bin/supersonic` — boots headless once per transport (UDP, TCP, UDS
   stream, UDS datagram, the shared-memory command plane) and drives OSC load
-  over each. The probe client (`rust/supersonic-transport-probe`) builds
+  over each. The probe client (clockwork's `transport_probe` example) builds
   offline from the vendored crates.
 - **Smoke**: a pristine container `apt install`s the .deb (resolving runtime
   deps from the archive), checks `-v` and the man page, and boots the server

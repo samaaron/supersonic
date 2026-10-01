@@ -8,6 +8,8 @@
 #include "EgressRouter.h"
 #include "clockwork_client.h"
 #include "clockwork_product.h"
+#include "GuestConfigText.h"     // the guest's options, as name=value text
+#include "scsynth_options.h"     // which options, which flags, which defaults
 #include "native/LinkAudioBridge.h"
 #ifdef __APPLE__
 #  include "cocoa_event_pump.h"
@@ -32,6 +34,32 @@ namespace supersonic_host {
 
 // ── The command line ─────────────────────────────────────────────────────────
 
+// The guest's option for a command-line letter, from the one list of them
+// (scsynth_options.h), or null for a letter that is not one of the guest's.
+static const ScsynthOptionInfo* scsynthOptionForFlag(char flag) {
+    for (uint32_t i = 0; i < scsynth_option_count(); ++i) {
+        const ScsynthOptionInfo* opt = scsynth_option_info(i);
+        if (opt->flag && opt->flag == flag) return opt;
+    }
+    return nullptr;
+}
+
+// The usage lines for those flags, in the list's order, with the defaults
+// the list says — so --help cannot say one number while the engine uses
+// another.
+static std::string scsynthOptionUsage() {
+    std::string out;
+    for (uint32_t i = 0; i < scsynth_option_count(); ++i) {
+        const ScsynthOptionInfo* opt = scsynth_option_info(i);
+        if (!opt->flag) continue;
+        char line[200];
+        std::snprintf(line, sizeof(line), "  -%c <num>     %s (default: %u)\n",
+                      opt->flag, opt->doc, opt->def);
+        out += line;
+    }
+    return out;
+}
+
 std::string usage(const char* productName) {
     std::string p = productName ? productName : "clockwork";
     return
@@ -43,12 +71,7 @@ std::string usage(const char* productName) {
         "  -z <size>    DSP control block size, 32-1024 (default: 128)\n"
         "  -i <num>     Input channels (default: device max; 0 = disable)\n"
         "  -o <num>     Output channels (default: device max)\n"
-        "  -n <num>     Max nodes (default: 1024)\n"
-        "  -b <num>     Sample buffers (default: 1024)\n"
-        "  -a <num>     Audio bus channels (default: 1024)\n"
-        "  -c <num>     Control bus channels (default: 16384)\n"
-        "  -m <size>    Real-time memory in KB (default: 8192)\n"
-        "  -w <num>     Max wire buffers (default: 64)\n"
+        + scsynthOptionUsage() +
         "  -B <addr>    Bind address (default: all interfaces)\n"
         "  -H <words>   Audio device (fuzzy match on 'Driver : Device')\n"
         "  -v           Print version and exit\n"
@@ -94,6 +117,11 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     // Recover automatically if the device's callback thread wedges (e.g. a
     // DirectSound cursor-poll spin), so a standalone process keeps running.
     cfg.callbackWatchdog = true;
+    // The guest's options start from its defaults (scsynth_options.h), with
+    // one host choice on top: a native process has a filesystem, so
+    // definitions in the synthdef directory are loaded at boot. -D 0 turns
+    // it off, as it does for scsynth.
+    clockwork::guest_config_text::set(cfg.guestConfig, "loadGraphDefs", "1");
     long inboxMb = 512;   // the host's default: generous, because it is only address space
 
     for (int i = 1; i < argc; ++i) {
@@ -147,17 +175,11 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
         if (arg[0] == '-' && arg[1] != '\0' && arg[2] == '\0' && val) {
             switch (arg[1]) {
             case 'u': cfg.udpPort               = std::atoi(val); ++i; break;
-            case 'a': cfg.numAudioBusChannels   = std::atoi(val); ++i; break;
             case 'i': cfg.numInputChannels      = std::atoi(val); ++i; break;
             case 'o': cfg.numOutputChannels     = std::atoi(val); ++i; break;
-            case 'b': cfg.numBuffers            = std::atoi(val); ++i; break;
-            case 'c': cfg.numControlBusChannels = std::atoi(val); ++i; break;
-            case 'm': cfg.realTimeMemorySize    = std::atoi(val); ++i; break;
             case 'B': cfg.bindAddress           = val;            ++i; break;
             case 'S': cfg.sampleRate            = std::atoi(val); ++i; break;
             case 'Z': cfg.bufferSize            = std::atoi(val); ++i; break;
-            case 'n': cfg.maxNodes              = std::atoi(val); ++i; break;
-            case 'w': cfg.maxWireBufs           = std::atoi(val); ++i; break;
             case 'z': cfg.blockSize             = std::atoi(val); ++i; break;
             case 'H': {
                 // scsynth's -H: "<in> <out>", or a single name for both.
@@ -168,10 +190,18 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
                 break;
             }
             // Accepted for scsynth compatibility (ignored):
-            case 'U': case 'D': case 'R': case 'l':
-            case 'd': case 'r': case 'I': case 'O':
+            case 'U': case 'R': case 'l': case 'I': case 'O':
                 ++i; break;
             default:
+                // The guest's own flags — -n, -b, -a, -c, -m, -w, -d, -r, -D,
+                // -V — are whatever scsynth_options.h says they are: the
+                // value goes to the guest by NAME, and the guest, not this
+                // host, decides whether it is acceptable.
+                if (const ScsynthOptionInfo* opt = scsynthOptionForFlag(arg[1])) {
+                    clockwork::guest_config_text::set(cfg.guestConfig, opt->name, val);
+                    ++i;
+                    break;
+                }
                 o.warnings.push_back(std::string("unknown flag: ") + arg);
                 ++i;
                 break;

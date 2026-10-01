@@ -92,7 +92,7 @@ test.describe("Audio Bus Channels Config", () => {
     expect(result.nodeCount).toBeGreaterThanOrEqual(3);
   });
 
-  test("bus 200 FAILS with default numAudioBusChannels (128)", async ({ page }) => {
+  test("bus 200 FAILS with numAudioBusChannels: 128", async ({ page }) => {
     test.setTimeout(15000);
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
@@ -100,7 +100,9 @@ test.describe("Audio Bus Channels Config", () => {
     const result = await page.evaluate(async () => {
       const sonic = new window.SuperSonic({
         baseURL: "/dist/",
-        // No scsynthOptions — uses default 128 channels
+        // The engine's default is 1024 (scsynth_options.h); ask for fewer
+        // and a bus past them is out of range.
+        scsynthOptions: { numAudioBusChannels: 128 },
       });
 
       let failMsg = null;

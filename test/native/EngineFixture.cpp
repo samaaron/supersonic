@@ -29,10 +29,10 @@ ClockworkEngine::Config EngineFixture::defaultConfig() {
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 0;
-    cfg.numBuffers        = 1024;
-    cfg.maxNodes          = 1024;
-    cfg.maxGraphDefs      = 512;
-    cfg.maxWireBufs       = 64;
+    setGuestOption(cfg, "numBuffers", 1024);
+    setGuestOption(cfg, "maxNodes", 1024);
+    setGuestOption(cfg, "maxGraphDefs", 512);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.headless          = true;
     // Pin channel counts for the headless test fixture. The live engine
     // uses kAutoChannelCount (-1) so JUCE picks up each device's real

@@ -35,10 +35,10 @@ ClockworkEngine::Config scopeOwnershipConfig() {
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
     cfg.udpPort           = 57210;  // non-zero enables shared memory
-    cfg.numBuffers        = 64;
-    cfg.maxNodes          = 256;
-    cfg.maxGraphDefs      = 64;
-    cfg.maxWireBufs       = 64;
+    setGuestOption(cfg, "numBuffers", 64);
+    setGuestOption(cfg, "maxNodes", 256);
+    setGuestOption(cfg, "maxGraphDefs", 64);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.headless          = true;
     cfg.numOutputChannels = 2;
     cfg.numInputChannels  = 0;

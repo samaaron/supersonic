@@ -177,10 +177,6 @@ typedef struct SndBufUpdates SndBufUpdates;
 
 enum { coord_None, coord_Complex, coord_Polar };
 
-#ifdef CLOCKWORK_GUEST
-extern "C" int clockwork_log(const char* fmt, ...);
-#endif
-
 inline float PhaseFrac(uint32_t inPhase) {
     union {
         uint32_t itemp;

@@ -161,14 +161,14 @@ struct InterfaceTable {
     // destroy any resources held internally.
     void (*fSCfftDestroy)(struct scfft* f, struct SCFFT_Allocator* alloc);
 
-    // SuperSonic contract (diverges from upstream SC): scope slots are
-    // shm_scope_stream cursor rings, not writable regions. fGetScopeBuffer
-    // claims slot `index` and sets ONLY hnd->internalData (a
-    // shm_scope_stream*, for ownership + constructing a
-    // shm_scope_stream_writer); hnd->data stays null, channels/maxFrames 0,
-    // and channel_data() must not be used. fPushScopeBuffer is a no-op
-    // (streams publish on every write). fReleaseScopeBuffer is
-    // owner-guarded. See synth/common/shm_scope_stream.hpp and ScopeOut2.
+    // SuperSonic contract (diverges from upstream SC): a scope slot is a
+    // stream the host owns, not a writable region. fGetScopeBuffer claims
+    // slot `index` and sets hnd->internalData (non-null while held) and
+    // hnd->channels (what the slot carries); hnd->data stays null and
+    // channel_data() must not be used. A ugen appends blocks through
+    // supersonic_scope_write (scsynth_scope.h). fPushScopeBuffer is a
+    // no-op: a stream publishes on every write. fReleaseScopeBuffer is
+    // owner-guarded by the handle's address. See ScopeOut2.
     SCBool (*fGetScopeBuffer)(World* inWorld, int32 index, int32 channels, int32 maxFrames, struct ScopeBufferHnd*);
     void (*fPushScopeBuffer)(World* inWorld, struct ScopeBufferHnd*, int frames);
     void (*fReleaseScopeBuffer)(World* inWorld, struct ScopeBufferHnd*);
@@ -224,9 +224,6 @@ typedef struct InterfaceTable InterfaceTable;
 #define DoAsyncUnitCommand (*ft->fDoAsyncUnitCommand)
 
 #ifdef CLOCKWORK_GUEST
-#    ifdef __cplusplus
-extern "C" int clockwork_log(const char* fmt, ...);
-#    endif
 #    define DefineSimpleUnit(name) (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0)
 #else
 #    define DefineSimpleUnit(name) (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0);

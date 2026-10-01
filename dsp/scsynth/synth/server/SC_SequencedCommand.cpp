@@ -55,7 +55,8 @@
 // =============================================================================
 // This file has the following changes from upstream SuperCollider:
 //
-// 1. clockwork_log: All scprintf calls replaced with clockwork_log for WASM
+// 1. scprintf: kept as upstream has it; it is the engine's one print, and on
+//    every target it goes to the host through DspHost::log (SC_Stubs.cpp)
 // 2. GET_COMPLETION_MSG: Removed optional integer skip (upstream commit b06dc8b4f)
 //    - The upstream version skips an optional integer-tagged value after the completion message
 //    - This affects all commands using GET_COMPLETION_MSG, not just /b_alloc
@@ -67,7 +68,7 @@
 // 5. AudioQuitCmd: Excludes mShmem and mQuitProgram (no SHM/semaphores in WASM)
 // 6. RecvSynthDefCmd::Stage2: Null check for mDefs to prevent null pointer crash
 // 7. RecvSynthDefCmd::Stage4: Sends /supersonic/synthdef/loaded messages
-// 8. RecvSynthDefCmd::Init: Added clockwork_log for empty synthdef error
+// 8. RecvSynthDefCmd::Init: Added scprintf for empty synthdef error
 // 9. NotifyCmd::Stage2: /notify on an already-registered client replies /done
 //    (idempotent) instead of upstream's /fail "already registered". Lets a
 //    redundant re-registration succeed — needed because a device rebuild
@@ -80,7 +81,6 @@
 extern "C" int  supersonic_inbox_contains(const void* ptr);
 extern "C" void supersonic_guest_release_buffer(int bufnum);
 extern "C" {
-    int clockwork_log(const char* fmt, ...);
 }
 
 const size_t ERR_BUF_SIZE(512);
@@ -342,7 +342,7 @@ bool BufAllocCmd::Stage2() {
     mFreeData = buf->data;
     SCErr err = bufAlloc(buf, mNumChannels, mNumFrames, mWorld->mSampleRate);
     if (err) {
-        clockwork_log("/b_alloc: memory allocation failed\n");
+        scprintf("/b_alloc: memory allocation failed\n");
         return false;
     }
     mSndBuf = *buf;
@@ -872,7 +872,7 @@ void BufCloseCmd::CallDestructor() { this->~BufCloseCmd(); }
 bool BufCloseCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure(&mReplyAddress, "/b_close", "scsynth compiled without libsndfile\n");
-    clockwork_log("scsynth compiled without libsndfile\n");
+    scprintf("scsynth compiled without libsndfile\n");
     return false;
 #else
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
@@ -906,18 +906,9 @@ bool AudioQuitCmd::Stage2() {
 bool AudioQuitCmd::Stage3() {
 #if SC_AUDIO_API == SC_AUDIO_API_AUDIOUNITS
     SendFailure(&mReplyAddress, "/quit", "not allowed in AU host\n");
-    clockwork_log("/quit : quit not allowed in AU host\n");
+    scprintf("/quit : quit not allowed in AU host\n");
     return false;
 #else
-#ifndef SC_LEAN_TARGET
-    // Honor host ownership of the segment: World_Cleanup gates segment
-    // deletion on mOwnsShmem (SC_World.cpp:1117); the same rule applies
-    // here. When the host supplies its own SHM via mExternalSharedMemory,
-    // disconnecting would leave Stage4's SendDone("/quit") writing to a
-    // freed page.
-    if (mWorld->hw->mShmem && mWorld->hw->mOwnsShmem)
-        mWorld->hw->mShmem->disconnect();
-#endif
     return true;
 #endif
 }
@@ -1060,7 +1051,7 @@ bool NotifyCmd::Stage2() {
 
         if (hw->mUsers->size() >= hw->mMaxUsers) {
             SendFailure(&mReplyAddress, "/notify", "too many users\n");
-            clockwork_log("too many users\n");
+            scprintf("too many users\n");
             return false;
         }
 
@@ -1082,7 +1073,7 @@ bool NotifyCmd::Stage2() {
         }
 
         SendFailure(&mReplyAddress, "/notify", "not registered\n");
-        clockwork_log("not registered\n");
+        scprintf("not registered\n");
     }
     return false;
 }
@@ -1129,7 +1120,7 @@ int RecvSynthDefCmd::Init(char* inData, int inSize) {
 
     mSize = msg.getbsize();
     if (!mSize) {
-        clockwork_log("ERROR /d_recv: synthdef data is empty");
+        scprintf("ERROR /d_recv: synthdef data is empty");
         throw kSCErr_WrongArgType;
     }
 
@@ -1444,7 +1435,7 @@ SCErr PerformAsyncUnitCommand(
         // happen if DoAsyncUnitCommand() is called in a Unit destructor (which is not allowed).
         // This check is important because it makes sure that we don't increment a reference count
         // that has already gone to zero!
-        clockwork_log("ERROR: cannot call DoAsyncUnitCommand() in a Unit destructor!\n");
+        scprintf("ERROR: cannot call DoAsyncUnitCommand() in a Unit destructor!\n");
         return kSCErr_Failed;
     }
 

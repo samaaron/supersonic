@@ -132,7 +132,7 @@ TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
     fx.send(osc_test::message("/n_free", 2400));
 }
 
-TEST_CASE("LinkUGen: LinkPhase.kr outputs phase in [0, quantum)",
+TEST_CASE("LinkUGen: LinkPhase.kr outputs phase from 0 up to, not including, quantum",
           "[Link][LinkUGen][integration]") {
     EngineFixture fx(linkProbeConfig());
 #ifdef CLOCKWORK_LINK

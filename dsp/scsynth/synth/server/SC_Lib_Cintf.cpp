@@ -41,7 +41,6 @@
 
 // From audio_processor.cpp
 extern "C" {
-    int clockwork_log(const char* fmt, ...);
 }
 
 Malloc gMalloc;

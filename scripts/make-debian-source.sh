@@ -13,7 +13,7 @@
 #                                           GitHub tag tarball lacks
 #                                           submodules, hence the clone)
 #   supersonic_<uv>.orig-rust-vendor.tar.xz `cargo vendor` output for the
-#                                           committed rust/Cargo.lock
+#                                           committed clockwork/rust/Cargo.lock
 #   supersonic_<dv>.dsc + .debian.tar.xz    via dpkg-buildpackage -S
 #
 # The four Link patches are clockwork's (clockwork/external/*.patch); they are
@@ -90,7 +90,7 @@ tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-link.tar.xz" link
 
 # ── Rust vendor component ───────────────────────────────────────────────────
 echo "=== orig-rust-vendor tarball ==="
-(cd rust && cargo vendor "$WORK/rust-vendor")
+(cd clockwork/rust && cargo vendor "$WORK/rust-vendor")
 
 # Sanitise the vendor tree so it survives Debian's source-package machinery and
 # lintian. For each affected crate we delete the offending files AND strip their

@@ -34,7 +34,6 @@
 
 // From audio_processor.cpp
 extern "C" {
-    int clockwork_log(const char* fmt, ...);
 }
 
 NodeDef gGroupNodeDef;
@@ -77,11 +76,11 @@ void Group_Calc(Group* inGroup) {
 }
 
 void Group_CalcTrace(Group* inGroup) {
-    clockwork_log("TRACE Group %d\n", inGroup->mNode.mID);
+    scprintf("TRACE Group %d\n", inGroup->mNode.mID);
     Node* child = inGroup->mHead;
     while (child) {
         Node* next = child->mNext;
-        clockwork_log("   %d %s\n", child->mID, (char*)child->mDef->mName);
+        scprintf("   %d %s\n", child->mID, (char*)child->mDef->mName);
         (*child->mCalcFunc)(child);
         child = next;
     }
@@ -97,14 +96,14 @@ void Group_Trace(Group* inGroup) {
 void Group_DumpNodeTree(Group* inGroup) {
     static int tabCount = 0;
     if (tabCount == 0)
-        clockwork_log("NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf("NODE TREE Group %d\n", inGroup->mNode.mID);
     tabCount++;
     Node* child = inGroup->mHead;
     while (child) {
         Node* next = child->mNext;
         for (int i = 0; i < tabCount; i++)
-            clockwork_log("   "); // small 'tabs'
-        clockwork_log("%d %s\n", child->mID, (char*)child->mDef->mName);
+            scprintf("   "); // small 'tabs'
+        scprintf("%d %s\n", child->mID, (char*)child->mDef->mName);
         if (child->mIsGroup) {
             Group_DumpTree((Group*)child);
         }
@@ -113,30 +112,30 @@ void Group_DumpNodeTree(Group* inGroup) {
     }
     tabCount--;
     if (tabCount == 0)
-        clockwork_log("END NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf("END NODE TREE Group %d\n", inGroup->mNode.mID);
 }
 
 void Group_DumpNodeTreeAndControls(Group* inGroup) {
     static int tabCount = 0;
     if (tabCount == 0)
-        clockwork_log("NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf("NODE TREE Group %d\n", inGroup->mNode.mID);
     tabCount++;
     Node* child = inGroup->mHead;
     while (child) {
         Node* next = child->mNext;
         int i;
         for (i = 0; i < tabCount; i++)
-            clockwork_log("   "); // small 'tabs'
-        clockwork_log("%d %s", child->mID, (char*)child->mDef->mName); // def will be 'group' if it's a group
+            scprintf("   "); // small 'tabs'
+        scprintf("%d %s", child->mID, (char*)child->mDef->mName); // def will be 'group' if it's a group
         if (child->mIsGroup) {
             Group_DumpTreeAndControls((Group*)child);
         } else {
             Graph* childGraph = (Graph*)child;
             int numControls = childGraph->mNumControls;
             if (numControls > 0) {
-                clockwork_log("\n ");
+                scprintf("\n ");
                 for (i = 0; i < tabCount; i++)
-                    clockwork_log("   ");
+                    scprintf("   ");
                 char** names;
                 names = new char*[numControls];
 
@@ -157,9 +156,9 @@ void Group_DumpNodeTreeAndControls(Group* inGroup) {
                     float* ptr = childGraph->mControls + i;
 
                     if (names[i]) {
-                        clockwork_log(" %s: ", names[i]);
+                        scprintf(" %s: ", names[i]);
                     } else {
-                        clockwork_log(" ", names[i]);
+                        scprintf(" ", names[i]);
                     }
                     // the ptr in nMapControls should be the same as the control itself, if not, it's mapped.
                     if ((childGraph->mMapControls[i]) != ptr) {
@@ -167,27 +166,27 @@ void Group_DumpNodeTreeAndControls(Group* inGroup) {
                         if (childGraph->mControlRates[i] == 2) {
                             bus = (childGraph->mMapControls[i]) - (child->mWorld->mAudioBus);
                             bus = (int)((float)bus / child->mWorld->mBufLength);
-                            clockwork_log("a%d", bus);
+                            scprintf("a%d", bus);
                         } else {
                             bus = (childGraph->mMapControls[i]) - (child->mWorld->mControlBus);
-                            clockwork_log("c%d", bus);
+                            scprintf("c%d", bus);
                         }
-                        // clockwork_log("bus: %d\n", bus);
+                        // scprintf("bus: %d\n", bus);
                     } else {
-                        clockwork_log("%.14g", *ptr);
+                        scprintf("%.14g", *ptr);
                     }
                 }
 
                 delete[] names;
             }
         }
-        clockwork_log("\n");
+        scprintf("\n");
         (*child->mCalcFunc)(child);
         child = next;
     }
     tabCount--;
     if (tabCount == 0)
-        clockwork_log("END NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf("END NODE TREE Group %d\n", inGroup->mNode.mID);
 }
 
 void Group_CalcDumpTree(Group* inGroup) {
@@ -355,7 +354,7 @@ void Group_QueryTreeAndControls(Group* inGroup, big_scpacket* packet) {
                         bus = (childGraph->mMapControls[i]) - (child->mWorld->mControlBus);
                         snprintf(buf, BUF_SIZE, "%c%d", 'c', bus);
                     }
-                    // clockwork_log("bus: %d\n", bus);
+                    // scprintf("bus: %d\n", bus);
                     packet->addtag('s');
                     packet->adds(buf);
                 } else {

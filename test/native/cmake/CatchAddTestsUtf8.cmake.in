@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2026 Sam Aaron
+#
+# Catch2's test discovery (CatchAddTests.cmake), reading the test list as UTF-8.
+#
+# catch_discover_tests runs the binary with --list-tests after it is built and
+# registers one CTest entry per name. CMake decodes that output, on Windows,
+# with the console's code page unless a policy says otherwise (CMP0176, new in
+# 3.31: UTF-8). The runner's console is OEM, so a case named with a dash or an
+# arrow was registered as mojibake, and ctest then ran it by a name no case
+# has: 36 cases here would have "failed" on windows-x64 and nowhere else. The names are UTF-8,
+# as the sources are; this says so. Catch2 v3.5.2 passes no ENCODING itself.
+#
+# Written at configure time from test/native/cmake/CatchAddTestsUtf8.cmake.in, with
+# the path of Catch2's own script filled in; test/native/CMakeLists.txt points
+# catch_discover_tests at this file instead.
+if(POLICY CMP0176)
+    cmake_policy(SET CMP0176 NEW)
+endif()
+include("@CATCH_ADD_TESTS_SCRIPT@")

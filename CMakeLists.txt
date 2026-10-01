@@ -44,7 +44,7 @@ endif()
 # Ableton Link, on by default: SuperSonic is a drop-in scsynth for Sonic Pi,
 # and Link tempo sync plus Link Audio are part of what it is. A DEFAULT, like
 # the product name above — an embedder that wants a Link-free binary says so.
-if(NOT DEFINED CLOCKWORK_LINK)
+if(NOT DEFINED CLOCKWORK_LINK AND NOT EMSCRIPTEN)
     set(CLOCKWORK_LINK ON CACHE BOOL "Integrate Ableton Link, tempo and audio (GPL-2.0-or-later; fetches the library)")
 endif()
 if(NOT DEFINED CLOCKWORK_LINK_AUDIO)
@@ -79,20 +79,37 @@ endif()
 set(CLOCKWORK_DSP     "scsynth" CACHE STRING "" FORCE)
 set(CLOCKWORK_DSP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dsp/scsynth" CACHE PATH "" FORCE)
 
-# ─── The Rust umbrella ───────────────────────────────────────────────────────
-# Only one Rust staticlib may be linked into a binary, and SuperSonic has Rust
-# of its own — the engine layer, where the OSC dispatch and the ugen host
-# actually live. So clockwork's clockwork-native cannot be used: rust/
-# supersonic-native depends on both halves and is built instead.
-set(CLOCKWORK_RUST_WORKSPACE "${CMAKE_CURRENT_SOURCE_DIR}/rust" CACHE PATH   "" FORCE)
-set(CLOCKWORK_RUST_PACKAGE   "supersonic-native"               CACHE STRING "" FORCE)
-set(CLOCKWORK_RUST_LIB_NAME  "supersonic_native"               CACHE STRING "" FORCE)
+# ─── The web module ──────────────────────────────────────────────────────────
+# `emcmake cmake -B build/web` (scripts/build-web.sh): the same clockwork and
+# the same guest, compiled for the AudioWorklet by clockwork's own CMake. What
+# is SuperSonic's is the module's name — scsynth-nrt.wasm, which the client and
+# the suite expect — where it lands, and the scheduler's shape: 2048 pending
+# events with a 512 KB payload pool is ample and fits the gap before the guest
+# region, and an event that is late PLAYS rather than disappears, which is what
+# OSC says and every SuperCollider client assumes.
+if(EMSCRIPTEN)
+    set(CLOCKWORK_WEB_MODULE_NAME "scsynth-nrt" CACHE STRING "" FORCE)
+    set(CLOCKWORK_WEB_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist/wasm" CACHE PATH "" FORCE)
+    set(CLOCKWORK_SCHEDULER_SLOT_COUNT 2048 CACHE STRING "" FORCE)
+    set(CLOCKWORK_SCHEDULER_DATA_POOL_SIZE 524288 CACHE STRING "" FORCE)
+    set(CLOCKWORK_SCHEDULER_SHED_LATE_MS 0 CACHE STRING "" FORCE)
+    set(CLOCKWORK_IN_BUFFER_SIZE 1048576 CACHE STRING "" FORCE)
+endif()
+
+# The guest is C++ throughout and brings no Rust of its own, so the one Rust
+# staticlib a binary may link is clockwork's own umbrella (clockwork-native),
+# built by clockwork's CMake from the submodule's workspace.
 
 # ─── Clockwork ───────────────────────────────────────────────────────────────
 # CLOCKWORK_STANDALONE defaults off for a subdirectory build, so this brings
 # in the library and the guest without clockwork's reference host or its own
 # test suite.
 add_subdirectory(clockwork)
+
+if(EMSCRIPTEN)
+    message(STATUS "SuperSonic ${PROJECT_VERSION}: web module, clockwork + ${CLOCKWORK_DSP}")
+    return()
+endif()
 
 # ─── SuperSonic ──────────────────────────────────────────────────────────────
 # The process. SuperSonic's own main (host/), composed from the host pieces

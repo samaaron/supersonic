@@ -23,8 +23,7 @@
 #endif
 
 #include "SC_PlugIn.h"
-#include "audio_config.h"
-#include "shm_scope_stream.hpp"
+#include "scsynth_scope.h"   // supersonic_scope_write: a block into a claimed slot
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -36,10 +35,6 @@ const int kMAXMEDIANSIZE = 32;
 
 static InterfaceTable* ft;
 
-// TODO: ScopeOut/ScopeOut2 are dead code in WASM — the server-side scope buffer functions
-// (getScopeBuffer, pushScopeBuffer, releaseScopeBuffer in SC_World.cpp) are all no-ops
-// under Emscripten. Either remove these UGens entirely, or figure out how to pipe scope
-// data out of the AudioWorklet (e.g. via the existing ring buffer / postMessage path).
 struct ScopeOut : public Unit {
     SndBuf* m_buf;
     SndBufUpdates* m_bufupdates;
@@ -4527,61 +4522,47 @@ void ScopeOut_Dtor(ScopeOut* unit) { TAKEDOWN_IN }
 std::atomic<int> gScopeOut2DefenseTripCount{0};
 
 struct ScopeOut2 : public Unit {
-    // Slot claim/ownership travels through the ft scope-buffer interface
-    // (SC_World.cpp owner-guards release); per-block writes go directly
-    // through the stream writer.
+    // The slot claim travels through the ft scope-buffer interface, which
+    // owner-guards release; each block is appended through the guest's scope
+    // door (scsynth_scope.h). The ring's layout stays on the host's side of
+    // dsp_api.h, so this unit holds nothing but the handle.
     ScopeBufferHnd m_buffer;
-    shm_scope_stream_writer m_writer;
 };
 
+// Every ScopeOut2 is bounded by what a slot carries (m_buffer.channels, as the
+// host clamped it); this is only the size of the pointer array on the stack.
+static constexpr int kScopeOut2MaxChannels = 16;
 
 void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
     // internalData is nulled when the slot is released mid-life (cold-swap
     // race); counted by [scope-diag]. Never-claimed units don't reach here —
     // the ctor installs ClearUnitOutputs instead — so the counter stays a
     // pure mid-life-release signal.
-    if (!unit->m_buffer.internalData || !unit->m_writer.valid()) {
+    if (!unit->m_buffer.internalData) {
         gScopeOut2DefenseTripCount.fetch_add(1, std::memory_order_relaxed);
-        static int warned = 0;
-        if (warned++ < 3) {
-            DEV_LOG("[scope-diag] ScopeOut2_next: slot released mid-life "
-                    "(internalData=%p) — scope write skipped",
-                    unit->m_buffer.internalData);
-        }
         return;
     }
 
     const int inputOffset = 3;
     const int numChannels = unit->mNumInputs - inputOffset;
-    const int n = std::min(numChannels, (int)SHM_SCOPE_STREAM_CHANNELS);
+    const int slotChannels = (int)unit->m_buffer.channels;
+    const int n = std::min(std::min(numChannels, slotChannels > 0 ? slotChannels : numChannels),
+                           kScopeOut2MaxChannels);
     if (n <= 0)
         return;
-    const float* channel_data[SHM_SCOPE_STREAM_CHANNELS];
+    const float* channel_data[kScopeOut2MaxChannels];
     for (int c = 0; c < n; ++c)
         channel_data[c] = IN(inputOffset + c);
-    for (int c = n; c < (int)SHM_SCOPE_STREAM_CHANNELS; ++c)
-        channel_data[c] = channel_data[n - 1];
 
-    // g_engine_frames anchors this block on the sample clock (and heals
-    // the cursor across skipped blocks, e.g. paused node groups).
-    unit->m_writer.write(channel_data, (uint32)inNumSamples,
-                         g_engine_frames.load(std::memory_order_relaxed));
+    supersonic_scope_write(&unit->m_buffer, channel_data, (uint32)n, (uint32)inNumSamples);
 }
 
 void ScopeOut2_Ctor(ScopeOut2* unit) {
-    new (&unit->m_writer) shm_scope_stream_writer();
     uint32 numChannels = unit->mNumInputs - 3;
     uint32 scopeNum = (uint32)ZIN0(0);
     uint32 maxFrames = (uint32)ZIN0(1);  // legacy input; ring size is fixed
 
     bool ok = (*ft->fGetScopeBuffer)(unit->mWorld, scopeNum, numChannels, maxFrames, &unit->m_buffer);
-
-    DEV_LOG("[scope-diag] ScopeOut2_Ctor: unit=%p scopeNum=%u ch=%u "
-            "result=%s slot=%p",
-            (void*)unit, scopeNum, numChannels,
-            ok ? "OK" : "FAIL",
-            unit->m_buffer.internalData);
-
     if (!ok) {
         if (unit->mWorld->mVerbosity > -1 && !unit->mDone)
             Print("ScopeOut2: Requested scope buffer unavailable! (index: %d, channels: %d)\n", scopeNum,
@@ -4589,15 +4570,10 @@ void ScopeOut2_Ctor(ScopeOut2* unit) {
         SETCALC(ClearUnitOutputs);
         return;
     }
-
-    unit->m_writer = shm_scope_stream_writer(
-        reinterpret_cast<shm_scope_stream*>(unit->m_buffer.internalData));
     SETCALC(ScopeOut2_next);
 }
 
 void ScopeOut2_Dtor(ScopeOut2* unit) {
-    DEV_LOG("[scope-diag] ScopeOut2_Dtor: unit=%p internalData=%p data=%p",
-            (void*)unit, unit->m_buffer.internalData, unit->m_buffer.data);
     if (unit->m_buffer)
         (*ft->fReleaseScopeBuffer)(unit->mWorld, &unit->m_buffer);
 }

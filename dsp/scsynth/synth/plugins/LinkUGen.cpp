@@ -35,8 +35,7 @@
 #include "SC_Unit.h"
 #include "SC_PlugIn.hpp"
 
-#include "shared_memory.h"   // ClockworkClockState, readClockworkClock
-#include "clock/clock_math.h"      // clockwork::wrapPhase
+#include "clockwork_clock_state.h"   // ClockworkClockState, readClockworkClock, clockwork::wrapPhase
 
 #include <algorithm>
 

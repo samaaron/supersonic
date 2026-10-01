@@ -119,7 +119,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-          key: cargo-${{ matrix.name }}-${{ hashFiles('rust/Cargo.lock', 'clockwork/rust/Cargo.lock') }}
+          key: cargo-${{ matrix.name }}-${{ hashFiles('clockwork/rust/Cargo.lock') }}
 
       # smoothie, clockwork's device layer (a fork of four JUCE 7 modules,
       # in-tree, not a dependency), needs the X11/freetype set to
@@ -146,14 +146,31 @@ jobs:
         # the engine.
         run: cmake --build build/native --config Release --parallel 2 --target SuperSonicNativeTests
 
-      - name: Run tests
+      # THE SUITE IS RUN TWICE, because each way sees what the other cannot.
+      #
+      # Through ctest: every test CMake registers — each Catch2 case in a
+      # process of its own (test/native/CMakeLists.txt discovers them,
+      # benchmarks excluded) and the guest boundary check. A case that only
+      # passes after another has run fails here, as does one whose name the
+      # discovery cannot carry. Both happened, with this workflow green.
+      - name: Run tests (each case on its own)
         env:
           SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
+        run: ctest --test-dir build/native -C Release --output-on-failure -j 2 --timeout 300
+
+      # The binary, every case in one process, in a shuffled order: a case
+      # that leaves something behind for the next fails here. The seed is the
+      # run number: every run shuffles differently, and re-running a failed
+      # job runs the same order again. Catch2 prints it first ("Randomness
+      # seeded to"); locally, --order rand --rng-seed <that>.
+      - name: Run tests (one process, shuffled)
+        env:
+          SUPERSONIC_QUIET: "1"
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]"
+            ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
           else
-            ./build/native/test/native/SuperSonicNativeTests "~[benchmark]"
+            ./build/native/test/native/SuperSonicNativeTests "~[benchmark]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
           fi
         shell: bash
 
@@ -264,7 +281,7 @@ jobs:
         run: docker exec ss32 scripts/ci-linux-x86.sh build
 
       - name: Run tests
-        run: docker exec ss32 scripts/ci-linux-x86.sh test
+        run: docker exec -e GITHUB_RUN_NUMBER ss32 scripts/ci-linux-x86.sh test
 
       - name: Transport harness
         run: docker exec ss32 scripts/ci-linux-x86.sh transport

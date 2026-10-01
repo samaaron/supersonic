@@ -26,14 +26,14 @@ ClockworkEngine::Config embeddedConfig() {
     ClockworkEngine::Config cfg;
     cfg.sampleRate            = 48000;
     cfg.bufferSize            = 64;
-    cfg.maxNodes              = 256;
-    cfg.numBuffers            = 64;
-    cfg.maxGraphDefs          = 128;
-    cfg.maxWireBufs           = 64;
-    cfg.numAudioBusChannels   = 64;
-    cfg.numControlBusChannels = 256;
+    setGuestOption(cfg, "maxNodes", 256);
+    setGuestOption(cfg, "numBuffers", 64);
+    setGuestOption(cfg, "maxGraphDefs", 128);
+    setGuestOption(cfg, "maxWireBufs", 64);
+    setGuestOption(cfg, "numAudioBusChannels", 64);
+    setGuestOption(cfg, "numControlBusChannels", 256);
     cfg.numOutputChannels     = 2;
-    cfg.realTimeMemorySize    = 128;   // KB — the tight RT pool
+    setGuestOption(cfg, "realTimeMemorySize", 128);   // KB — the tight RT pool
     cfg.headless              = true;
     return cfg;
 }

@@ -45,8 +45,8 @@ export function parseNodeTree(buffer, treeOffset, windowBytes) {
   // Read entries - each entry is 72 bytes: 6 int32s (24) + def_name (32) + uuid (16)
   // SuperSonic's own layout, not the host's. Clockwork reserves the window
   // and reads only its first word; the shape of everything after that is
-  // ours, and these must match supersonic-node-mirror's NodeTreeHeader and
-  // NodeEntry.
+  // ours, and these must match NodeTreeHeader and NodeEntry in
+  // dsp/scsynth/node_tree.h.
   const entriesBase = treeOffset + NODE_TREE_HEADER_SIZE;
   const maxNodes = Math.floor((windowBytes - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
   const entrySize = NODE_TREE_ENTRY_SIZE;

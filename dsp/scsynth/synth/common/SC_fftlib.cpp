@@ -33,10 +33,10 @@ For speed we keep this global, although this makes the code non-thread-safe.
 #include <cassert>
 
 #include "SC_fftlib.hpp"
+#include "SC_WorldOptions.h"   // scprintf
 #include "malloc_aligned.hpp"
 
 #ifdef CLOCKWORK_GUEST
-extern "C" int clockwork_log(const char* fmt, ...);
 #endif
 
 #ifdef NOVA_SIMD
@@ -200,7 +200,7 @@ static bool scfft_global_initialization(void) {
     for (int i = SC_FFT_LOG2_MINSIZE; i < SC_FFT_LOG2_MAXSIZE + 1; ++i) {
         fftSetup[i] = vDSP_create_fftsetup(i, FFT_RADIX2);
         if (fftSetup[i] == NULL) {
-            clockwork_log("FFT ERROR: Mac vDSP library could not allocate FFT setup for size %i\n", 1 << i);
+            scprintf("FFT ERROR: Mac vDSP library could not allocate FFT setup for size %i\n", 1 << i);
         }
     }
     // vDSP prepares its memory-aligned buffer for rearranging input data.

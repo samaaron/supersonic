@@ -38,10 +38,6 @@
 // allowing JavaScript to poll the synth/group hierarchy without OSC latency.
 // When merging upstream changes, preserve this block.
 // =============================================================================
-extern "C" {
-    int clockwork_log(const char* fmt, ...);
-    extern uint8_t* shared_memory;
-}
 #include "../../node_tree.h"
 // =============================================================================
 // TAU MODIFICATION END
@@ -56,20 +52,20 @@ int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
             HiddenWorld* hw = inWorld->hw;
             inID = hw->mHiddenID = (hw->mHiddenID - 8) | 0x80000000;
         } else {
-            clockwork_log("[Node_New] ERROR: Reserved node ID: %d", inID);
+            scprintf("[Node_New] ERROR: Reserved node ID: %d", inID);
             return kSCErr_ReservedNodeID;
         }
     }
 
     if (World_GetNode(inWorld, inID)) {
-        clockwork_log("[Node_New] ERROR: Duplicate node ID: %d", inID);
+        scprintf("[Node_New] ERROR: Duplicate node ID: %d", inID);
         return kSCErr_DuplicateNodeID;
     }
 
     Node* node = (Node*)World_Alloc(inWorld, def->mAllocSize);
 
     if (!node) {
-        clockwork_log("[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
+        scprintf("[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
         return kSCErr_OutOfRealTimeMemory;
     }
     node->mWorld = inWorld;
@@ -82,7 +78,7 @@ int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
     node->mID = inID;
     node->mHash = Hash(inID);
     if (!World_AddNode(inWorld, node)) {
-        clockwork_log("[Node_New] ERROR: World_AddNode failed - too many nodes");
+        scprintf("[Node_New] ERROR: World_AddNode failed - too many nodes");
         World_Free(inWorld, node);
         return kSCErr_TooManyNodes;
     }
@@ -145,7 +141,7 @@ void Node_RemoveID(Node* inNode) {
     inNode->mID = id;
     inNode->mHash = Hash(id);
     if (!World_AddNode(world, inNode)) {
-        clockwork_log("mysterious failure in Node_RemoveID\n");
+        scprintf("mysterious failure in Node_RemoveID\n");
         Node_Delete(inNode);
         // enums are uncatchable. must throw an int.
         int err = kSCErr_Failed; // shouldn't happen..
@@ -198,7 +194,7 @@ void Node_AddBefore(Node* s, Node* beforeThisOne) {
 }
 
 void Node_Replace(Node* s, Node* replaceThisOne) {
-    // clockwork_log("->Node_Replace\n");
+    // scprintf("->Node_Replace\n");
     Group* group = replaceThisOne->mParent;
     if (!group)
         return; // failed
@@ -223,7 +219,7 @@ void Node_Replace(Node* s, Node* replaceThisOne) {
     replaceThisOne->mParent = nullptr;
 
     Node_Delete(replaceThisOne);
-    // clockwork_log("<-Node_Replace\n");
+    // scprintf("<-Node_Replace\n");
 }
 
 // set a node's control so that it reads from a control bus - index argument
@@ -376,7 +372,7 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
         // every control block, so an unguarded log would flood the ring.
         static std::atomic<uint32_t> allocFailCount{0};
         if (allocFailCount.fetch_add(1, std::memory_order_relaxed) < 5)
-            clockwork_log("[Node_SendReply] ERROR: World_Alloc(%zu) failed — dropped %s"
+            scprintf("[Node_SendReply] ERROR: World_Alloc(%zu) failed — dropped %s"
                    " for node %d (RT pool exhausted)",
                    replySize, cmdName, inNode->mID);
         return;
@@ -402,7 +398,7 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
         // for every reply the World will ever send.
         static std::atomic<uint32_t> fifoFullCount{0};
         if (fifoFullCount.fetch_add(1, std::memory_order_relaxed) < 5)
-            clockwork_log("[Node_SendReply] ERROR: mNodeMsgs FIFO full — dropped %s"
+            scprintf("[Node_SendReply] ERROR: mNodeMsgs FIFO full — dropped %s"
                    " for node %d", cmdName, inNode->mID);
         World_Free(world, mem);
     }
@@ -427,10 +423,10 @@ void Node_StateMsg(Node* inNode, int inState) {
     // - But we want ALL nodes in the SAB tree for real-time visualization
     // - The SAB tree is polled locally, so there's no network overhead concern
     // =========================================================================
-    if (shared_memory) {
-        NodeTreeHeader* tree_header  = supersonic_node_tree_header();
-        NodeEntry*      tree_entries = supersonic_node_tree_entries();
-
+    // The window clockwork handed the guest, if it handed one (node_tree.h).
+    NodeTreeHeader* tree_header  = supersonic_node_tree_header();
+    NodeEntry*      tree_entries = supersonic_node_tree_entries();
+    if (tree_header && tree_entries) {
         switch (inState) {
             case kNode_Go:
                 NodeTree_Add(inNode, tree_header, tree_entries);

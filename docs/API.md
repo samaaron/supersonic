@@ -227,24 +227,24 @@ const sonic = new SuperSonic({
 
 #### Server Options
 
-| Property                                                    | Type       | Description                                                                    | Default | Range          |
-| ----------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------ | ------- | -------------- |
-| <a id="buflength"></a> `bufLength?`                         | `128`      | Audio buffer length — must be 128 (WebAudio API constraint).                   | 128     | 128 (fixed)    |
-| <a id="loadgraphdefs"></a> `loadGraphDefs?`                 | `0` \| `1` | Auto-load synthdefs from disk: 0 or 1. Default: 0.                             | 0       | 0–1            |
-| <a id="maxgraphdefs"></a> `maxGraphDefs?`                   | `number`   | Max synth definitions. Default: 1024.                                          | 1024    | 1+             |
-| <a id="maxnodes"></a> `maxNodes?`                           | `number`   | Max synthesis nodes — synths + groups. Default: 1024.                          | 1024    | 1+             |
-| <a id="maxwirebufs"></a> `maxWireBufs?`                     | `number`   | Max wire buffers for internal UGen routing. Default: 64.                       | 64      | 1+             |
-| <a id="memorylocking"></a> `memoryLocking?`                 | `boolean`  | Memory locking — not applicable in browser. Default: false.                    | false   | —              |
-| <a id="numaudiobuschannels"></a> `numAudioBusChannels?`     | `number`   | Audio bus channels for routing between synths. Default: 128.                   | 128     | 1+             |
-| <a id="numbuffers"></a> `numBuffers?`                       | `number`   | Max audio buffers (1–65535). Default: 1024.                                    | 1024    | 1–65535        |
-| <a id="numcontrolbuschannels"></a> `numControlBusChannels?` | `number`   | Control bus channels for control-rate data. Default: 4096.                     | 4096    | 1+             |
-| <a id="numinputbuschannels"></a> `numInputBusChannels?`     | `number`   | Hardware input channels. Default: 2 (stereo).                                  | 2       | 0+             |
-| <a id="numoutputbuschannels"></a> `numOutputBusChannels?`   | `number`   | Hardware output channels (1–128). Default: 2 (stereo).                         | 2       | 1–128          |
-| <a id="numrgens"></a> `numRGens?`                           | `number`   | Random number generators per synth. Default: 64.                               | 64      | 1+             |
-| <a id="preferredsamplerate"></a> `preferredSampleRate?`     | `number`   | Preferred sample rate. 0 = use AudioContext default (typically 48000).         | 0       | 0, 8000–384000 |
-| <a id="realtime"></a> `realTime?`                           | `boolean`  | Clock source. Always false in SuperSonic (externally clocked by AudioWorklet). | false   | —              |
-| <a id="realtimememorysize"></a> `realTimeMemorySize?`       | `number`   | Real-time memory pool in KB for synthesis allocations. Default: 8192 (8MB).    | 8192    | 1+             |
-| <a id="verbosity"></a> `verbosity?`                         | `number`   | Debug verbosity: 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug.     | 0       | 0–4            |
+| Property                                                    | Type       | Description                                                                     | Default | Range          |
+| ----------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------- | ------- | -------------- |
+| <a id="buflength"></a> `bufLength?`                         | `128`      | Audio buffer length — must be 128 (WebAudio API constraint).                    | 128     | 128 (fixed)    |
+| <a id="loadgraphdefs"></a> `loadGraphDefs?`                 | `0` \| `1` | Load synth definitions from the synthdef directory at boot: 0 or 1. Default: 0. | 0       | 0–1            |
+| <a id="maxgraphdefs"></a> `maxGraphDefs?`                   | `number`   | Max synth definitions. Default: 1024.                                           | 1024    | 1–4194304      |
+| <a id="maxnodes"></a> `maxNodes?`                           | `number`   | Max synthesis nodes — synths + groups. Default: 1024.                           | 1024    | 1–4194304      |
+| <a id="maxwirebufs"></a> `maxWireBufs?`                     | `number`   | Max wire buffers for internal UGen routing. Default: 64.                        | 64      | 1–4194304      |
+| <a id="memorylocking"></a> `memoryLocking?`                 | `boolean`  | Memory locking — not applicable in browser. Default: false.                     | false   | —              |
+| <a id="numaudiobuschannels"></a> `numAudioBusChannels?`     | `number`   | Audio bus channels for routing between synths. Default: 1024.                   | 1024    | 1–4194304      |
+| <a id="numbuffers"></a> `numBuffers?`                       | `number`   | Max audio buffers (1–65535). Default: 1024.                                     | 1024    | 1–65535        |
+| <a id="numcontrolbuschannels"></a> `numControlBusChannels?` | `number`   | Control bus channels for control-rate data. Default: 16384.                     | 16384   | 1–16777216     |
+| <a id="numinputbuschannels"></a> `numInputBusChannels?`     | `number`   | Hardware input channels. Default: 2 (stereo).                                   | 2       | 0+             |
+| <a id="numoutputbuschannels"></a> `numOutputBusChannels?`   | `number`   | Hardware output channels (1–128). Default: 2 (stereo).                          | 2       | 1–128          |
+| <a id="numrgens"></a> `numRGens?`                           | `number`   | Random number generators per synth. Default: 64.                                | 64      | 1–65536        |
+| <a id="preferredsamplerate"></a> `preferredSampleRate?`     | `number`   | Preferred sample rate. 0 = use AudioContext default (typically 48000).          | 0       | 0, 8000–384000 |
+| <a id="realtime"></a> `realTime?`                           | `boolean`  | Clock source. Always false in SuperSonic (externally clocked by AudioWorklet).  | false   | —              |
+| <a id="realtimememorysize"></a> `realTimeMemorySize?`       | `number`   | Real-time memory pool in KB for synthesis allocations. Default: 8192 (8MB).     | 8192    | 1–4194304      |
+| <a id="verbosity"></a> `verbosity?`                         | `number`   | Debug verbosity: 0 = quiet, 1 = errors, 2 = warnings, 3 = info, 4 = debug.      | 0       | 0–4            |
 
 ***
 

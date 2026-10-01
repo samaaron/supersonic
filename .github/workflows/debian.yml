@@ -33,7 +33,6 @@ on:
       - 'dsp/**'
       - 'host/**'
       - 'front/**'
-      - 'rust/**'
       - 'test/native/**'
       - 'test/transport-harness/**'
       - 'packaging/**'

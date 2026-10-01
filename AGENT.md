@@ -2,7 +2,7 @@
 
 SuperSonic is a port of SuperCollider's scsynth audio engine to work within the strict constraints of a web audioworklet. The goal is low latency and high reliability for long running sessions.
 
-Since 0.80 SuperSonic runs on [clockwork](https://github.com/samaaron/clockwork), a git submodule at `clockwork/`. clockwork provides the audio device IO, MIDI, OSC, gamepad input, transport clock, Ableton Link, the shared-memory segment, the browser client (`clockwork/js`) and the workers; SuperSonic provides the scsynth guest (`dsp/scsynth`), its engine-side Rust (`rust/`), the native process (`host/`, `front/`), the JavaScript on top of clockwork's client (`js/supersonic.js` extends `Clockwork`), the tests and the packages. Changes to clockwork go to the clockwork repository; this repository then moves the submodule pointer.
+Since 0.80 SuperSonic runs on [clockwork](https://github.com/samaaron/clockwork), a git submodule at `clockwork/`. clockwork provides the audio device IO, MIDI, OSC, gamepad input, transport clock, Ableton Link, the shared-memory segment, the browser client (`clockwork/js`) and the workers; SuperSonic provides the scsynth guest (`dsp/scsynth`), the native process (`host/`, `front/`), the JavaScript on top of clockwork's client (`js/supersonic.js` extends `Clockwork`), the tests and the packages. Changes to clockwork go to the clockwork repository; this repository then moves the submodule pointer.
 
 **See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full architectural documentation including message flow diagrams and component relationships.**
 
@@ -43,6 +43,19 @@ There are two distinct modes with which these components communicate:
 Both modes are first class citizens and are fully supported and tested. SAB mode needs extra headers from the server and requires the browser to have stricter security (so no CDN) however postMessage mode is possible to deploy via CDN.
 
 ## Building
+
+Every target is one CMake tree (clockwork's, with `dsp/scsynth` as the guest),
+configured for this machine, for the NIF, or under `emcmake` for the web.
+`scripts/build-all.sh` builds all three.
+
+The engine's options are listed once in `dsp/scsynth/scsynth_options.h`; the
+native flags, the NIF's config map and the web client's `scsynthOptions` all
+take them by name from there. After changing the header run
+`node scripts/gen-scsynth-options.mjs` to regenerate the client's schema.
+
+The guest reaches clockwork through `clockwork/src/dsp_api.h` and nothing
+else; `scripts/check-guest-boundary.sh` (also a CTest) fails on any other
+clockwork include or symbol in `dsp/scsynth`.
 
 Build the web (WASM + JS) distribution:
 

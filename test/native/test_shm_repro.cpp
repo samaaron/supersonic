@@ -5,10 +5,10 @@ TEST_CASE("Engine boots with udpPort > 0 (cross-process shm)", "[shm-repro]") {
     cfg.sampleRate       = 48000;
     cfg.bufferSize       = 128;
     cfg.udpPort          = 30099;  // non-zero → creates POSIX shm
-    cfg.numBuffers       = 1024;
-    cfg.maxNodes         = 1024;
-    cfg.maxGraphDefs     = 512;
-    cfg.maxWireBufs      = 64;
+    setGuestOption(cfg, "numBuffers", 1024);
+    setGuestOption(cfg, "maxNodes", 1024);
+    setGuestOption(cfg, "maxGraphDefs", 512);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.headless         = true;
 
     EngineFixture fx(cfg);

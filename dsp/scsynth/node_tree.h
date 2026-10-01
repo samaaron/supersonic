@@ -101,9 +101,10 @@
 
     LIMITATIONS
     -----------
-    - NODE_TREE_MIRROR_MAX_NODES nodes in the mirror: what the window holds
-      at NODE_TREE_ENTRY_SIZE bytes each, after the header (1024 at the default
-      CLOCKWORK_WINDOW_BYTES). Raise the window to raise it.
+    - supersonic_node_tree_capacity() nodes in the mirror: what the window
+      the host handed over holds at NODE_TREE_ENTRY_SIZE bytes each, after
+      the header (1024 at clockwork's default window). Raise the window to
+      raise it.
     - If actual scsynth tree exceeds this, excess nodes are not mirrored
       (dropped_count tracks how many; audio continues working)
     - Synthdef names truncated to 31 characters
@@ -116,8 +117,6 @@
 #ifndef CLOCKWORK_NODE_TREE_H
 #define CLOCKWORK_NODE_TREE_H
 
-#include "shared_memory.h"   // the window's extent, not its shape
-
 #include <atomic>
 #include <cstdint>
 
@@ -126,8 +125,7 @@
 // Ours, not the host's. Clockwork reserves DspConfig::shm_window, reads its
 // FIRST uint32 to know when the window is worth copying out, and reads
 // nothing else — so everything below is between this writer and the clients
-// that parse it (js/lib/node_tree_parser.js, and the same layout in
-// rust/supersonic-node-mirror).
+// that parse it (js/lib/node_tree_parser.js).
 //
 // VERSION IS FIRST because that word is the host's one convention. The rest
 // is ours to order.
@@ -138,16 +136,13 @@
 // them into the table's window entry when the guest binds (clockwork_arena.h,
 // CLOCKWORK_GEOM_WINDOW_MAGIC / _VERSION). A client checks them before it
 // casts a pointer at the record below. Bump the version whenever
-// NodeTreeHeader or NodeEntry change shape; the parsers in
-// js/lib/node_tree_parser.js and rust/supersonic-node-mirror carry the same
-// two numbers.
+// NodeTreeHeader or NodeEntry change shape; the parser in
+// js/lib/node_tree_parser.js carries the same two numbers.
 constexpr uint32_t NODE_TREE_WINDOW_MAGIC   = 0x53434E54u;   // 'SCNT': scsynth node tree
 constexpr uint32_t NODE_TREE_WINDOW_VERSION = 1u;
 constexpr uint32_t NODE_TREE_HEADER_SIZE   = 16;
 constexpr uint32_t NODE_TREE_DEF_NAME_SIZE = 32;
 constexpr uint32_t NODE_TREE_ENTRY_SIZE    = 96;
-constexpr uint32_t NODE_TREE_MIRROR_MAX_NODES =
-    (SHM_WINDOW_SIZE - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE;
 
 struct alignas(4) NodeTreeHeader {
     std::atomic<uint32_t> version;       // bumped on every change; the host watches this
@@ -187,7 +182,14 @@ static_assert(sizeof(NodeTreeHeader) == NODE_TREE_HEADER_SIZE,
 // know where clockwork keeps things.
 NodeTreeHeader* supersonic_node_tree_header();
 NodeEntry*      supersonic_node_tree_entries();
+// Bind the window: every entry is reset to empty, the header zeroed, and the
+// free list and hash sized to what the window holds. Called from dsp_new,
+// which is the one place the guest may allocate.
 void            supersonic_node_tree_bind(void* window, uint32_t bytes);
+// Let go of the window and the indices. Called from dsp_free.
+void            supersonic_node_tree_unbind();
+// How many entries the bound window holds (0 when unbound).
+uint32_t        supersonic_node_tree_capacity();
 
 // Forward declarations
 struct Node;

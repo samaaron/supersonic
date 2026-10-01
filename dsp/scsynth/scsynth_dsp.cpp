@@ -14,7 +14,6 @@
  *      dsp_process  -> EngineCore_BeginBlock + RunBlock + FlushNotifications
  *      dsp_osc      -> PerformOSCMessage / PerformOSCBundle
  *      dsp_free     -> World_Cleanup
- *      dsp_status   -> the engine's own counters
  *
  * WHAT TAU NO LONGER PROVIDES, and scsynth therefore owns: buses, the
  * node tree, the buffer table, the wire pool. The seam passes channels and
@@ -28,29 +27,29 @@
 #include "dsp_api.h"
 #include "engine_api.h"
 #include "scsynth_config.h"
+#include "scsynth_options.h"
 #include "buffer_commands.h"
 
 #include "SC_World.h"
 #include "SC_WorldOptions.h"
 #include "SC_HiddenWorld.h"
 #include "SC_Group.h"        // mTopGroup is only a forward declaration in SC_World.h
+#include "SC_InterfaceTable.h"   // ScopeBufferHnd, the ugens' shape of a scope handle
+#include "node_tree.h"
+#include "scsynth_scope.h"
+
 // SC_Reply.h only forward-declares ReplyAddress; the layout — and mReplyData,
 // which is where the origin token rides — is in the Impl header. OSC_Packet is
 // the server's own.
-#include "shared_memory.h"   // GUEST_CONFIG_START: the client's config block
-#include "node_tree.h"
-
-// clockwork's shared-memory base, where the mirror lives. Declared the same
-// way SC_Node.cpp declares it, because it is the same C-linkage symbol.
-extern "C" {
-    extern uint8_t* shared_memory;
-}
 #include "SC_Reply.h"
 #include "SC_ReplyImpl.hpp"
 #include "OSC_Packet.h"
 
+#include "malloc_aligned.hpp"   // nova: the fallback when a host offers no heap
+
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <new>
@@ -246,7 +245,7 @@ const DspInfo kInfo = {
     /* name                    */ "scsynth",
     /* version                 */ "3.14.1",
     /* holds_schedule          */ 0,          // clockwork holds timed messages for us
-    /* arena_bytes_wanted      */ 0,          // no claim: allocate from the system, as always
+    /* arena_bytes_wanted      */ 0,          // no claim of our own: the host's arena is used when it holds the RT pool, else the heap (SC_World.cpp)
     /* arena_bulk_bytes_wanted */ 0,
     /* wants_events            */ 0,          // a client relays a keyboard to us
     // What our window is: the node tree mirror, so a client reading the
@@ -264,12 +263,75 @@ const DspInfo* dsp_describe(void) { return &kInfo; }
 
 /*
  * Guest-internal: SC code deep in the server only ever holds a World*, and the
- * host vtable lives on the ScsynthDsp instance. BufFreeCmd::Stage4 needs to
- * hand a finished block back to whoever allocated it, so the pointer is parked
- * here at bring-up. Guest plumbing for a guest problem — clockwork sees only
- * a call carrying a pointer.
+ * host table lives on the ScsynthDsp instance. The server's allocator, its
+ * printing and its scope ugens all need a way back to the host, so the table
+ * is parked here at bring-up and reached through the doors below. Guest
+ * plumbing for a guest problem — clockwork sees only its own callbacks.
  */
-static DspHost g_host_for_free{};
+static DspHost g_host{};
+// The guest's arena (DspConfig::arena): the host placed it for the guest's hot
+// state, and the real-time pool is carved from it when it holds one.
+static void*    g_arena       = nullptr;
+static uint32_t g_arena_bytes = 0;
+
+// ── The doors ────────────────────────────────────────────────────────────────
+//
+// Everything the server wants from the host goes through one of these, so the
+// server's own sources name no clockwork symbol: dsp_api.h is the whole of
+// what the guest knows, and scripts/check-guest-boundary.sh holds it to that.
+
+extern "C" void* supersonic_guest_alloc_bytes(size_t bytes) {
+    if (bytes == 0) return nullptr;
+    if (g_host.alloc_bytes) return g_host.alloc_bytes(g_host.ctx, bytes);
+    return nova::malloc_aligned(bytes);   // a host with no heap: the system's
+}
+
+extern "C" const void* supersonic_guest_arena(uint32_t* bytes) {
+    if (bytes) *bytes = g_arena ? g_arena_bytes : 0;
+    return g_arena;
+}
+
+// One line of diagnostics to the host, finished text in. `len` bounds a buffer
+// that need not be terminated (the OSC dump builds its line in place).
+extern "C" void supersonic_guest_log(const char* text, uint32_t len) {
+    if (!text || len == 0) return;
+    char line[1024];
+    if (len >= sizeof(line)) len = sizeof(line) - 1;
+    std::memcpy(line, text, len);
+    line[len] = '\0';
+    if (g_host.log) g_host.log(g_host.ctx, 6, line);
+}
+
+// The scope doors: ScopeBufferHnd is the ugens' shape of DspScopeHandle.
+static_assert(sizeof(ScopeBufferHnd) == sizeof(DspScopeHandle),
+              "ScopeBufferHnd and DspScopeHandle must be the same four words");
+static_assert(offsetof(ScopeBufferHnd, internalData) == offsetof(DspScopeHandle, slot)
+              && offsetof(ScopeBufferHnd, channels) == offsetof(DspScopeHandle, channels),
+              "ScopeBufferHnd and DspScopeHandle must agree on slot and channels");
+
+extern "C" bool supersonic_scope_get(World*, int index, int channels, int /*maxFrames*/,
+                                     ScopeBufferHnd* hnd) {
+    if (!hnd) return false;
+    hnd->internalData = nullptr;
+    hnd->data = nullptr;
+    hnd->channels = 0;
+    hnd->maxFrames = 0;
+    if (!g_host.scope_open || index < 0 || channels < 0) return false;
+    return g_host.scope_open(g_host.ctx, (uint32_t)index, (uint32_t)channels,
+                             reinterpret_cast<DspScopeHandle*>(hnd)) != 0;
+}
+
+extern "C" void supersonic_scope_push(World*, ScopeBufferHnd*, int) {}   // a stream publishes on write
+
+extern "C" void supersonic_scope_release(World*, ScopeBufferHnd* hnd) {
+    if (hnd && g_host.scope_close) g_host.scope_close(g_host.ctx, reinterpret_cast<DspScopeHandle*>(hnd));
+}
+
+extern "C" void supersonic_scope_write(ScopeBufferHnd* hnd, const float* const* channels,
+                                       uint32_t n_channels, uint32_t frames) {
+    if (hnd && hnd->internalData && g_host.scope_write)
+        g_host.scope_write(g_host.ctx, reinterpret_cast<DspScopeHandle*>(hnd), channels, n_channels, frames);
+}
 
 /*
  * The session clock, and the time of the block being rendered.
@@ -350,8 +412,11 @@ extern "C" int supersonic_inbox_contains(const void* ptr) {
 void supersonic_guest_free_bytes(void* ptr) {
     if (!ptr) return;
     if (supersonic_inbox_contains(ptr)) return;   // the client's range, not ours
-    if (g_host_for_free.free_bytes)
-        g_host_for_free.free_bytes(g_host_for_free.ctx, ptr);
+    if (g_host.alloc_bytes) {
+        if (g_host.free_bytes) g_host.free_bytes(g_host.ctx, ptr);
+        return;
+    }
+    nova::free_aligned(ptr);   // what supersonic_guest_alloc_bytes fell back to
 }
 
 // A buffer bound to an ASSET is letting go: its bytes are the client's, in
@@ -361,8 +426,8 @@ void supersonic_guest_free_bytes(void* ptr) {
 // is then nothing, and that client hears /supersonic/buffer/freed as before.
 extern "C" void supersonic_guest_release_buffer(int bufnum) {
     if (bufnum < 0) return;
-    if (g_host_for_free.asset_release)
-        g_host_for_free.asset_release(g_host_for_free.ctx, (uint32_t)bufnum);
+    if (g_host.asset_release)
+        g_host.asset_release(g_host.ctx, (uint32_t)bufnum);
 }
 
 struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** err) {
@@ -370,7 +435,9 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     auto* d = new (std::nothrow) ScsynthDsp;
     if (!d) { if (err) *err = "out of memory"; return nullptr; }
     d->config = *config;
-    if (host) { d->host = *host; g_host_for_free = *host; }
+    if (host) { d->host = *host; g_host = *host; }
+    g_arena       = config->arena;
+    g_arena_bytes = config->arena_bytes;
     g_inbox_base  = static_cast<const uint8_t*>(config->inbox);
     g_inbox_bytes = config->inbox_bytes;
     g_outbox_base  = static_cast<uint8_t*>(config->outbox);
@@ -394,57 +461,34 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     options.mPreferredSampleRate  = (uint32_t)(config->sample_rate + 0.5);
 
     /*
-     * The shape of the graph, READ FROM THE CONFIG BLOCK the client wrote.
+     * The shape of the graph, READ FROM THE CONFIG BLOCK the host wrote.
      *
-     * These were compile-time SC_* constants until 2026-08-31, which meant
-     * scsynthOptions could not change any of them: a caller asking for
-     * maxNodes 2048 got 1024 and nothing said so. audio_bus_channels passed
-     * only because SC_NUM_AUDIO_BUS_CHANNELS happened to be big enough for
-     * what it asked.
-     *
-     * The demolition was right to stop forwarding these across the seam —
-     * the host has no business sizing a graph it cannot see — but the other
-     * half never landed: the guest has to read them itself. The block arrives
-     * as DspConfig::guest_config, written before the engine is built, and the
-     * SC_* constants are the fallback for a zero slot so a host that writes no
-     * block still boots.
-     *
-     * THROUGH THE POINTER WE WERE HANDED, not through the host's segment. This
-     * read the same bytes as `shared_memory + GUEST_CONFIG_START`, which only
-     * worked because the guest is linked into the host and could see its
-     * globals — the boundary hands over a base and a length precisely so a
-     * guest does not have to know the host's layout to find its own block.
-     *
-     * A short block is refused rather than read past: slot 15 is the highest
-     * this asks for, so anything smaller is a host and a guest disagreeing
-     * about the shape, and the SC_* defaults are the honest answer.
+     * The block arrives as DspConfig::guest_config, opaque to clockwork, and
+     * scsynth reads it as `name=value` lines against the one list of its
+     * options (scsynth_options.h). A line it cannot take refuses the boot
+     * with a message naming it: an option that looked applied and was not
+     * is how every wrong-slot bug of the positional block survived.
      */
-    static constexpr uint32_t kHighestSlot = 15;
-    const uint32_t* cfg = nullptr;
-    if (config->guest_config
-        && config->guest_config_bytes >= (kHighestSlot + 1) * sizeof(uint32_t))
-        cfg = static_cast<const uint32_t*>(config->guest_config);
-    auto slot = [cfg](int i, uint32_t fallback) -> uint32_t {
-        const uint32_t v = cfg ? cfg[i] : 0u;
-        return v ? v : fallback;
-    };
-    // Slots that are legitimately zero cannot use `slot`; they still need the
-    // absent-block case to read as zero rather than dereference nothing.
-    auto raw = [cfg](int i) -> uint32_t { return cfg ? cfg[i] : 0u; };
-
-    options.mNumBuffers           = slot(0,  SC_NUM_BUFFERS);
-    options.mMaxNodes             = slot(1,  SC_MAX_NODES);
-    options.mMaxGraphDefs         = slot(2,  SC_MAX_GRAPH_DEFS);
-    options.mMaxWireBufs          = slot(3,  SC_MAX_WIRE_BUFS);
-    options.mNumAudioBusChannels  = slot(4,  SC_NUM_AUDIO_BUS_CHANNELS);
-    options.mNumControlBusChannels= slot(7,  SC_NUM_CONTROL_BUS_CHANNELS);
-    options.mRealTimeMemorySize   = slot(9,  SC_REAL_TIME_MEMORY_SIZE);
-    options.mNumRGens             = slot(10, SC_NUM_RGENS);
-    // Slot 13 is loadGraphDefs and is legitimately 0: the host sends
-    // synthdefs over OSC, so `slot`'s zero-means-absent rule cannot be used
-    // for it. Same for verbosity.
-    options.mLoadGraphDefs        = static_cast<int>(raw(13));
-    options.mVerbosity            = static_cast<int>(raw(15));
+    ScsynthOptions so;
+    static char optionsErr[256];
+    if (scsynth_options_parse(static_cast<const char*>(config->guest_config),
+                              config->guest_config_bytes, &so,
+                              optionsErr, sizeof(optionsErr)) != 0) {
+        supersonic_guest_log(optionsErr, (uint32_t)std::strlen(optionsErr));
+        delete d;
+        if (err) *err = optionsErr;
+        return nullptr;
+    }
+    options.mNumBuffers            = so.numBuffers;
+    options.mMaxNodes              = so.maxNodes;
+    options.mMaxGraphDefs          = so.maxGraphDefs;
+    options.mMaxWireBufs           = so.maxWireBufs;
+    options.mNumAudioBusChannels   = so.numAudioBusChannels;
+    options.mNumControlBusChannels = so.numControlBusChannels;
+    options.mRealTimeMemorySize    = so.realTimeMemorySize;
+    options.mNumRGens              = so.numRGens;
+    options.mLoadGraphDefs         = static_cast<int>(so.loadGraphDefs);
+    options.mVerbosity             = static_cast<int>(so.verbosity);
 
     d->osc_to_samples = config->sample_rate / 4294967296.0;
     // The clock clockwork publishes, for this instance's UGens.
@@ -472,12 +516,6 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     // host zeroes the region and knows nothing of its shape, so the empty
     // slots (-1) and the header are ours to write.
     supersonic_node_tree_bind(config->shm_window, config->shm_window_bytes);
-    if (NodeEntry* e = supersonic_node_tree_entries()) {
-        const uint32_t rows = (config->shm_window_bytes - NODE_TREE_HEADER_SIZE)
-                            / NODE_TREE_ENTRY_SIZE;
-        for (uint32_t i = 0; i < rows; ++i) e[i].id = -1;
-    }
-    NodeTree_InitIndices();
 
     const char* engineErr = nullptr;
     d->world = EngineCore_New(&options, &engineErr);
@@ -579,6 +617,7 @@ void dsp_free(struct Dsp* dsp) {
     if (!d) return;
     if (g_dsp == d) g_dsp = nullptr;
     if (d->world) World_Cleanup(d->world, true);
+    supersonic_node_tree_unbind();
     delete d;
 }
 
@@ -680,49 +719,6 @@ void dsp_osc(struct Dsp* dsp, const uint8_t* bytes, uint32_t len,
     } else {
         PerformOSCMessage(d->world, (int)len, osc, &reply);
     }
-}
-
-/*
- * The name of the first synthdef in a /d_recv blob.
- *
- * Clockwork caches definition blobs so a device switch can restore them, and
- * keys that cache by whatever this returns. It cannot parse the blob itself —
- * SCgf is scsynth's format, and a DSP with a different one would answer
- * differently — which is exactly why this call is on the DSP's side of the
- * seam. It used to be StateCache::extractSynthDefName in clockwork; moving
- * it here is what let clockwork stop knowing what a synthdef is.
- *
- * SCgf layout: magic(4) version(4:BE) numDefs(2) [defSize(4) if v3] nameLen(1)
- * name(nameLen).
- */
-uint32_t dsp_definition_name(const uint8_t* bytes, uint32_t len,
-                             char* out, uint32_t cap) {
-    // magic(4) + version(4) + numDefs(2) + nameLen(1)
-    if (!bytes || len < 11) return 0;
-    if (std::memcmp(bytes, "SCgf", 4) != 0) return 0;
-
-    const int32_t version = ((int32_t)bytes[4] << 24) | ((int32_t)bytes[5] << 16)
-                          | ((int32_t)bytes[6] << 8)  |  (int32_t)bytes[7];
-
-    uint32_t offset = 10;              // past magic, version, numDefs
-    if (version == 3) offset += 4;     // v3 carries defSize before the name
-    if (offset >= len) return 0;
-
-    const uint32_t nameLen = bytes[offset];
-    ++offset;
-    if (nameLen == 0 || offset + nameLen > len) return 0;
-
-    if (out && cap > 0) {
-        const uint32_t n = nameLen < cap - 1 ? nameLen : cap - 1;
-        std::memcpy(out, bytes + offset, n);
-        out[n] = 0;
-    }
-    return nameLen;
-}
-
-uint32_t dsp_status(struct Dsp* dsp, uint32_t selector) {
-    (void)dsp; (void)selector;
-    return 0;
 }
 
 } // extern "C"

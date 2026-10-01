@@ -315,10 +315,10 @@ inline ClockworkEngine::Config fakeEngineConfig(
     ClockworkEngine::Config cfg;
     cfg.sampleRate           = 48000;
     cfg.udpPort              = 0;
-    cfg.numBuffers           = 1024;
-    cfg.maxNodes             = 1024;
-    cfg.maxGraphDefs         = 512;
-    cfg.maxWireBufs          = 64;
+    setGuestOption(cfg, "numBuffers", 1024);
+    setGuestOption(cfg, "maxNodes", 1024);
+    setGuestOption(cfg, "maxGraphDefs", 512);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.headless             = false;
     cfg.numOutputChannels    = 2;
     cfg.numInputChannels     = 0;   // skip mac aggregate-promotion CoreAudio reads

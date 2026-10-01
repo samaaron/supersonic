@@ -30,14 +30,12 @@
 #include "SC_World.h"
 #include "SC_Reply.h"
 #include "MsgFifo.h"
-#include "memory_profile.h"
 #include <map>
 #include <deque>
 #include <set>
 
 #ifndef SC_LEAN_TARGET
 #include "SC_QuitSemaphore.hpp"
-#include "shm_segment.hpp"
 #endif
 
 #ifndef NO_LIBSNDFILE
@@ -151,10 +149,6 @@ struct HiddenWorld {
 
     const char* mInDeviceName;
     const char* mOutDeviceName;
-#ifndef SC_LEAN_TARGET
-    class shm_segment_creator* mShmem;
-    bool mOwnsShmem = true;  // false when external shared memory was provided
-#endif
 };
 
 typedef struct HiddenWorld HiddenWorld;

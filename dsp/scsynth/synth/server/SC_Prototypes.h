@@ -235,8 +235,4 @@ SCErr PerformAsyncUnitCommand(
 
 ////////////////////////////////////////////////////////////////////////
 
-// WASM-safe debug logging (defined in audio_processor.cpp)
-extern "C" {
-int clockwork_log(const char* fmt, ...);
-int clockwork_log_va(const char* fmt, va_list args);
-}
+

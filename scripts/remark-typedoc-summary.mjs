@@ -6,6 +6,8 @@
  * Also inlines related interfaces into class sections and enhances tables.
  */
 
+import { scsynthOptionSchema } from '../js/lib/scsynth_options_schema.js';
+
 /**
  * Extract plain text from a node tree (handles text, inlineCode, link children etc.)
  */
@@ -240,25 +242,26 @@ function buildGroupedTables(rows) {
 const REQUIRED_MAP = { baseURL: 'Yes*' };
 
 /**
- * Server Options default/range mapping (Phase 5).
+ * Server Options default/range mapping.
+ *
+ * The engine's own options come from the schema generated out of
+ * dsp/scsynth/scsynth_options.h — the one list of them — so this table cannot
+ * say a default the engine does not use. The rest are the web host's own
+ * (scsynth_options.js) and are spelled here.
  */
-const SERVER_OPTIONS_MAP = {
+const HOST_OPTIONS_MAP = {
   bufLength: { default: '128', range: '128 (fixed)' },
-  loadGraphDefs: { default: '0', range: '0–1' },
-  maxGraphDefs: { default: '1024', range: '1+' },
-  maxNodes: { default: '1024', range: '1+' },
-  maxWireBufs: { default: '64', range: '1+' },
   memoryLocking: { default: 'false', range: '—' },
-  numAudioBusChannels: { default: '128', range: '1+' },
-  numBuffers: { default: '1024', range: '1–65535' },
-  numControlBusChannels: { default: '4096', range: '1+' },
   numInputBusChannels: { default: '2', range: '0+' },
   numOutputBusChannels: { default: '2', range: '1–128' },
-  numRGens: { default: '64', range: '1+' },
   preferredSampleRate: { default: '0', range: '0, 8000–384000' },
   realTime: { default: 'false', range: '—' },
-  realTimeMemorySize: { default: '8192', range: '1+' },
-  verbosity: { default: '0', range: '0–4' },
+};
+const SERVER_OPTIONS_MAP = {
+  ...Object.fromEntries(scsynthOptionSchema.map((o) => [
+    o.name, { default: String(o.default), range: `${o.min}–${o.max}` },
+  ])),
+  ...HOST_OPTIONS_MAP,
 };
 
 /**

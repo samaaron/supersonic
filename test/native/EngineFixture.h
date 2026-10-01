@@ -8,6 +8,7 @@
 #pragma once
 
 #include "ClockworkEngine.h"
+#include "GuestConfigText.h"
 #include "OscTestUtils.h"
 #include <catch2/catch_test_macros.hpp>
 #include <vector>
@@ -17,6 +18,15 @@
 #include <chrono>
 #include <thread>
 #include <cstdint>
+
+// The guest's options travel as `name=value` text in Config::guestConfig
+// (GuestConfigText.h). Two spellings for tests: set one, read one back.
+inline void setGuestOption(ClockworkEngine::Config& cfg, const char* name, long value) {
+    clockwork::guest_config_text::set(cfg.guestConfig, name, std::to_string(value));
+}
+inline std::string guestOption(const ClockworkEngine::Config& cfg, const char* name) {
+    return clockwork::guest_config_text::get(cfg.guestConfig, name);
+}
 #include <functional>
 
 // A reply or notification with the routing that decided where it went (ClockworkEngine::onReplyRouted): the

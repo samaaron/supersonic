@@ -31,7 +31,6 @@
 
 #ifdef CLOCKWORK_GUEST
 extern "C" {
-    int clockwork_log(const char* fmt, ...);
 }
 #endif
 
@@ -194,14 +193,14 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
         err = (mFunc)(inWorld, inSize, inData, inReply);
     } catch (int iexc) {
         err = iexc;
-        clockwork_log("ERROR: %s threw int exception: %d", (char*)Name(), iexc);
+        scprintf("ERROR: %s threw int exception: %d", (char*)Name(), iexc);
     } catch (std::exception& exc) {
-        clockwork_log("ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
+        scprintf("ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
         if (inWorld->mLocalErrorNotification <= 0 && inWorld->mErrorNotification) {
 #ifdef CLOCKWORK_GUEST
             // Direct synchronous error reporting — SuperSonic runs NRT (single-threaded)
             SendFailure(inReply, (char*)Name(), exc.what());
-            clockwork_log("FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
+            scprintf("FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
 #else
             CallSendFailureCommand(inWorld, (char*)Name(), exc.what(), inReply);
             scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), exc.what());
@@ -223,9 +222,9 @@ SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyA
         // but the server can't tell that apart from a bad id, so the log
         // states only what it knows.
         if (err == kSCErr_NodeNotFound && strcmp((char*)Name(), "/n_free") == 0)
-            clockwork_log("/n_free: %s - nothing to free", errstr);
+            scprintf("/n_free: %s - nothing to free", errstr);
         else
-            clockwork_log("WARNING: %s failed - %s", (char*)Name(), errstr);
+            scprintf("WARNING: %s failed - %s", (char*)Name(), errstr);
 #else
         CallSendFailureCommand(inWorld, (char*)Name(), errstr, inReply);
         scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);

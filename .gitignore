@@ -1,7 +1,6 @@
 build/
 build-*/
 dist/
-rust/target/
 node_modules/
 
 # Playwright's per-run output — regenerated every run, never source.

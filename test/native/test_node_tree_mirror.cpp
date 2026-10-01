@@ -17,7 +17,7 @@ static const NodeEntry* findNode(int32_t id) {
     auto* header = supersonic_node_tree_header();
     auto* entries = supersonic_node_tree_entries();
     uint32_t count = header->node_count.load(std::memory_order_acquire);
-    for (uint32_t i = 0; i < count && i < NODE_TREE_MIRROR_MAX_NODES; i++) {
+    for (uint32_t i = 0; i < count && i < supersonic_node_tree_capacity(); i++) {
         if (entries[i].id == id) return &entries[i];
     }
     return nullptr;

@@ -67,8 +67,8 @@ phase_deps() {
         libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
         libxinerama-dev libxcursor-dev libxcomposite-dev
 
-    # The Rust subsystems (clockwork's MIDI/gamepad/OSC and SuperSonic's own
-    # engine layer) are one cargo-built staticlib the native build links. i686-unknown-linux-gnu is a tier-1 target, but getting
+    # The Rust subsystems (clockwork's MIDI/gamepad/OSC) are one cargo-built
+    # staticlib the native build links. i686-unknown-linux-gnu is a tier-1 target, but getting
     # it installed takes saying so: rustup-init infers the host triple from the
     # KERNEL, which is x86_64 even in a 32-bit userland, so left alone it
     # installs a 64-bit toolchain whose binaries cannot execute here. That
@@ -123,7 +123,11 @@ phase_build() {
 phase_test() {
     echo "=== test: Catch2 suite ==="
     setup_paths
-    SUPERSONIC_QUIET=1 "$BUILD_DIR/test/native/SuperSonicNativeTests" "~[benchmark]"
+    # Twice, as the x64 job and for its reasons (native.yml): every
+    # registered test with each Catch2 case in a process of its own, then the
+    # binary with every case in one process, in a shuffled order.
+    SUPERSONIC_QUIET=1 ctest --test-dir "$BUILD_DIR" --output-on-failure -j 2 --timeout 300
+    SUPERSONIC_QUIET=1 "$BUILD_DIR/test/native/SuperSonicNativeTests" "~[benchmark]" --order rand ${GITHUB_RUN_NUMBER:+--rng-seed "$GITHUB_RUN_NUMBER"}
 }
 
 phase_transport() {

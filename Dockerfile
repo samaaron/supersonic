@@ -16,10 +16,13 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 
 WORKDIR /build
 
+# One CMake tree: the web build is `emcmake cmake -S /build` (scripts/build-web.sh),
+# so the tree's own CMakeLists.txt goes in with the sources. SuperSonic has no
+# rust/ of its own any more; the Rust subsystems are clockwork's (clockwork/rust).
+COPY CMakeLists.txt /build/
 COPY clockwork /build/clockwork/
 COPY dsp /build/dsp/
 COPY js /build/js/
-COPY rust /build/rust/
 COPY scripts /build/scripts/
 COPY packages /build/packages/
 COPY docs /build/docs/

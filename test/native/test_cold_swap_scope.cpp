@@ -18,10 +18,10 @@ static ClockworkEngine::Config scopeConfig() {
     cfg.sampleRate    = 48000;
     cfg.bufferSize    = 128;
     cfg.udpPort       = 57199;  // Non-zero enables shared memory (needed for scope buffers)
-    cfg.numBuffers    = 1024;
-    cfg.maxNodes      = 1024;
-    cfg.maxGraphDefs  = 512;
-    cfg.maxWireBufs   = 64;
+    setGuestOption(cfg, "numBuffers", 1024);
+    setGuestOption(cfg, "maxNodes", 1024);
+    setGuestOption(cfg, "maxGraphDefs", 512);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.headless      = true;
     return cfg;
 }

@@ -96,6 +96,7 @@ set(SCSYNTH_PLUGIN_SOURCES
 
 add_library(scsynth STATIC
     scsynth_dsp.cpp
+    scsynth_options.cpp
     buffer_commands.cpp
     piano_wavetable.cpp
     node_tree.cpp
@@ -121,7 +122,9 @@ add_library(scsynth_tlsf STATIC
     synth/external_libraries/TLSF-2.4.6/src/tlsf.c)
 target_include_directories(scsynth_tlsf PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/synth/external_libraries/TLSF-2.4.6/src)
-set_target_properties(scsynth_tlsf PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(NOT EMSCRIPTEN)
+    set_target_properties(scsynth_tlsf PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
 
 target_compile_definitions(scsynth PUBLIC
     # The engine's sources are upstream SuperCollider's with clockwork's changes
@@ -149,4 +152,10 @@ target_compile_definitions(scsynth PRIVATE
     STATIC_PLUGINS=1)
 
 target_link_libraries(scsynth PRIVATE clockwork scsynth_tlsf)
-set_target_properties(scsynth PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(EMSCRIPTEN)
+    # The web module: nova-simd over wasm SIMD, and the Green FFT, since
+    # there is no vDSP or FFTW in a browser.
+    target_compile_definitions(scsynth PRIVATE NOVA_SIMD SC_FFT_GREEN)
+else()
+    set_target_properties(scsynth PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()

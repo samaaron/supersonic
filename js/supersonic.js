@@ -40,9 +40,10 @@ import { defaultScsynthOptions, validateScsynthOptions, encodeScsynthOptions } f
  * memory_layout.js is the span clockwork gives it), so the client no longer
  * reserves anything here and the whole region is buffers.
  */
-/* Room in the arena for everything that is not the engine's pool:
- * clockwork's own heap (CLOCKWORK_HEAP_SIZE, 8MB on this target) and the AllocPool's
- * area headers. */
+/* Room in the arena for everything that is not the engine's pool: the rest of
+ * clockwork's heap, which takes the arena and serves the pool out of it
+ * (CLOCKWORK_HEAP_SIZE on this target), its spare growth area, and the
+ * AllocPool's area headers. */
 const RT_ARENA_HEADROOM = 16 * 1024 * 1024;
 const BUFFERS_INIT   =  4 * 1024 * 1024;
 const BUFFERS_MAX    = 768 * 1024 * 1024;
@@ -377,14 +378,15 @@ export class SuperSonic extends Clockwork {
   /**
    * scsynth's config block, in the byte layout its C++ reads.
    *
-   * Eighteen slots, seventeen of which are scsynth's own fields. Clockwork
-   * wrote them itself until 2026-08-31 — every field name and every index
+   * The engine's options as `name=value` text (scsynth_options.js), which
+   * the guest reads by name against its one list of them. Clockwork wrote a
+   * positional block itself until 2026-08-31 — every field and every index
    * hardcoded in a guest-agnostic worklet — which meant no other guest could
    * be configured without editing it. Clockwork reserves the region and
-   * copies these bytes; only this side knows what they say.
+   * copies these bytes; only the guest knows what they say.
    */
-  encodeGuestConfig(ctx) {
-    return encodeScsynthOptions(this.#scsynthOptions, ctx);
+  encodeGuestConfig() {
+    return encodeScsynthOptions(this.#scsynthOptions);
   }
 
   /**

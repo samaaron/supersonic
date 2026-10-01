@@ -309,7 +309,36 @@ add_dependencies(SuperSonicNativeTests supersonic_test_shm_peer)
 
 include(CTest)
 include(Catch)
-catch_discover_tests(SuperSonicNativeTests)
+# Discovery reads the test list as UTF-8 (cmake/CatchAddTestsUtf8.cmake.in
+# says why): Catch2's own script, included under the policy that makes CMake
+# decode a process's output that way on Windows.
+set(CATCH_ADD_TESTS_SCRIPT "${_CATCH_DISCOVER_TESTS_SCRIPT}")
+configure_file(cmake/CatchAddTestsUtf8.cmake.in "${CMAKE_CURRENT_BINARY_DIR}/CatchAddTestsUtf8.cmake" @ONLY)
+set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/CatchAddTestsUtf8.cmake"
+    CACHE INTERNAL "Catch2's CatchAddTests.cmake, run with its output read as UTF-8" FORCE)
+# One CTest entry per Catch2 case, which is how CI runs the suite (ctest, not
+# the binary): everything registered here runs, including the guest boundary
+# check below. Benchmarks are left out of the discovery, as CI has always
+# left them out of the run; run the binary with "[benchmark]" for them.
+#
+# A CASE'S NAME MUST NOT OPEN A SQUARE BRACKET IT DOES NOT CLOSE. The
+# discovered names travel through a CMake list, where an unbalanced `[`
+# swallows every `;` up to the next `]` — so "phase in [0, quantum)" fused
+# itself and the six cases after it into one entry that matched nothing and
+# failed. Tags are fine; prose in the name is not.
+catch_discover_tests(SuperSonicNativeTests TEST_SPEC "~[benchmark]")
 
 # test_supersonic_binary.cpp spawns the SuperSonic process: build it first.
 add_dependencies(SuperSonicNativeTests SuperSonic)
+
+# ─── The guest boundary ──────────────────────────────────────────────────────
+# The scsynth guest reaches clockwork through dsp_api.h and nothing else:
+# scripts/check-guest-boundary.sh greps the guest's sources for any include
+# or symbol of clockwork's past that header, and fails on the first one.
+find_program(SUPERSONIC_SH sh)
+if(SUPERSONIC_SH)
+    add_test(NAME guest_boundary
+        COMMAND "${SUPERSONIC_SH}" "${SUPERSONIC_ROOT}/scripts/check-guest-boundary.sh")
+else()
+    message(STATUS "no sh on this machine: the guest boundary check is not registered here (CI runs it on Linux)")
+endif()

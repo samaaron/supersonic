@@ -18,10 +18,6 @@
 #ifndef SCSYNTH_CONFIG_H
 #define SCSYNTH_CONFIG_H
 
-#ifndef SC_MAX_TIMELINES
-#define SC_MAX_TIMELINES 8
-#endif
-
 /* /tr trigger queue depth — RT to NRT. */
 #ifndef SC_TRIGGERS_FIFO_SIZE
 #define SC_TRIGGERS_FIFO_SIZE 1024
@@ -40,39 +36,18 @@
 
 /* ── World sizing ────────────────────────────────────────────────────────────
  *
- * These eight numbers used to arrive from the host, through the options block
- * and across the seam. They do not any more, deliberately: they size scsynth's
- * INTERNAL tables — its buffer table, its node pool, its wire pool, its bus
- * arrays — and a host cannot know the right values for a graph it cannot see.
- * dsp_api.h passes what only the host can know (rate, block, channel counts)
- * and stops.
- *
- * So the guest picks them, and a build can override any of them. Values are
- * upstream SuperSonic's defaults.
+ * The buffer table, the node pool, the wire pool, the bus arrays: a host
+ * chooses these per boot, by name, and scsynth_options.h is the one list of
+ * them with their defaults and ranges. Nothing here restates a default.
  */
-#ifndef SC_NUM_BUFFERS
-#define SC_NUM_BUFFERS 1024
-#endif
-#ifndef SC_MAX_NODES
-#define SC_MAX_NODES 1024
-#endif
-#ifndef SC_MAX_GRAPH_DEFS
-#define SC_MAX_GRAPH_DEFS 1024
-#endif
-#ifndef SC_MAX_WIRE_BUFS
-#define SC_MAX_WIRE_BUFS 64
-#endif
-#ifndef SC_NUM_AUDIO_BUS_CHANNELS
-#define SC_NUM_AUDIO_BUS_CHANNELS 1024
-#endif
-#ifndef SC_NUM_CONTROL_BUS_CHANNELS
-#define SC_NUM_CONTROL_BUS_CHANNELS 16384
-#endif
-#ifndef SC_REAL_TIME_MEMORY_SIZE
-#define SC_REAL_TIME_MEMORY_SIZE 8192   /* KB */
-#endif
-#ifndef SC_NUM_RGENS
-#define SC_NUM_RGENS 64
+
+/* How much the real-time pool grows by when it overflows, in bytes. 0 — the
+ * desktop, the NIF and the web — means it does not: a pool that cannot be had
+ * at the size asked for fails the boot with a reason rather than playing with
+ * less. An embedded build sets a small non-zero value so a pool sized to
+ * internal SRAM can spill into bulk memory on demand. */
+#ifndef SCSYNTH_RT_POOL_GROWTH_SIZE
+#define SCSYNTH_RT_POOL_GROWTH_SIZE 0
 #endif
 
 #endif /* SCSYNTH_CONFIG_H */

@@ -6,7 +6,7 @@
  *
  * Unix-only: the client side uses POSIX sockets directly. The shared
  * framing/registry logic is covered on every platform by the Rust suite
- * (rust/supersonic-osc-net); the named-pipe path is exercised end-to-end by
+ * (clockwork/rust/clockwork-osc-net); the named-pipe path is exercised end-to-end by
  * the CI transport harness (test/transport-harness/run.ps1).
  */
 #ifndef _WIN32

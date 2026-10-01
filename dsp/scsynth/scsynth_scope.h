@@ -3,22 +3,26 @@
 /*
  * scsynth_scope.h — the scope entry points, declared where scsynth's types are.
  *
- * Clockwork implements all four (rust/clockwork-scope) and declares only one of
- * them in src/scope_streams.h: clockwork_scope_geometry, whose signature is plain
- * sizes. The other three take a World* and a ScopeBufferHnd*, and clockwork
- * has no World — so declaring them there would have put a scsynth type in a
- * clockwork header, which is exactly the coupling the seam removed.
+ * Clockwork owns the scope slots and the ring a client reads; a guest reaches
+ * them through DspHost::scope_open / scope_write / scope_close (dsp_api.h),
+ * and never learns the layout. These four are the guest's own doors to those
+ * three, implemented in scsynth_dsp.cpp where the host table lives:
  *
- * The Rust side takes `*mut c_void` for the world and never dereferences it,
- * so nothing about scsynth reaches clockwork. The type only matters HERE,
- * where scsynth assigns these to its own function-pointer table, and so the
- * declaration belongs here too.
+ *   - get / push / release are the shape the InterfaceTable already has
+ *     (fGetScopeBuffer, fPushScopeBuffer, fReleaseScopeBuffer), so the ugens
+ *     compile unchanged. push is a no-op: a stream publishes on every write.
+ *   - write is what a ugen calls per block, with its input buffers.
  *
- * ScopeBufferHnd is scsynth's own (SC_Types.h) and is laid out identically to
- * clockwork's; both are { void*, float*, uint32, uint32 }.
+ * ScopeBufferHnd is scsynth's own (SC_InterfaceTable.h) and is laid out
+ * identically to DspScopeHandle: { void*, float*, uint32, uint32 }. After a
+ * successful get, internalData is non-null while the slot is held and
+ * `channels` is how many channels the slot carries; `data` is null and
+ * channel_data() must not be used.
  */
 #ifndef SCSYNTH_SCOPE_H
 #define SCSYNTH_SCOPE_H
+
+#include <stdint.h>
 
 struct World;
 struct ScopeBufferHnd;
@@ -27,17 +31,12 @@ struct ScopeBufferHnd;
 extern "C" {
 #endif
 
-/*
- * Returns bool, matching scsynth's SCBool function-pointer table — which is
- * what upstream SuperSonic declared too. The Rust implementation returns a
- * c_int of 0 or 1, so the low byte the caller reads is always right; the
- * mismatch is real but harmless on every ABI in use, and narrowing it here
- * rather than widening scsynth's table is the smaller change.
- */
-bool clockwork_scope_get(struct World* world, int index, int channels, int maxFrames,
-                   struct ScopeBufferHnd* hnd);
-void clockwork_scope_push(struct World* world, struct ScopeBufferHnd* hnd, int frames);
-void clockwork_scope_release(struct World* world, struct ScopeBufferHnd* hnd);
+bool supersonic_scope_get(struct World* world, int index, int channels, int maxFrames,
+                          struct ScopeBufferHnd* hnd);
+void supersonic_scope_push(struct World* world, struct ScopeBufferHnd* hnd, int frames);
+void supersonic_scope_release(struct World* world, struct ScopeBufferHnd* hnd);
+void supersonic_scope_write(struct ScopeBufferHnd* hnd, const float* const* channels,
+                            uint32_t n_channels, uint32_t frames);
 
 #ifdef __cplusplus
 }

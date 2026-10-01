@@ -29,7 +29,6 @@
 
 #include "SC_World.h"
 #include "SC_WorldOptions.h"
-#include "audio_config.h"   // for DEV_LOG macro
 #include "SC_HiddenWorld.h"
 #include "SC_InterfaceTable.h"
 #include "SC_AllocPool.h"
@@ -85,18 +84,6 @@ extern "C" {
 #    include <sys/mman.h>
 #endif
 
-// server_shm.hpp (native) also pulls in shared_memory.h; on lean targets
-// (WASM/embedded) we include it directly — no boost cross-process SHM. Either
-// way the unified fixed-inline scope constants (SHM_SCOPE_*) are in scope.
-#ifndef SC_LEAN_TARGET
-#include "shm_segment.hpp"
-#else
-#include "shared_memory.h"
-#endif
-// Real-pointer arena base, valid on native + WASM (from audio_processor.cpp).
-// Backs the unified fixed-inline scope path below.
-extern "C" void* get_shared_memory_base();
-
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -111,11 +98,15 @@ extern HashTable<PlugInCmd, Malloc>* gPlugInCmds;
 extern "C" {
 
 #ifdef CLOCKWORK_GUEST
-int clockwork_log(const char* fmt, ...);
-// scsynth_dsp.cpp: whether a pointer is a range the client wrote into the
-// inbox — memory /b_allocPtr pointed a buffer at in place, and which no free
-// here may hand to an allocator.
-int supersonic_inbox_contains(const void* ptr);
+// scsynth_dsp.cpp: the guest's doors to the host (dsp_api.h). The heap the
+// engine's larger allocations come from, the arena the host placed for its
+// hot state, and whether a pointer is a range the client wrote into the inbox
+// — memory /b_allocPtr pointed a buffer at in place, and which no free here
+// may hand to an allocator.
+void*       supersonic_guest_alloc_bytes(size_t bytes);
+void        supersonic_guest_free_bytes(void* ptr);
+const void* supersonic_guest_arena(uint32_t* bytes);
+int         supersonic_inbox_contains(const void* ptr);
 #endif
 
 #ifdef NO_LIBSNDFILE
@@ -130,35 +121,41 @@ SCBool SendMsgFromEngine(World* inWorld, FifoMsg* inMsg);
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef CLOCKWORK_GUEST
-#include "clockwork_heap.h"
-inline void* sc_malloc(size_t size) { return clockwork_heap_alloc(size); }
-#else
-inline void* sc_malloc(size_t size) { return nova::malloc_aligned(size); }
-#endif
+// The host's heap, through the guest's doors in scsynth_dsp.cpp
+// (DspHost::alloc_bytes / free_bytes): lock-free, so a sequenced command's
+// Stage2 may take from it on the audio thread, and the one heap every target
+// has. sc_free hands nothing back that the client owns — a buffer bound to
+// the inbox is the client's range, and the door knows so.
+inline void* sc_malloc(size_t size) { return supersonic_guest_alloc_bytes(size); }
+inline void sc_free(void* ptr) { supersonic_guest_free_bytes(ptr); }
 
-#if defined(CLOCKWORK_GUEST)
-#include "mem_region.h"
-#include "memory_profile.h"
-// Backing-area callbacks for scsynth's real-time AllocPool (world->hw->mAllocPool,
-// the per-block-hot graph state: Nodes, Graphs, per-synth wire buffers, Units).
-// The initial area is Tier::Fast (internal SRAM on embedded); overflow grows into
-// Tier::Bulk (PSRAM) instead of failing, mirroring clockwork_heap. The first
-// callback call hands back the pre-sized initial area (g_rt_pool_pending, set at
-// pool construction below); later calls are growth and draw from Bulk. On
-// desktop/NIF both tiers are std::malloc, so the pool behaves as one region —
-// unless the host gave clockwork::mem an arena (wasm does), in which case both tiers
-// come from inside that span and a request too big for it fails here rather
-// than escaping into memory tau does not own.
+// Backing areas for scsynth's real-time AllocPool (world->hw->mAllocPool, the
+// per-block-hot graph state: Nodes, Graphs, per-synth wire buffers, Units).
+// The initial area is pre-sized at World_New: the guest's ARENA
+// (DspConfig::arena) when it holds the pool, so the hot state lives in the
+// memory the host placed for exactly that, else the host's heap. Growth areas
+// (SCSYNTH_RT_POOL_GROWTH_SIZE; 0 on desktop, web and the NIF) come from the
+// heap. An arena area is the host's and is never freed.
 static void* g_rt_pool_pending = nullptr;
+static void* g_rt_pool_arena   = nullptr;
 static void* supersonic_rt_pool_area_alloc(size_t size) {
     if (g_rt_pool_pending) {
         void* p = g_rt_pool_pending;
         g_rt_pool_pending = nullptr;
         return p;
     }
-    return clockwork::mem::alloc(clockwork::mem::Tier::Bulk, size); // growth -> PSRAM
+    return supersonic_guest_alloc_bytes(size);
 }
-static void supersonic_rt_pool_area_free(void* ptr) { clockwork::mem::free(ptr); }
+static void supersonic_rt_pool_area_free(void* ptr) {
+    if (ptr && ptr == g_rt_pool_arena) {
+        g_rt_pool_arena = nullptr;
+        return;
+    }
+    supersonic_guest_free_bytes(ptr);
+}
+#else
+inline void* sc_malloc(size_t size) { return nova::malloc_aligned(size); }
+inline void sc_free(void* ptr) { nova::free_aligned(ptr); }
 #endif
 
 void* sc_dbg_malloc(size_t size, const char* tag, int line) {
@@ -172,23 +169,6 @@ void* sc_dbg_malloc(size_t size, const char* tag, int line) {
 #endif
     return ptr;
 }
-
-#ifdef CLOCKWORK_GUEST
-inline void sc_free(void* ptr) {
-    // A buffer's data may be the client's inbox range rather than anything
-    // this heap issued: World_Cleanup and a re-alloc free buffer data through
-    // here, and for those the engine is done with the range, not its owner.
-    if (supersonic_inbox_contains(ptr)) return;
-    return clockwork_heap_free(ptr);
-}
-#else
-inline void sc_free(void* ptr) {
-#ifdef CLOCKWORK_GUEST
-    if (supersonic_inbox_contains(ptr)) return;   // as above
-#endif
-    return nova::free_aligned(ptr);
-}
-#endif
 
 void sc_dbg_free(void* ptr, const char* tag, int line) {
     fprintf(stderr, "sc_dbg_free [%s:%d]: %p\n", tag, line, ptr);
@@ -272,9 +252,7 @@ void sc_SetDenormalFlags() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Scope publishing is SuperSonic's, shared with the other engine; see
-// src/scope_streams.h.
-#include "scope_streams.h"
+// Scope publishing goes through the guest's doors to the host (scsynth_scope.h).
 #include "scsynth_scope.h"
 
 void InterfaceTable_Init() {
@@ -284,11 +262,7 @@ void InterfaceTable_Init() {
     ft->mSineSize = kSineSize;
     ft->mSineWavetable = gSineWavetable;
 
-#ifdef CLOCKWORK_GUEST
-    ft->fPrint = &clockwork_log;
-#else
     ft->fPrint = &scprintf;
-#endif
 
     ft->fRanSeed = &server_timeseed;
 
@@ -341,9 +315,9 @@ void InterfaceTable_Init() {
     ft->fSCfftDoFFT = &scfft_dofft;
     ft->fSCfftDoIFFT = &scfft_doifft;
 
-    ft->fGetScopeBuffer = &clockwork_scope_get;
-    ft->fPushScopeBuffer = &clockwork_scope_push;
-    ft->fReleaseScopeBuffer = &clockwork_scope_release;
+    ft->fGetScopeBuffer = &supersonic_scope_get;
+    ft->fPushScopeBuffer = &supersonic_scope_push;
+    ft->fReleaseScopeBuffer = &supersonic_scope_release;
 }
 
 void initialize_library(const char* mUGensPluginPath);
@@ -419,72 +393,48 @@ World* World_New(WorldOptions* inOptions) {
         world = (World*)zalloc(1, sizeof(World));
         world->hw = (HiddenWorld*)zalloc(1, sizeof(HiddenWorld));
 #if defined(CLOCKWORK_GUEST)
-        // RT pool: a Fast (internal-SRAM) initial area, growing into Bulk (PSRAM) on
-        // overflow. The initial area is bounded by the largest free Fast block (minus
-        // the reserve) so it never requests more contiguous SRAM than exists; a
-        // fixed-size request larger than that used to fall back to PSRAM in full,
-        // making graph traversal PSRAM-bus-bound. Overflow grows into Bulk
-        // (areaMoreSize > 0) rather than failing /s_new. On desktop/NIF largest_free()
-        // is SIZE_MAX and CLOCKWORK_RT_POOL_GROWTH_SIZE is 0, so this reduces to the
-        // fixed malloc-backed pool as before.
         {
-            size_t want = (size_t)inOptions->mRealTimeMemorySize * 1024;
-            const size_t avail = clockwork::mem::largest_free(clockwork::mem::Tier::Fast);
-            const size_t reserve = (size_t)CLOCKWORK_FAST_RESERVE + kAreaOverhead;
-            const size_t cap = (avail > reserve) ? (avail - reserve) : 0;
-            const size_t fastInit = (want < cap) ? want : cap;
-            const size_t total = fastInit + kAreaOverhead;
-
             /*
-             * A POOL THAT CANNOT GROW MUST NOT BE QUIETLY SHRUNK.
+             * The pool's first area, pre-sized here and handed over through
+             * supersonic_rt_pool_area_alloc: the guest's arena when it holds
+             * the whole pool, else the host's heap.
              *
-             * The clamp above is right where growth is possible: an embedded
-             * target sizes its initial area to the Fast tier and overflows
-             * into Bulk on demand, so asking for more than fits is a placement
-             * hint, not an error. With CLOCKWORK_RT_POOL_GROWTH_SIZE at 0 — desktop,
-             * NIF and web — there is no overflow, so the same clamp hands the
-             * engine a smaller pool than it asked for and says nothing.
-             *
-             * Measured 2026-09-01: a 128 MB request served out of a 32 MB
-             * arena booted cleanly, played, and reported no error anywhere.
-             * The test that was supposed to cover it asserted only that the
-             * boot did not throw.
+             * A POOL THAT CANNOT GROW MUST NOT BE QUIETLY SHRUNK. With growth
+             * at 0 — desktop, the NIF and web — a pool that cannot be had at
+             * the size asked for is a boot that fails with a reason, not one
+             * that plays with less memory than it said. Measured 2026-09-01:
+             * a 128 MB request served out of a 32 MB span booted cleanly,
+             * played, and reported no error anywhere.
              */
-            if (CLOCKWORK_RT_POOL_GROWTH_SIZE == 0 && want > cap) {
+            const size_t want  = (size_t)inOptions->mRealTimeMemorySize * 1024;
+            const size_t total = want + kAreaOverhead;
+            uint32_t arenaBytes = 0;
+            void* arena = const_cast<void*>(supersonic_guest_arena(&arenaBytes));
+            void* area = nullptr;
+            if (arena && (size_t)arenaBytes >= total) {
+                area = arena;
+                g_rt_pool_arena = arena;
+            } else {
+                area = supersonic_guest_alloc_bytes(total);
+            }
+            if (!area) {
                 char msg[200];
                 snprintf(msg, sizeof(msg),
-                         "World_New: RT pool of %zu bytes was asked for but only "
-                         "%zu bytes are available, and this target's pool cannot "
-                         "grow - raise memArenaSize or lower realTimeMemorySize",
-                         want, cap);
+                         "World_New: RT pool of %zu bytes was asked for and the host "
+                         "cannot provide it - raise the host's heap "
+                         "(CLOCKWORK_HEAP_SIZE) or lower realTimeMemorySize",
+                         want);
                 // LOGGED BEFORE IT IS THROWN, because what() does not survive
                 // the trip. Catch-by-type needs RTTI the wasm build does not
                 // carry, so this lands in World_New's catch-all, which has an
                 // exception it cannot ask anything of — the caller would see
                 // "World_New returned null" and no reason at all.
-                clockwork_log("%s", msg);
+                scprintf("%s\n", msg);
                 throw std::runtime_error(msg);
             }
-            // Strict Fast (no silent spill); fall back to Bulk visibly if it won't fit.
-            g_rt_pool_pending = clockwork::mem::alloc(clockwork::mem::Tier::Fast, total, /*allow_spill=*/false);
-            if (!g_rt_pool_pending) {
-                scprintf("World_New: RT pool (%zu bytes) did not fit Fast, falling back to Bulk\n", total);
-                g_rt_pool_pending = clockwork::mem::alloc(clockwork::mem::Tier::Bulk, total);
-            }
-            if (!g_rt_pool_pending) {
-                // Bounded placement failing is a real answer, not a reason to
-                // reach past it: on wasm the only memory left to take is the
-                // guest's own region, which is what the arena exists to stop.
-                char msg[160];
-                snprintf(msg, sizeof(msg),
-                         "World_New: RT pool of %zu bytes does not fit "
-                         "(largest free area is %zu bytes)",
-                         total, clockwork::mem::largest_free(clockwork::mem::Tier::Fast));
-                clockwork_log("%s", msg);   // see the note at the sibling throw above
-                throw std::runtime_error(msg);
-            }
+            g_rt_pool_pending = area;
             world->hw->mAllocPool = new AllocPool(supersonic_rt_pool_area_alloc, supersonic_rt_pool_area_free,
-                                                  fastInit, CLOCKWORK_RT_POOL_GROWTH_SIZE);
+                                                  want, SCSYNTH_RT_POOL_GROWTH_SIZE);
         }
 #else
         world->hw->mAllocPool = new AllocPool(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
@@ -525,27 +475,9 @@ World* World_New(WorldOptions* inOptions) {
         world->mErrorNotification = 1; // i.e., 0x01 | 0x02
         world->mLocalErrorNotification = 0;
 
-#ifndef SC_LEAN_TARGET
-        if (inOptions->mExternalSharedMemory) {
-            // Reuse caller-owned shared memory (survives cold swaps)
-            hw->mShmem = static_cast<shm_segment_creator*>(inOptions->mExternalSharedMemory);
-            hw->mOwnsShmem = false;
-        } else if (inOptions->mSharedMemoryID) {
-            // A segment of the guest's own. Anonymous, like every clockwork
-            // segment: nothing to clean up, and nothing another process can
-            // reach unless a host serves the handle (shm_attach.hpp) — under
-            // clockwork the host owns the segment and this branch is not
-            // taken. mNumControlBusChannels no longer sizes it: control
-            // busses are process-local.
-            hw->mShmem = new shm_segment_creator();
-            hw->mOwnsShmem = true;
-        } else {
-            hw->mShmem = nullptr;
-        }
-#endif
-        // Control busses are process-local on every runtime (not observed
-        // cross-process), so they are heap-allocated rather than placed in the
-        // shm arena.
+        // Control busses are process-local on every runtime: the host owns
+        // whatever shared segment there is, and the engine publishes nothing
+        // of its own into one.
         world->mControlBus = (float*)zalloc(world->mNumControlBusChannels, sizeof(float));
 
         world->mNumSharedControls = 0;
@@ -902,7 +834,7 @@ void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) no
                     printf("nextOSCPacket %g\n", schedTime * oscToSeconds);
                 }
                 if (schedTime < prevTime) {
-                    clockwork_log("ERROR: Packet time stamps out-of-order.\n");
+                    scprintf("ERROR: Packet time stamps out-of-order.\n");
                     run = false;
                     goto Bail;
                 }
@@ -1004,14 +936,14 @@ int32 GetHash(GraphDef* inGraphDef) { return inGraphDef->mNodeDef.mHash; }
 void World_AddGraphDef(World* inWorld, GraphDef* inGraphDef) {
     bool added = inWorld->hw->mGraphDefLib->Add(inGraphDef);
     if (!added)
-        clockwork_log(
+        scprintf(
             "ERROR: Could not add SynthDef %s.\nTry adjusting ServerOptions:maxSynthDefs or the -d cmdline flag.\n",
             (char*)inGraphDef->mNodeDef.mName);
     for (uint32 i = 0; i < inGraphDef->mNumVariants; ++i) {
         GraphDef* var = inGraphDef->mVariants + i;
         added = inWorld->hw->mGraphDefLib->Add(var);
         if (!added)
-            clockwork_log(
+            scprintf(
                 "ERROR: Could not add SynthDef %s.\nTry adjusting ServerOptions:maxSynthDefs or the -d cmdline flag.\n",
                 (char*)var->mNodeDef.mName);
     }
@@ -1110,24 +1042,22 @@ Group* World_GetGroup(World* inWorld, int32 inID) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Forward declare clockwork_log
-extern "C" int clockwork_log(const char* fmt, ...);
 
 void World_Run(World* inWorld) {
     // Validate world before running
     if (!inWorld) {
-        clockwork_log("ERROR: World_Run called with null World");
+        scprintf("ERROR: World_Run called with null World");
         return;
     }
     if (!inWorld->mTopGroup) {
-        clockwork_log("ERROR: World_Run: mTopGroup is null");
+        scprintf("ERROR: World_Run: mTopGroup is null");
         return;
     }
 
     // run top group
     Node* node = (Node*)inWorld->mTopGroup;
     if (!node->mCalcFunc) {
-        clockwork_log("ERROR: World_Run: TopGroup has null mCalcFunc");
+        scprintf("ERROR: World_Run: TopGroup has null mCalcFunc");
         return;
     }
 
@@ -1213,14 +1143,7 @@ void World_Cleanup(World* world, bool unload_plugins) {
 
     free_alig(world->mControlBusTouched);
     free_alig(world->mAudioBusTouched);
-#ifndef SC_LEAN_TARGET
-    if (hw->mShmem) {
-        if (hw->mOwnsShmem)
-            delete hw->mShmem;
-        // else: caller owns it — don't delete (survives cold swap)
-    } else
-#endif
-        free_alig(world->mControlBus);
+    free_alig(world->mControlBus);
     free_alig(world->mAudioBus);
     delete[] world->mRGen;
     if (hw) {
@@ -1252,53 +1175,6 @@ void World_NRTLock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)->
 void World_NRTUnlock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)->unlock(); }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-// Unified scope streams (native + WASM). Each slot in the SHM_SCOPE region
-// of the shared arena is a shm_scope_stream — a lossless cursor ring; the
-// protocol (struct layout, writer, reader) lives in
-// synth/common/shm_scope_stream.hpp.
-//
-// Current owner of each scope slot (the ScopeBufferHnd that most recently
-// initialised it). Graph ctors/dtors run on the RT thread, so plain pointers
-// suffice. A slot may be re-claimed while a superseded unit still lives — its
-// late dtor must not stomp the new owner's slot state (see releaseScopeBuffer).
-
-// Publish NRT control-thread blocking into the native-stats region. Written by
-// a thread that is NOT the gateway (the watchdog), so a gateway stuck inside a
-// handler still gets its in-flight duration reported — a blocked thread cannot
-// publish its own stall, which is exactly the state worth seeing.
-extern "C" void World_PublishNrtBlocking(uint32_t maxPassUs, uint32_t recentWorstUs,
-                                         uint32_t inFlightUs) {
-    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
-    if (!base) return;
-    uint8_t* ns = base + NATIVE_STATS_START;
-    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_NRT_MAX_PASS_US)
-        ->store(maxPassUs, std::memory_order_relaxed);
-    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_NRT_RECENT_WORST_US)
-        ->store(recentWorstUs, std::memory_order_relaxed);
-    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_NRT_IN_FLIGHT_US)
-        ->store(inFlightUs, std::memory_order_relaxed);
-}
-
-// Publish the audio-thread DSP load + overrun count into the native-stats
-// region. It lives here rather than in the World because the source (audio
-// callback timing) is the platform driver's. Native-only; relaxed stores,
-// best-effort display values. avg/peak are percent * 100.
-extern "C" void World_PublishAudioLoad(uint32_t cpuAvgCenti, uint32_t cpuPeakCenti,
-                                       uint32_t callbackOverruns) {
-    uint8_t* base = reinterpret_cast<uint8_t*>(get_shared_memory_base());
-    if (!base) return;
-    uint8_t* ns = base + NATIVE_STATS_START;
-    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_CPU_AVG_CENTI)
-        ->store(cpuAvgCenti, std::memory_order_relaxed);
-    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_CPU_PEAK_CENTI)
-        ->store(cpuPeakCenti, std::memory_order_relaxed);
-    reinterpret_cast<std::atomic<uint32_t>*>(ns + NATIVE_STAT_CB_OVERRUNS)
-        ->store(callbackOverruns, std::memory_order_relaxed);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-
 
 inline int32 BUFMASK(int32 x) { return (1 << (31 - CLZ(x))) - 1; }
 

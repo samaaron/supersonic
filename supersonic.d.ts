@@ -125,8 +125,15 @@ export type TransportMode = 'sab' | 'postMessage';
 /**
  * Engine configuration options controlling resource limits and audio behaviour.
  *
- * All values have sensible defaults.
- * Override via `new SuperSonic({ scsynthOptions: { ... } })`.
+ * The engine's own options (their names, defaults and ranges) are listed once
+ * in `dsp/scsynth/scsynth_options.h`; the values documented here are that
+ * list's. The remaining fields are the web host's own and never reach the
+ * engine. Override via `new SuperSonic({ scsynthOptions: { ... } })`.
+ *
+ * Until 0.87 the web client kept defaults of its own, and three differ from
+ * the engine's list: `maxNodes` was 8192 (now 1024), `numAudioBusChannels`
+ * 128 (now 1024) and `numControlBusChannels` 4096 (now 16384). A host that
+ * needs more than 1024 nodes at once sets `maxNodes` itself.
  */
 export interface ScsynthOptions {
   /** Max audio buffers (1–65535). Default: 1024. */
@@ -137,13 +144,13 @@ export interface ScsynthOptions {
   maxGraphDefs?: number;
   /** Max wire buffers for internal UGen routing. Default: 64. */
   maxWireBufs?: number;
-  /** Audio bus channels for routing between synths. Default: 128. */
+  /** Audio bus channels for routing between synths. Default: 1024. */
   numAudioBusChannels?: number;
   /** Hardware input channels. Default: 2 (stereo). */
   numInputBusChannels?: number;
   /** Hardware output channels (1–128). Default: 2 (stereo). */
   numOutputBusChannels?: number;
-  /** Control bus channels for control-rate data. Default: 4096. */
+  /** Control bus channels for control-rate data. Default: 16384. */
   numControlBusChannels?: number;
   /** Audio buffer length — must be 128 (WebAudio API constraint). */
   bufLength?: 128;
@@ -155,7 +162,7 @@ export interface ScsynthOptions {
   realTime?: boolean;
   /** Memory locking — not applicable in browser. Default: false. */
   memoryLocking?: boolean;
-  /** Auto-load synthdefs from disk: 0 or 1. Default: 0. */
+  /** Load synth definitions from the synthdef directory at boot: 0 or 1. Default: 0. */
   loadGraphDefs?: 0 | 1;
   /** Preferred sample rate. 0 = use AudioContext default (typically 48000). */
   preferredSampleRate?: number;

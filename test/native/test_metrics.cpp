@@ -278,7 +278,12 @@ TEST_CASE("metrics: in_buffer_peak_bytes > 0 after activity",
           "[metrics][buffer]") {
     EngineFixture fx;
     fx.send(osc_test::message("/status"));
-    CHECK(metrics(fx).in_buffer_peak_bytes.load() > 0);
+    // The message is in the IN ring the moment send() returns, but the peak
+    // the audio thread saw is published on its metrics flush (~30 Hz,
+    // audio_processor.cpp), not on the tick that read it. Poll until it lands.
+    CHECK(fx.pollUntil([&] {
+        return metrics(fx).in_buffer_peak_bytes.load() > 0;
+    }));
 }
 
 TEST_CASE("metrics: out_buffer_peak_bytes > 0 after replies",

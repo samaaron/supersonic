@@ -12,6 +12,7 @@
 #include "sc_msg_iter.h"
 #include <cstring>
 #include <cstdlib>
+#include "SC_WorldOptions.h"   // scprintf
 
 // Forward declaration - implemented in SC_Stubs.cpp
 bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket);
@@ -25,7 +26,7 @@ static constexpr int MAX_BUNDLE_DEPTH = 8;
 static bool UnrollOSCPacketWithDepth(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket, int depth) {
     // Depth limit check - prevents stack overflow from deeply nested bundles
     if (depth > MAX_BUNDLE_DEPTH) {
-        clockwork_log("ERROR: UnrollOSCPacket nesting too deep (%d > %d), skipping",
+        scprintf("ERROR: UnrollOSCPacket nesting too deep (%d > %d), skipping",
                      depth, MAX_BUNDLE_DEPTH);
         return false;
     }

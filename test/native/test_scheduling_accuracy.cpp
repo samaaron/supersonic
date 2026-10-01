@@ -84,10 +84,10 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     cfg.sampleRate   = 48000;
     cfg.bufferSize   = 128;
     cfg.udpPort      = 0;
-    cfg.numBuffers   = 1024;
-    cfg.maxNodes     = 1024;
-    cfg.maxGraphDefs = 512;
-    cfg.maxWireBufs  = 64;
+    setGuestOption(cfg, "numBuffers", 1024);
+    setGuestOption(cfg, "maxNodes", 1024);
+    setGuestOption(cfg, "maxGraphDefs", 512);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.freewheelClock = true;   // deterministic sample clock — see test header
     const char* device = std::getenv("CLOCKWORK_TEST_DEVICE");
     if (device && device[0] != '\0') {
@@ -222,10 +222,10 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     cfg.sampleRate   = 48000;
     cfg.bufferSize   = 128;
     cfg.udpPort      = 0;
-    cfg.numBuffers   = 1024;
-    cfg.maxNodes     = 2048;
-    cfg.maxGraphDefs = 512;
-    cfg.maxWireBufs  = 64;
+    setGuestOption(cfg, "numBuffers", 1024);
+    setGuestOption(cfg, "maxNodes", 2048);
+    setGuestOption(cfg, "maxGraphDefs", 512);
+    setGuestOption(cfg, "maxWireBufs", 64);
     cfg.freewheelClock = true;   // deterministic sample clock — see test header
     const char* device = std::getenv("CLOCKWORK_TEST_DEVICE");
     if (device && device[0] != '\0') {

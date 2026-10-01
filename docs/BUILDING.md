@@ -10,8 +10,18 @@ git clone --recurse-submodules https://github.com/samaaron/supersonic
 git submodule update --init
 ```
 
-The native server, the web build and the NIF are all the same two halves; what
-differs is the toolchain that compiles them.
+The native server, the web build and the NIF are one CMake tree — the same
+lists of sources, the same flags, the same guest — configured three ways: for
+this machine, for this machine with `-DCLOCKWORK_NIF=ON`, and under `emcmake`
+for the AudioWorklet. `scripts/build-all.sh` builds all three; the sections
+below build each on its own.
+
+The engine's options — how many buffers, nodes, buses and so on — are listed
+once, in `dsp/scsynth/scsynth_options.h`, and every host takes them by name
+from there: the native server's `-n`/`-b`/`-a`/... flags, the NIF's config
+map, and the web client's `scsynthOptions` (through the generated
+`js/lib/scsynth_options_schema.js`; run `node scripts/gen-scsynth-options.mjs`
+after changing the header).
 
 ## Native server
 
@@ -58,17 +68,26 @@ is clockwork's: its options (`CLOCKWORK_MIDI`, `CLOCKWORK_GAMEPAD`,
 
 ### Native tests
 
-The native test suite uses Catch2. Configure with `-DBUILD_TESTS=ON` and run
-the test binary directly:
+The native test suite uses Catch2. Configure with `-DBUILD_TESTS=ON`, build
+the tests and run them the two ways CI does, because each sees what the other
+cannot. Through CTest every Catch2 case runs in a process of its own
+(benchmarks excluded), alongside the guest boundary check
+(`scripts/check-guest-boundary.sh`): a case that only passes after another has
+run fails there. The binary runs every case in one process, in a shuffled
+order: a case that leaves something behind for the next fails there.
 
 ```bash
 cmake -B build/native -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
 cmake --build build/native --config Release --parallel --target SuperSonicNativeTests
-./build/native/test/native/SuperSonicNativeTests "~[benchmark]"
+ctest --test-dir build/native -C Release --output-on-failure -j 4
+./build/native/test/native/SuperSonicNativeTests "~[benchmark]" --order rand
 ```
 
-On Windows the test binary is at `build/native/test/native/Release/SuperSonicNativeTests.exe`.
-`scripts/test-native.sh` does all three steps.
+`scripts/test-native.sh` does all four steps. On Windows the binary is at
+`build/native/test/native/Release/SuperSonicNativeTests.exe`. A shuffled run
+prints its seed first ("Randomness seeded to"); `--order rand --rng-seed <seed>`
+runs the same order again. The benchmarks are run with
+`SuperSonicNativeTests "[benchmark]"`.
 
 Note that the Link tests join a real Link session on the machine's loopback:
 another Link-enabled app running at the same time (Sonic Pi, Ableton Live)
@@ -79,7 +98,7 @@ will change the tempo they observe and fail them.
 `test/transport-harness/run.sh` (`run.ps1` on Windows) boots the built server
 headless once per command transport — UDP, TCP, Unix sockets, the shared-memory
 command plane, the Windows named pipe — and drives OSC over each with the
-probe in `rust/supersonic-transport-probe`:
+probe clockwork ships as an example (`clockwork/rust/clockwork-comms/examples/transport_probe.rs`):
 
 ```bash
 test/transport-harness/run.sh                # defaults to build/native/SuperSonic
@@ -111,14 +130,24 @@ scripts/build-web.sh --release   # what CI and npm publish use: __DEV__ off, min
 
 This will:
 
-1. Build the Rust subsystems (SuperSonic's engine layer plus clockwork's) as one
-   staticlib for `wasm32-unknown-emscripten`.
-2. Compile clockwork and the scsynth guest to `dist/wasm/scsynth-nrt.wasm`.
-3. Build clockwork's MIDI and gamepad modules (wasm-bindgen) into
+1. Configure and build the same CMake tree as the native server under
+   `emcmake` (`build/web`): clockwork's CMake builds its Rust subsystems for
+   `wasm32-unknown-emscripten` with the pinned nightly, compiles clockwork and
+   the scsynth guest with the module's flags, and links
+   `dist/wasm/scsynth-nrt.wasm` with the exports the worklet calls. The memory
+   sizes come from `clockwork/js/memory_layout.js` at configure time.
+2. Build clockwork's MIDI and gamepad modules (wasm-bindgen) into
    `clockwork/dist/`, and copy them under `dist/`.
-4. Bundle the JavaScript client and the workers with esbuild.
-5. Copy the synthdefs and samples into `dist/`, the engine and the worklet into
+3. Bundle the JavaScript client and the workers with esbuild.
+4. Copy the synthdefs and samples into `dist/`, the engine and the worklet into
    `packages/supersonic-scsynth-core`, and generate `README.npm.md`.
+
+The module alone, without the JavaScript, is plain CMake:
+
+```bash
+emcmake cmake -B build/web -DCMAKE_BUILD_TYPE=Release
+cmake --build build/web --parallel
+```
 
 ### Web tests
 

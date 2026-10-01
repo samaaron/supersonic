@@ -34,15 +34,8 @@
 #include "scsynthsend.h"
 #include "SC_WorldOptions.h"
 #include "SC_Version.hpp"
-#include "clock/ClockworkClock.h"
 
 extern int gMissingNodeID;
-
-// From audio_processor.cpp
-extern "C" {
-    int clockwork_log(const char* fmt, ...);
-    extern uint8_t* shared_memory;
-}
 
 // =============================================================================
 // TAU MODIFICATION START - Direct SAB tree update for /n_order
@@ -53,7 +46,7 @@ extern "C" {
 #include "../../node_tree.h"
 
 static void NodeTree_UpdateDirect(Node* node) {
-    if (!shared_memory || !node) return;
+    if (!node) return;
 
     NodeTreeHeader* tree_header  = supersonic_node_tree_header();
     NodeEntry*      tree_entries = supersonic_node_tree_entries();
@@ -194,7 +187,6 @@ SCErr meth_b_zero(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
 // carries the guard frames the client laid around the audio.
 #include "buffer_commands.h"
 #include "piano_wavetable.h"
-#include "shm_audio_buffer.hpp"
 
 SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -971,7 +963,7 @@ SCErr meth_s_do_new(World* inWorld, int inSize, char* inData, bool argtype) {
 
     GraphDef* def = World_GetGraphDef(inWorld, defname);
     if (!def) {
-        clockwork_log("*** ERROR: SynthDef %s not found\n", (char*)defname);
+        scprintf("*** ERROR: SynthDef %s not found\n", (char*)defname);
         return kSCErr_SynthDefNotFound;
     }
 

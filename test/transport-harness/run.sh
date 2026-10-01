@@ -21,8 +21,8 @@ if [ ! -x "$BIN" ]; then
 fi
 
 echo "harness: building transport_probe…"
-(cd "$REPO/rust" && cargo build -q -p supersonic-transport-probe) || exit 2
-PROBE="$REPO/rust/target/debug/transport_probe"
+(cd "$REPO/clockwork/rust" && cargo build -q --example transport_probe -p clockwork-comms) || exit 2
+PROBE="$REPO/clockwork/rust/target/debug/examples/transport_probe"
 
 SERVER_PID=""
 FAILURES=0

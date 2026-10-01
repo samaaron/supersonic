@@ -29,10 +29,10 @@ ClockworkEngine::Config planeConfig(unsigned port) {
     cfg.sampleRate   = 48000;
     cfg.bufferSize   = 128;
     cfg.udpPort      = port;   // non-zero enables the public shm segment
-    cfg.numBuffers   = 256;
-    cfg.maxNodes     = 256;
-    cfg.maxGraphDefs = 64;
-    cfg.maxWireBufs  = 32;
+    setGuestOption(cfg, "numBuffers", 256);
+    setGuestOption(cfg, "maxNodes", 256);
+    setGuestOption(cfg, "maxGraphDefs", 64);
+    setGuestOption(cfg, "maxWireBufs", 32);
     cfg.headless     = true;
     cfg.shmCommands  = true;
     return cfg;

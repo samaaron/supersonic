@@ -23,14 +23,13 @@ import { test, expect } from "./fixtures.mjs";
  */
 
 // What must fit below the guest region, beyond the static data:
-//   clockwork_heap's backing block (CLOCKWORK_HEAP_SIZE, web profile)   8MB
+//   the placement arena (memArenaSize), one malloc that clockwork_heap
+//     and the engine's real-time pool are both carved from       32MB
 //   the wasm stack (--stack-first)                          1MB
 //   everything else emscripten mallocs                     slack
-// Keep this in step with CLOCKWORK_HEAP_SIZE in src/memory_profile.h.
-const CLOCKWORK_HEAP_BYTES = 8 * 1024 * 1024;
+// The arena's size is read from the layout below, so it cannot drift from it.
 const STACK_BYTES    = 1 * 1024 * 1024;
 const SLACK_BYTES    = 2 * 1024 * 1024;
-const MIN_MALLOC_MARGIN = CLOCKWORK_HEAP_BYTES + STACK_BYTES + SLACK_BYTES;  // 11MB
 
 test.describe("WASM memory headroom", () => {
   test("static regions leave room for clockwork heap below the guest region", async ({ page, sonicConfig }) => {
@@ -62,11 +61,13 @@ test.describe("WASM memory headroom", () => {
         guestMemoryOffset: MemoryLayout.guestMemoryOffset,
         wasmHeapSize: MemoryLayout.wasmHeapSize,
         ringBufferReserved: MemoryLayout.ringBufferReserved,
+        memArenaSize: MemoryLayout.memArenaSize,
         largest: named.slice(0, 3),
       };
     }, { sonicConfig });
 
     const margin = m.guestMemoryOffset - m.staticEnd;
+    const MIN_MALLOC_MARGIN = m.memArenaSize + STACK_BYTES + SLACK_BYTES;  // 35MB
     const mb = (n) => (n / 1048576).toFixed(2) + "MB";
     console.log(
       `\n  static data ends at   ${mb(m.staticEnd)} (base ${mb(m.ringBufferBase)})` +
@@ -79,11 +80,11 @@ test.describe("WASM memory headroom", () => {
     expect(m.staticEnd).toBeLessThan(m.guestMemoryOffset);
 
     // And they must leave room for everything clockwork allocates below it —
-    // clockwork_heap above all, which is claimed with malloc and so lands here.
+    // the placement arena above all, which is claimed with malloc and so lands here.
     expect(
       margin,
       `only ${mb(margin)} below the guest region, but clockwork needs ` +
-      `${mb(MIN_MALLOC_MARGIN)} (clockwork_heap ${mb(CLOCKWORK_HEAP_BYTES)} + stack + slack). ` +
+      `${mb(MIN_MALLOC_MARGIN)} (arena ${mb(m.memArenaSize)} + stack + slack). ` +
       `Raise wasmHeapSize in js/memory_layout.js — its sum with ` +
       `ringBufferReserved is what moves guestMemoryOffset.`
     ).toBeGreaterThanOrEqual(MIN_MALLOC_MARGIN);
