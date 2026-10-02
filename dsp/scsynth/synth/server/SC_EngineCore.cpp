@@ -20,8 +20,11 @@ World* EngineCore_New(const WorldOptions* options, const char** outError) {
         *outError = nullptr;
 
     World* world = World_New(const_cast<WorldOptions*>(options));
-    if (!world)
-        return fail("World_New returned null");
+    if (!world) {
+        // World_New's own reason when it gave one: the caller passes it on.
+        const char* why = World_NewError();
+        return fail(why ? why : "World_New returned null");
+    }
 
     // Realtime worlds get their sample rate from the audio driver, NRT worlds
     // from the input soundfile. A self-driven engine has neither, so set it

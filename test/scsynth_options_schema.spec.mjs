@@ -15,13 +15,14 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { parseHeader, render } = await import(join(ROOT, 'scripts/gen-scsynth-options.mjs'));
+const { parseHeader, parseHeapHeadroom, render } = await import(join(ROOT, 'scripts/gen-scsynth-options.mjs'));
 const { scsynthOptionSchema } = await import(join(ROOT, 'js/lib/scsynth_options_schema.js'));
-const { defaultScsynthOptions, encodeScsynthOptions, validateScsynthOptions, guestOptionNames } =
-  await import(join(ROOT, 'js/scsynth_options.js'));
+const { defaultScsynthOptions, encodeScsynthOptions, validateScsynthOptions, guestOptionNames,
+        scsynthHeapBytes } = await import(join(ROOT, 'js/scsynth_options.js'));
 
 const header = readFileSync(join(ROOT, 'dsp/scsynth/scsynth_options.h'), 'utf8');
 const fromHeader = parseHeader(header);
+const headroom = parseHeapHeadroom(header);
 
 test.describe('scsynth options schema', () => {
   test('the header lists options', () => {
@@ -34,8 +35,22 @@ test.describe('scsynth options schema', () => {
 
   test('the generated module is what the header says (run scripts/gen-scsynth-options.mjs)', () => {
     const committed = readFileSync(join(ROOT, 'js/lib/scsynth_options_schema.js'), 'utf8');
-    expect(committed).toBe(render(fromHeader));
+    expect(committed).toBe(render(fromHeader, headroom));
     expect(scsynthOptionSchema.map((o) => o.name)).toEqual(fromHeader.map((o) => o.name));
+  });
+
+  // The heap scsynth's pool comes out of is sized by every host with one sum
+  // (scsynth_heap_bytes in the header): the native host from -m, this client
+  // for its arena. Regression: the two kept their own figures, and only the
+  // web sized for the pool at all — a native 128 MB pool met a 64 MB heap.
+  test('the client sizes the heap with the header\'s sum', () => {
+    expect(headroom).toBeGreaterThan(0);
+    expect(scsynthHeapBytes(131072)).toBe(131072 * 1024 + headroom);
+    expect(scsynthHeapBytes(defaultScsynthOptions.realTimeMemorySize))
+      .toBe(defaultScsynthOptions.realTimeMemorySize * 1024 + headroom);
+    const client = readFileSync(join(ROOT, 'js/supersonic.js'), 'utf8');
+    expect(client).toContain('scsynthHeapBytes(');
+    expect(client).not.toContain('RT_ARENA_HEADROOM');
   });
 
   test('the client defaults to the header\'s defaults', () => {

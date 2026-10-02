@@ -351,8 +351,23 @@ void stopAsioThread();
 bool asioThreadStarted();
 }
 
+// WHY THE LAST World_New RETURNED NULL, for the host to pass on: without it the
+// caller has "World_New returned null" and nothing to act on. Kept in a fixed
+// buffer and written where the failure is known — before the throw, since
+// what() does not survive the catch-all the wasm build lands in, and in the
+// typed handler where it can be asked. The first reason wins.
+static char g_world_new_error[256] = {0};
+
+static void world_new_failed(const char* why) {
+    if (!g_world_new_error[0] && why)
+        snprintf(g_world_new_error, sizeof(g_world_new_error), "%s", why);
+}
+
+const char* World_NewError() { return g_world_new_error[0] ? g_world_new_error : nullptr; }
+
 
 World* World_New(WorldOptions* inOptions) {
+    g_world_new_error[0] = '\0';
 #if (_POSIX_MEMLOCK - 0) >= 200112L
     if (inOptions->mMemoryLocking && inOptions->mRealTime) {
         bool lock_memory = false;
@@ -420,16 +435,16 @@ World* World_New(WorldOptions* inOptions) {
             if (!area) {
                 char msg[200];
                 snprintf(msg, sizeof(msg),
-                         "World_New: RT pool of %zu bytes was asked for and the host "
-                         "cannot provide it - raise the host's heap "
-                         "(CLOCKWORK_HEAP_SIZE) or lower realTimeMemorySize",
+                         "World_New: RT pool of %zu bytes was asked for and the host's "
+                         "heap cannot provide it - size the heap for it "
+                         "(scsynth_heap_bytes) or lower realTimeMemorySize",
                          want);
-                // LOGGED BEFORE IT IS THROWN, because what() does not survive
-                // the trip. Catch-by-type needs RTTI the wasm build does not
-                // carry, so this lands in World_New's catch-all, which has an
-                // exception it cannot ask anything of — the caller would see
-                // "World_New returned null" and no reason at all.
+                // LOGGED AND KEPT BEFORE IT IS THROWN, because what() does not
+                // survive the trip. Catch-by-type needs RTTI the wasm build
+                // does not carry, so this lands in World_New's catch-all, which
+                // has an exception it cannot ask anything of.
                 scprintf("%s\n", msg);
+                world_new_failed(msg);
                 throw std::runtime_error(msg);
             }
             g_rt_pool_pending = area;
@@ -583,6 +598,7 @@ World* World_New(WorldOptions* inOptions) {
 
     } catch (std::exception& exc) {
         fprintf(stderr, "[World_New] EXCEPTION: %s\n", exc.what()); fflush(stderr);
+        world_new_failed(exc.what());
         World_Cleanup(world, true);
         return nullptr;
     } catch (...) {

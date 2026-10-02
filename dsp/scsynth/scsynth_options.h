@@ -98,6 +98,28 @@ typedef struct ScsynthOptionInfo {
 uint32_t                 scsynth_option_count(void);
 const ScsynthOptionInfo* scsynth_option_info(uint32_t index);
 
+/*
+ * THE HEAP A HOST GIVES THIS GUEST. scsynth takes its real-time pool — and
+ * everything else it allocates: the World's tables, synth definitions, the
+ * buffers /b_alloc makes — from the host's heap (DspHost::alloc_bytes). The
+ * host takes that heap once per build and never grows it on the audio
+ * thread, so it has to be sized for the pool these options ask for, and only
+ * a host that reads the options can: clockwork never does.
+ *
+ *   heap = realTimeMemorySize * 1024 + SCSYNTH_HEAP_HEADROOM_BYTES
+ *
+ * The headroom is the rest of what scsynth takes from the same heap, and the
+ * pool's own bookkeeping. Every host does this sum — the native one from -m
+ * (host/EngineHost.cpp), the web client for the arena its heap comes out of
+ * (js/supersonic.js, through the generated schema) — so it is written once,
+ * here. A plain literal, so scripts/gen-scsynth-options.mjs can read it.
+ */
+#define SCSYNTH_HEAP_HEADROOM_BYTES 16777216u   /* 16 MB */
+
+static inline uint64_t scsynth_heap_bytes(uint32_t real_time_memory_kb) {
+    return (uint64_t)real_time_memory_kb * 1024u + SCSYNTH_HEAP_HEADROOM_BYTES;
+}
+
 #ifdef __cplusplus
 }
 #endif

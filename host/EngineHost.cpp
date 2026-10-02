@@ -10,6 +10,7 @@
 #include "clockwork_product.h"
 #include "GuestConfigText.h"     // the guest's options, as name=value text
 #include "scsynth_options.h"     // which options, which flags, which defaults
+#include "memory_profile.h"      // CLOCKWORK_HEAP_SIZE: the heap a build takes unless asked
 #include "native/LinkAudioBridge.h"
 #ifdef __APPLE__
 #  include "cocoa_event_pump.h"
@@ -231,6 +232,22 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     cfg.headless    = o.headless;
     cfg.shmCommands = o.shmCommands;
     cfg.inboxBytes  = static_cast<size_t>(inboxMb) * 1024u * 1024u;
+
+    // The heap scsynth allocates from holds its real-time pool, and is taken
+    // once per build, so it is sized from -m: scsynth's own sum
+    // (scsynth_heap_bytes), with the pool read by the guest's own parser so
+    // the figure is the one the guest will ask for. A pool the profile's
+    // heap already holds leaves it at the profile's (0). A config the guest
+    // will refuse is left to it to refuse, with its line.
+    ScsynthOptions guest;
+    char refused[160];
+    if (scsynth_options_parse(cfg.guestConfig.c_str(),
+                              static_cast<uint32_t>(cfg.guestConfig.size()),
+                              &guest, refused, sizeof(refused)) == 0) {
+        const uint64_t heap = scsynth_heap_bytes(guest.realTimeMemorySize);
+        cfg.heapBytes = heap > static_cast<uint64_t>(CLOCKWORK_HEAP_SIZE)
+                      ? static_cast<size_t>(heap) : 0;
+    }
     return true;
 }
 

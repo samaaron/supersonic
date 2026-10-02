@@ -22,7 +22,7 @@ import { scsynthProfile } from "./scsynth_profile.js";
 import { NODE_TREE_HEADER_SIZE, NODE_TREE_ENTRY_SIZE } from "./lib/node_tree_parser.js";
 import { parseNodeTree } from "./lib/node_tree_parser.js";
 import { MemoryLayout } from "../clockwork/js/memory_layout.js";
-import { defaultScsynthOptions, validateScsynthOptions, encodeScsynthOptions } from "./scsynth_options.js";
+import { defaultScsynthOptions, validateScsynthOptions, encodeScsynthOptions, scsynthHeapBytes } from "./scsynth_options.js";
 
 /*
  * HOW SUPERSONIC SPLITS ITS MEMORY.
@@ -40,11 +40,6 @@ import { defaultScsynthOptions, validateScsynthOptions, encodeScsynthOptions } f
  * memory_layout.js is the span clockwork gives it), so the client no longer
  * reserves anything here and the whole region is buffers.
  */
-/* Room in the arena for everything that is not the engine's pool: the rest of
- * clockwork's heap, which takes the arena and serves the pool out of it
- * (CLOCKWORK_HEAP_SIZE on this target), its spare growth area, and the
- * AllocPool's area headers. */
-const RT_ARENA_HEADROOM = 16 * 1024 * 1024;
 const BUFFERS_INIT   =  4 * 1024 * 1024;
 const BUFFERS_MAX    = 768 * 1024 * 1024;
 
@@ -179,13 +174,15 @@ export class SuperSonic extends Clockwork {
      * region moved and the side channel went; the sum did not change, and it
      * still belongs to the guest's client rather than to clockwork.
      *
-     * The headroom covers what else is taken from the same span —
-     * clockwork's own heap, and the pool's area bookkeeping — so a default
-     * config does not land exactly on the boundary.
+     * The sum is scsynth's (scsynthHeapBytes: the pool and the headroom for
+     * what else is taken from the same span — the rest of clockwork's heap,
+     * its spare growth area, the pool's area bookkeeping), and it is the one
+     * the native host sizes clockwork's heap with from -m, read from the same
+     * header, so the two cannot drift.
      */
-    const rtBytes = scOpts.realTimeMemorySize ?? 8192;
+    const rtKB = scOpts.realTimeMemorySize ?? defaultScsynthOptions.realTimeMemorySize;
     memory.memArenaSize = memory.memArenaSize
-      ?? Math.max(MemoryLayout.memArenaSize, rtBytes * 1024 + RT_ARENA_HEADROOM);
+      ?? Math.max(MemoryLayout.memArenaSize, scsynthHeapBytes(rtKB));
     // /b_allocPtr NAMES A SAMPLE'S POSITION AS AN OFFSET FROM THE INBOX BASE,
     // never as an address: the guest adds the inbox pointer it was handed at
     // dsp_new. The buffer manager computes that offset once (laneOffset) and

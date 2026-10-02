@@ -105,6 +105,9 @@ struct SndBuf;
 
 SCSYNTH_DLLEXPORT_C void SetPrintFunc(PrintFunc func);
 SCSYNTH_DLLEXPORT_C struct World* World_New(struct WorldOptions* inOptions);
+// Why the last World_New returned null, or NULL when it did not (or could not
+// say). Valid until the next World_New.
+SCSYNTH_DLLEXPORT_C const char* World_NewError();
 SCSYNTH_DLLEXPORT_C void World_Cleanup(struct World* inWorld, bool unload_plugins = false);
 // noexcept(false): the body throws on bad NRT options, but MSVC assumes
 // extern "C" functions never throw (/EHsc) and warns C4297 — make the

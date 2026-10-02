@@ -20,7 +20,7 @@
  * here and consumed here (supersonic.js), and they are listed below so a
  * caller who knows scsynth's options finds them under the names they expect.
  */
-import { scsynthOptionSchema } from "./lib/scsynth_options_schema.js";
+import { scsynthOptionSchema, scsynthHeapHeadroomBytes } from "./lib/scsynth_options_schema.js";
 
 const guestDefaults = Object.fromEntries(scsynthOptionSchema.map((o) => [o.name, o.default]));
 
@@ -50,6 +50,17 @@ export default defaultScsynthOptions;
 
 /** The names of the guest's options, in the schema's order. */
 export const guestOptionNames = Object.freeze(scsynthOptionSchema.map((o) => o.name));
+
+/**
+ * The heap scsynth allocates from, for a real-time pool of `realTimeMemorySize`
+ * KB: the pool and the headroom the rest of scsynth takes beside it. The same
+ * sum every host does (scsynth_heap_bytes in dsp/scsynth/scsynth_options.h —
+ * the native host sizes clockwork's heap with it from -m), with the headroom
+ * taken from the generated schema rather than a figure of this file's own.
+ */
+export function scsynthHeapBytes(realTimeMemorySize) {
+  return realTimeMemorySize * 1024 + scsynthHeapHeadroomBytes;
+}
 
 /*
  * Refuse what the engine would refuse, before a worklet is spun up for it:

@@ -42,7 +42,15 @@ export function parseHeader(src) {
   return out;
 }
 
-export function render(options) {
+// SCSYNTH_HEAP_HEADROOM_BYTES: what every host adds to the real-time pool when
+// it sizes the heap scsynth allocates from (scsynth_heap_bytes in the header).
+export function parseHeapHeadroom(src) {
+  const m = src.match(/#define SCSYNTH_HEAP_HEADROOM_BYTES\s+(\d+)u?\b/);
+  if (!m) throw new Error(`${HEADER}: no SCSYNTH_HEAP_HEADROOM_BYTES literal`);
+  return Number(m[1]);
+}
+
+export function render(options, heapHeadroom) {
   const lines = options.map((o) =>
     `  { name: ${JSON.stringify(o.name)}, flag: ${JSON.stringify(o.flag)}, ` +
     `default: ${o.default}, min: ${o.min}, max: ${o.max}, doc: ${JSON.stringify(o.doc)} },`);
@@ -57,11 +65,16 @@ export const scsynthOptionSchema = Object.freeze([
 ${lines.join("\n")}
 ]);
 export default scsynthOptionSchema;
+
+// What a host adds to the real-time pool (realTimeMemorySize KB) when it sizes
+// the heap scsynth allocates from — SCSYNTH_HEAP_HEADROOM_BYTES.
+export const scsynthHeapHeadroomBytes = ${heapHeadroom};
 `;
 }
 
 const main = () => {
-  const text = render(parseHeader(readFileSync(HEADER, "utf8")));
+  const src = readFileSync(HEADER, "utf8");
+  const text = render(parseHeader(src), parseHeapHeadroom(src));
   if (process.argv.includes("--check")) {
     let current = "";
     try { current = readFileSync(MODULE, "utf8"); } catch {}

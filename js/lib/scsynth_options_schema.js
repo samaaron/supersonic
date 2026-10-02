@@ -18,3 +18,7 @@ export const scsynthOptionSchema = Object.freeze([
   { name: "verbosity", flag: "V", default: 0, min: 0, max: 4, doc: "How much the engine prints; 0 is quiet" },
 ]);
 export default scsynthOptionSchema;
+
+// What a host adds to the real-time pool (realTimeMemorySize KB) when it sizes
+// the heap scsynth allocates from — SCSYNTH_HEAP_HEADROOM_BYTES.
+export const scsynthHeapHeadroomBytes = 16777216;
