@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-06-08
-**Last Sync Commit**: b70e7ab7e
-**Upstream Branch**: supercollider/develop (tracked to 2026-06-08)
-**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD b70e7ab7e)
+**Last Updated**: 2026-10-01
+**Last Sync Commit**: 7e6f20928
+**Upstream Branch**: supercollider/develop (tracked to 2026-10-01)
+**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD 7e6f20928)
 
 ---
 
@@ -13,93 +13,48 @@ Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated
 
 ---
 
-## License boundary: AGPL code stays out of SuperSonic
+## License boundary: upstream code goes into SuperSonic, never into clockwork
 
 **Read this before every sync.**
 
-### Why it matters
+SuperSonic as a whole is **AGPL-3.0-or-later**: clockwork, the substrate it runs
+on (ingress/egress, the clock, scheduler, MIDI, the JS client and workers), is
+AGPL-3.0-or-later or commercially licensed, and the combined program takes the
+AGPL side. The forked scsynth core in `dsp/scsynth` is GPL-3.0-or-later,
+inherited from upstream.
 
-- SuperSonic as a whole is **AGPL-3.0-or-later**: the substrate it runs on, clockwork (ingress/egress, the clock, scheduler, MIDI, the JS client and workers), is AGPL-3.0-or-later or commercially licensed, and the combined program takes the AGPL side. What is SuperSonic's own — the scsynth glue, the host, the client layer over clockwork's — is GPL-3.0-or-later, with a few older client files still carrying `MIT OR GPL-3.0-or-later` headers; none of that is offered permissively as a product any more.
-- The forked scsynth *core* is **GPL-3.0-or-later** (inherited from upstream). This is the expected licence to keep syncing.
-- Upstream's **WASM port** ([PR #7428](https://github.com/supercollider/supercollider/pull/7428), `wasm-audio-worklet`) is licensed **GNU Affero GPL v3 (AGPL-3.0-or-later)**, which is broader than the GPL-3.0 core.
+### SuperSonic may take GPL and AGPL upstream code
 
-### The audio layer is clockwork's — smoothie, never JUCE 8+
+Upstream SuperCollider code — the GPL-3.0 core **and** AGPL-3.0 sources such as
+upstream's own wasm port ([PR #7428](https://github.com/supercollider/supercollider/pull/7428):
+`server/scsynth/SC_WebAudio.cpp`, `platform/wasm/**`) — may be backported into
+SuperSonic, including the `dsp/scsynth` guest. Taking AGPL code into
+`dsp/scsynth` makes those parts AGPL; that is accepted.
 
-The native backend fetches no JUCE. The device layer is `clockwork/smoothie`,
-clockwork's vendored fork of the four **ISC-licensed** modules of JUCE 7.0.12
-(`juce_core`, `juce_events`, `juce_audio_basics`, `juce_audio_devices`),
-maintained in the clockwork repository. **Never sync, backport, or transcribe
-code from JUCE 8 or later into it** — JUCE ≥ 8 is AGPL/commercial-only, and a
-retyped fragment still carries that licence. That rule and its changelog live
-with clockwork now; nothing in this repository touches JUCE.
+(Earlier versions of this guide kept AGPL out of SuperSonic entirely. That rule
+predates clockwork's extraction and no longer applies.)
 
-Note on the boundary below: SuperSonic as a whole is AGPL-3.0-or-later,
-because clockwork is. What the rule protects is the guest: `dsp/scsynth`
-stays GPL-3.0-or-later and separable, so scsynth can be taken without
-clockwork's terms attached.
+Most of upstream's wasm port still does not *apply*: its WebAudio driver, OSC
+builder and wasm build glue do what clockwork does for SuperSonic. Treat those
+files as "not applicable" on architectural grounds, but read them freely — a
+fix there can point at the same bug in SuperSonic's own path.
 
-AGPL §13 ("Remote Network Interaction") requires that anyone who lets users interact with the software **over a network** be offered its complete corresponding source. A browser-delivered audio engine meets that description. GPL-3.0 → AGPL-3.0 compatibility is **one-way**: incorporating any AGPL code places the **combined work** under AGPL. That would extend the network-source-offer requirement to everyone who deploys it and change the platform layer's effective licence from MIT/GPL to AGPL. The change applies to every copy already distributed, so it cannot be undone after a release. Keeping the two licence domains separate is therefore a release-time decision, made here, on the way in.
+### clockwork takes no third-party code under a non-MIT-like licence
 
-### The rule — it covers parts, not just whole files
+clockwork (the `clockwork/` submodule, its own repository) is dual-licensed
+AGPL/commercial, so everything in it must be code its author owns or can
+relicense. **Never copy, port, paraphrase or otherwise derive code from
+upstream SuperCollider (GPL or AGPL), JUCE 8+ (AGPL/commercial), or any other
+copyleft source into clockwork** — a retyped fragment still carries its
+licence. Permissively licensed (MIT/BSD/ISC-style) third-party code is the only
+kind clockwork can carry. In practice an upstream sync never touches clockwork:
+if a backport needs a new seam between the guest and clockwork, implement the
+clockwork side independently, from the behaviour required, not from upstream
+code.
 
-> **Do not copy, cherry-pick, adapt, paraphrase, "port", or otherwise derive any
-> code — a whole file OR a single fragment — from an AGPL / Affero-licensed
-> upstream source. Copyright covers derivative works: manually re-typing or
-> reworking an AGPL snippet into one of our GPL/MIT files still produces
-> AGPL-licensed code, even without the AGPL header.**
-
-The reliable approach is to **not use an AGPL upstream file as a backport source
-at all.** The decision is made at the **source, before you read it** — not by
-scanning the result afterwards. If you need equivalent behaviour, implement it
-independently from the OSC spec / observable behaviour, with **no reference** to
-the AGPL source.
-
-> **[Manual Application](#option-b-manual-application) is the path where AGPL code
-> could be introduced unintentionally.** "Read the upstream change, apply by hand"
-> is how an AGPL fragment can end up retyped into a GPL file without carrying the
-> AGPL header. No automated scan of this repo detects that — checking the source's
-> licence before adapting it is what keeps it out.
-
-### Known AGPL sources in upstream — do not use as backport sources
-
-All from PR #7428 (upstream's *alternative* wasm port). SuperSonic already has its
-own MIT-or-GPL callback-driven driver + OSC ingress, so none of these are needed:
-
-| Upstream path | What it is | Added by |
-|---|---|---|
-| `server/scsynth/SC_WebAudio.cpp` | AGPL WebAudio driver backend. Note: it lives in `server/scsynth/`, an INCLUDE path, so it appears in Step 2 `--since` discovery — leave it out; do not adapt it. | `6dad9cae6` |
-| `platform/wasm/SC_WebOsc.cpp` | AGPL OSC message builder | `640babcd3` |
-| `platform/wasm/LICENSE` | The AGPL-3.0 licence text covering everything under `platform/wasm/` | PR #7428 |
-| `platform/wasm/**` (`init.js`, `index.html`, pre-js, `README_WASM.md`, …) | Upstream's wasm demo / build glue — all AGPL-covered | PR #7428 |
-
-**Re-verify this list every sync** — upstream may add more AGPL under these paths.
-
-> **Not AGPL (note):** `COPYING`, `external_libraries/hidapi/LICENSE-gpl3.txt`,
-> and ordinary GPL-3.0 file headers contain the word "Affero" because **GPL-3.0 §13
-> *references* the AGPL**. A file is AGPL only if its own header says it is *licensed
-> under* the GNU Affero General Public License.
-
-### Checks — one primary, one backstop
-
-1. **Provenance check, BEFORE adapting anything (the primary check).** Run this on
-   the upstream SOURCE path before you open it, for cherry-pick *and* manual application:
-   ```bash
-   git show <upstream-commit>:<path> | grep -iqE "affero|AGPL" \
-     && echo "AGPL source — leave it out; implement independently if needed" \
-     || echo "ok to inspect"
-   ```
-
-2. **Whole-file backstop (limited).** Catches only a verbatim or header-preserving
-   copy of an entire AGPL file. It does **not** catch fragments retyped into existing
-   files, reworked code, or a copy with the header removed. Wire it into CI so a whole
-   AGPL file does not land unnoticed:
-   ```bash
-   # Must return nothing. A hit = a whole AGPL file is in the tree.
-   grep -rlI -e "Affero" -e "AGPL" src/ | grep -vE "GPL-3\.0|§13"
-   ```
-
-Check (2) only covers a whole copied file. Fragments and adaptations are covered by
-check (1) and the rule above: do not use an AGPL file as a source in the first place.
+The audio device layer is clockwork's `clockwork/smoothie`, its vendored fork
+of the four **ISC-licensed** modules of JUCE 7.0.12; the never-JUCE-8 rule and
+its changelog live with clockwork.
 
 ---
 
@@ -107,14 +62,14 @@ check (1) and the rule above: do not use an AGPL file as a source in the first p
 
 When syncing with upstream:
 
-- [ ] **FIRST — read the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic): never derive from AGPL/Affero upstream code, whole files OR fragments**
+- [ ] **FIRST — read the [License boundary](#license-boundary-upstream-code-goes-into-supersonic-never-into-clockwork): upstream code never goes into clockwork**
 - [ ] Fetch latest upstream changes
-- [ ] Identify scsynth-relevant commits since last sync
+- [ ] Identify scsynth-relevant commits since the last sync commit
 - [ ] Filter out non-applicable changes (sclang, supernova, threads, tests)
 - [ ] Check if changes are already applied
 - [ ] Cherry-pick or manually apply changes
-- [ ] Adapt for WASM (ss_log, no threads)
-- [ ] Commit with proper attribution
+- [ ] Adapt for the guest (no threads, no malloc on the audio thread)
+- [ ] **Leave everything uncommitted** — never `git commit` (or amend, rebase, `cherry-pick --continue`) in this repository; hand the maintainer a suggested commit split with messages in the [format below](#commit-message-format)
 - [ ] Update this guide with new sync date
 
 ---
@@ -150,12 +105,15 @@ git log --oneline --grep="Backported from SuperCollider" | head -10
 
 ### Step 1: Get All Commits Since Last Sync
 
+Use the **Last Sync Commit** at the top of this file as a range start, not a
+date: upstream merges branches whose commits carry older dates, and a
+`--since` date filter can miss them.
+
 ```bash
-# Replace YYYY-MM-DD with last sync date (check top of this file)
-LAST_SYNC="2025-09-25"
+LAST_SYNC_COMMIT="7e6f20928"   # top of this file
 
 # View all upstream commits since then
-git log supercollider/develop --oneline --since="$LAST_SYNC"
+git log --oneline "$LAST_SYNC_COMMIT"..supercollider/develop
 ```
 
 ### Step 2: Filter for scsynth-Relevant Paths
@@ -163,23 +121,24 @@ git log supercollider/develop --oneline --since="$LAST_SYNC"
 Focus on these paths ONLY:
 
 ```bash
-# Server core files
-git log supercollider/develop --oneline --since="$LAST_SYNC" -- \
-    "server/scsynth/*.cpp" \
-    "server/scsynth/*.h" \
-    "include/server/*.h" \
-    "include/plugin_interface/*.h"
-
-# Plugin files
-git log supercollider/develop --oneline --since="$LAST_SYNC" -- \
-    "server/plugins/*.cpp"
+git log --reverse --format='%h %ad %s' --date=short \
+    "$LAST_SYNC_COMMIT"..supercollider/develop -- \
+    server/scsynth server/plugins \
+    include/server include/plugin_interface include/common common/
 ```
+
+Upstream paths map onto `dsp/scsynth/synth/`: `server/plugins/` →
+`plugins/`, `server/scsynth/` → `server/`, `include/` → `include/`,
+`common/` → `common/`. An upstream patch can usually be applied directly
+once its paths are rewritten (`git show <hash> -- <paths>`, rewrite the
+`a/` and `b/` prefixes, then `git apply --check`).
 
 ### Step 3: Exclude Non-Applicable Changes
 
 **Always SKIP these**:
-- ❌ **ANY AGPL / Affero-licensed source — whole file OR fragment (see the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic)). Covers all of PR #7428's WASM port: `server/scsynth/SC_WebAudio.cpp`, `platform/wasm/**`. Check the source's license header BEFORE you open it to adapt it.**
-- ❌ sclang changes (`lang/`, `SCClassLibrary/`)
+- ❌ Upstream's own wasm port (`server/scsynth/SC_WebAudio.cpp`, `platform/wasm/**`) — not applicable, clockwork does that job; read it for bugs that may also be ours
+- ❌ Anything that would land in `clockwork/` (see the [License boundary](#license-boundary-upstream-code-goes-into-supersonic-never-into-clockwork))
+- ❌ sclang changes (`lang/`, `SCClassLibrary/`, `common/SC_Filesystem*` class-library folder selection)
 - ❌ supernova changes (`server/supernova/`)
 - ❌ Help files (`HelpSource/`, `*.schelp`)
 - ❌ Test files (`testsuite/`)
@@ -263,6 +222,9 @@ grep -r "World_TotalFree" dsp/scsynth/synth/
 
 ## Applying Changes
 
+Whichever option, the result stays **uncommitted** in the working tree for the
+maintainer to review and commit. Always pass `--no-commit` to `cherry-pick`.
+
 ### Option A: Cherry-Pick (Preferred When Possible)
 
 ```bash
@@ -303,17 +265,15 @@ When cherry-pick isn't feasible:
 
 ## Adapting Upstream Changes
 
-SuperSonic has three build targets (WASM, native, NIF) with a shared engine. Use the ifdef conventions above to mark adaptations clearly.
+SuperSonic has three build targets (WASM, native, NIF) with a shared engine. Use the [preprocessor conventions](#preprocessor-conventions-for-upstream-files) to mark adaptations clearly.
 
-### 1. Print Functions — use `#ifdef SUPERSONIC`
+### 1. Print Functions — keep upstream's `scprintf` / `Print`
 
-```cpp
-#ifdef SUPERSONIC
-    ss_log("debug message\n");
-#else
-    scprintf("debug message\n");
-#endif
-```
+No change needed. `scprintf` is SuperSonic's own (`dsp/scsynth/synth/server/SC_Stubs.cpp`):
+it formats into a stack buffer and hands the line to the host's log through
+`supersonic_guest_log` (`dsp/scsynth/scsynth_dsp.cpp`), on every target. A
+plugin's `Print` reaches the same place. (The old `ss_log` substitution is
+gone.)
 
 ### 2. Platform-unavailable APIs — use `#ifndef __EMSCRIPTEN__`
 
@@ -338,7 +298,9 @@ Guard with `#ifndef __EMSCRIPTEN__` if the code requires threading APIs. WASM Au
 
 ## Handling Conflicts
 
-Common conflicts when cherry-picking:
+Common conflicts when cherry-picking. Once they are resolved, end the
+cherry-pick with `git cherry-pick --quit`, which leaves the changes in place
+uncommitted — **never** `git cherry-pick --continue`, which commits.
 
 ### 1. Help Files (.schelp)
 
@@ -347,8 +309,8 @@ Common conflicts when cherry-picking:
 git rm -f HelpSource/**/*.schelp
 git rm -f SCClassLibrary/**/*.sc
 
-# Continue with the cherry-pick
-git cherry-pick --continue
+# End the cherry-pick, keeping the changes uncommitted
+git cherry-pick --quit
 ```
 
 ### 2. Test Files
@@ -358,8 +320,8 @@ git cherry-pick --continue
 git rm -f testsuite/**/*.sc
 git rm -f testsuite/**/*.scd
 
-# Continue
-git cherry-pick --continue
+# End the cherry-pick, keeping the changes uncommitted
+git cherry-pick --quit
 ```
 
 ### 3. Missing Files
@@ -377,21 +339,20 @@ git rm -f server/plugins/PluginName.cpp
 git cherry-pick --abort
 ```
 
-### 4. Staging Already-Modified Files
+### 4. Conflicts in Files SuperSonic Has Changed
 
 ```bash
-# If you have unstaged changes that need to be included
-git add dsp/scsynth/synth/server/SC_GraphDef.cpp
-
-# Then continue
-git cherry-pick --continue
+# Resolve the conflict markers by hand, then end the cherry-pick,
+# keeping the changes uncommitted
+git cherry-pick --quit
 ```
 
 ---
 
 ## Commit Message Format
 
-Use this format for all backported commits:
+The maintainer commits; a sync never does. For each backport, give them a
+suggested commit — the files it covers and a message in this format:
 
 ```
 <component>: <brief description>
@@ -437,14 +398,15 @@ instead of scprintf for WASM AudioWorklet compatibility.
 
 After applying changes:
 
-- [ ] **No AGPL code introduced — every upstream source you adapted was non-AGPL (provenance checked at the source, per the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic)); the `grep -rlI -e Affero -e AGPL src/` backstop shows nothing new (backstop only — it does not catch retyped fragments)**
-- [ ] Code compiles on all targets (`scripts/build-web.sh`, `scripts/build-native.sh`)
-- [ ] SuperSonic-specific changes wrapped in `#ifdef SUPERSONIC` with upstream code in `#else`
-- [ ] Platform guards use `#ifndef __EMSCRIPTEN__` (not `#ifdef SUPERSONIC`)
-- [ ] No bare `scprintf` in shared code — use `ss_log` inside `#ifdef SUPERSONIC`
+- [ ] **Nothing from upstream landed in `clockwork/`** (see the [License boundary](#license-boundary-upstream-code-goes-into-supersonic-never-into-clockwork))
+- [ ] Code compiles on all targets (`scripts/build-all.sh` — native, NIF, web)
+- [ ] `scripts/check-guest-boundary.sh` passes (the guest reaches clockwork only through `clockwork/src/dsp_api.h`)
+- [ ] SuperSonic-specific changes wrapped in `#ifdef CLOCKWORK_GUEST` with upstream code in `#else`
+- [ ] Platform guards use `#ifndef __EMSCRIPTEN__` (not `#ifdef CLOCKWORK_GUEST`)
 - [ ] No malloc/free on audio thread paths
-- [ ] Git commit includes upstream hash and link
-- [ ] Commit message explains adaptations (if any)
+- [ ] Nothing committed — every change is left in the working tree
+- [ ] Each suggested commit message includes the upstream hash and link
+- [ ] Each suggested commit message explains adaptations (if any)
 - [ ] Tests pass: `scripts/test-native.sh`, `npx playwright test`, `scripts/test-nif.sh`
 - [ ] Updated LAST_SYNC date at top of this file
 
@@ -554,10 +516,11 @@ git fetch supercollider
 git checkout main
 git status  # ensure clean working directory
 
-# 2. Find commits since last sync
-LAST_SYNC="2025-09-25"
-git log supercollider/develop --oneline --since="$LAST_SYNC" \
-    -- "server/plugins/*.cpp" "server/scsynth/*.cpp" \
+# 2. Find commits since last sync (Last Sync Commit, top of this file)
+LAST_SYNC_COMMIT="7e6f20928"
+git log --reverse --oneline "$LAST_SYNC_COMMIT"..supercollider/develop -- \
+    server/scsynth server/plugins \
+    include/server include/plugin_interface include/common common/ \
     > /tmp/new_commits.txt
 
 # 3. Review the list
@@ -577,28 +540,26 @@ git cherry-pick $COMMIT --no-commit
 git rm -f HelpSource/*.schelp testsuite/*.sc
 git status
 
-# 8. Adapt for WASM if needed (check diff)
+# 8. Adapt for the guest if needed (check diff)
 git diff --cached
 
-# 9. Edit files if needed to replace scprintf with ss_log
-# Use Edit tool here
+# 9. Do NOT commit. Note the files and a suggested message for the
+#    maintainer (see Commit Message Format):
+#      plugins: Fix initialization
+#
+#      Backported from SuperCollider upstream commit $COMMIT
+#      https://github.com/supercollider/supercollider/commit/$COMMIT
+#
+#      [description]
 
-# 10. Commit with proper message
-git commit -m "plugins: Fix initialization
-
-Backported from SuperCollider upstream commit $COMMIT
-https://github.com/supercollider/supercollider/commit/$COMMIT
-
-[description]"
-
-# 11. Repeat for next commit
+# 10. Repeat for next commit
 ```
 
 ---
 
 ## Troubleshooting
 
-### Problem: Cherry-pick creates empty commit
+### Problem: Cherry-pick produces no changes
 
 ```bash
 # This means the change is already applied
@@ -679,6 +640,35 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Full sync — first since clockwork's extraction (2026-10-01)
+
+Reviewed `b70e7ab7e..7e6f20928` (141 upstream commits, 15 touching scsynth
+paths). Four backported, all applied as upstream patches with paths remapped
+onto `dsp/scsynth/synth/` (PanUGens by hand, for the Boost-free form).
+
+**Applied:**
+- `8a483574d` Median: clip length to 1 ([PR #7672](https://github.com/supercollider/supercollider/pull/7672)) — 🔴 a length below 1 started the insertion at index -1 and wrote outside the median window. `FilterUGens.cpp`.
+- `79884629f` PanUGens: `else` before the alignment check — 🟡 `LinPan2`/`XFade2`/`Pan2` chose their 64-sample SIMD path and then overwrote it with the generic aligned one. `PanUGens.cpp`, applied to the Boost-free `((BUFLENGTH & 15) == 0)` form.
+- `11193fb00` improve reblocking ([PR #7707](https://github.com/supercollider/supercollider/pull/7707)) — 🟡 a Synth's block size may now exceed the Server's as long as blockSize / resample factor does not (too large is reduced to Server block size × factor), and may be smaller than the factor; wire-buffer offsets are scaled by the Graph's block size in `Graph_Ctor` instead of by the Server's in `DoBufferColoring`; `Graph::mNumTicks`/`mTickCounter` become `uint32`; plugin API version 6 → 7. `SC_Graph.h`, `SC_InterfaceTable.h`, `IOUGens.cpp`, `SC_Graph.cpp`, `SC_GraphDef.cpp`. Nothing else in SuperSonic reads `OutputSpec::mBufferIndex`, and the wire-buffer space is `mMaxWireBufs × mBufLength` as upstream assumes.
+- `19954900c` `SC_PlugIn.hpp`: `in`, `zin`, … take `uint32` ([PR #7742](https://github.com/supercollider/supercollider/pull/7742)) — ⚪ type tidy, no behaviour change.
+
+No adaptation was needed: the incoming `scprintf`/`Print` calls go to the host log as they are.
+
+**Not applicable:**
+- `25e1ffc99` TCP disconnect deregisters `/notify` clients ([PR #7671](https://github.com/supercollider/supercollider/pull/7671)) — the trigger lives in upstream's `SC_ComPort.cpp`; clockwork owns SuperSonic's sockets and already prunes closed connections from its own notify lists. Clients are identified to the guest by clockwork's `origin`, so a closed TCP origin stays in scsynth's `mUsers` until it sends `/notify 0` — a separate follow-up that would need a clockwork seam, implemented independently.
+- `9a070cfe8`, `403a0cb62` — upstream's `SC_WebAudio.cpp` driver (`realTimeMemorySize` passthrough, `try`/`finally` around the reply callback). SuperSonic doesn't build it and already passes `realTimeMemorySize` through (`scsynth_dsp.cpp`).
+- `6081aaa63` — sclang class-library platform folders (`SC_Filesystem_*.cpp`).
+- `963a8d2d3` — reviewed 2026-06-10.
+- `6314d5840`, `0d11c50a3`, `a9c02c442`, `a86e3c411`, `d7801926f`, `558eb939d` — CMake only.
+- Supernova, sclang, HelpSource and testsuite parts of the above.
+
+**Testing:**
+- New fixtures, compiled with sclang 3.15.0-dev built from `7e6f20928`: `rr_probe_reblock_resample_ctrl` and `rr_audio_reblock_resample_ctrl` (both block size and factor as Synth controls). The nine existing reblock fixtures recompiled byte-identical. `median_length_probe` compiled with sclang 3.14.
+- `test/reblock_resample.spec.mjs`: 4 new rate probes (256/2, 512/4, 512/2 → 256, 1/2) and 2 new audio cases (256/2, 512/4). `test/median_length.spec.mjs`: lengths 3, 1, 0, −3. Against the pre-sync engine the Median 0/−3 and the three larger-than-Server block cases fail; 1/2 and the audio cases already passed and guard the new paths.
+- Web (Playwright): 1493 passed, 76 skipped, 1 failed — the postMessage "prophet stress: find the breaking point" benchmark, under a load average of ~13; `wasm_benchmark.spec.mjs` passed 6/6 on rerun. Native: 1007/1007 in the per-test run; the shuffled one-process run's only failure was `LinkTempo.kr` reading 60 BPM from a running Sonic Pi on the Link session. NIF: 18 passed. Guest boundary: clean.
+
+---
 
 ### Single-commit check — static-plugins build option (2026-06-10)
 
@@ -1013,11 +1003,12 @@ See `BACKPORT_COMPLETION_SUMMARY.md` for full details.
 
 1. **Batch related fixes together** - Apply all initialization fixes in one session
 2. **Trust but verify** - Even if commit message matches, check the actual code
-3. **Document WASM changes** - Note every `scprintf→ss_log` replacement
+3. **Document adaptations** - Note every change made to fit the guest (Boost-free conversions, `#ifdef CLOCKWORK_GUEST` blocks)
 4. **Test critical fixes** - EnvGen, triggers, delays are high-risk areas
 5. **Keep upstream links** - Future maintainers need to trace back to original PRs
 6. **Update this guide** - Add new patterns, pitfalls, or workflow improvements
-7. **Use cherry-pick when possible** - Preserves upstream history and attribution
+7. **Use `cherry-pick --no-commit` (or a path-remapped `git apply`) when possible** - Applies the upstream change exactly; the maintainer's commit carries the attribution
+8. **Never commit** - Leave the sync uncommitted for the maintainer to review and commit
 
 ---
 
@@ -1034,38 +1025,36 @@ Some upstream features are excluded due to AudioWorklet constraints:
 
 SuperSonic uses two preprocessor guards in upstream scsynth files. Each serves a distinct purpose for upstream sync.
 
-### `#ifdef SUPERSONIC` — Fork Divergence
+### `#ifdef CLOCKWORK_GUEST` — Fork Divergence
 
-Marks where SuperSonic intentionally diverges from upstream scsynth. The original upstream code is preserved in the `#else` branch for merge reference.
+Marks where SuperSonic intentionally diverges from upstream scsynth. The original upstream code is preserved in the `#else` branch for merge reference. `CLOCKWORK_GUEST` is defined for every target by `dsp/scsynth/CMakeLists.txt` (it replaced the old `SUPERSONIC` guard when clockwork was extracted).
 
 ```bash
 # Find all fork divergence points
-grep -rn "ifdef SUPERSONIC\|ifndef SUPERSONIC" dsp/scsynth/synth/
+grep -rn "CLOCKWORK_GUEST" dsp/scsynth/synth/
 ```
 
-**During upstream syncs:** Update the `#else` branch to match upstream. Then check whether the `SUPERSONIC` branch needs corresponding changes.
+**During upstream syncs:** Update the `#else` branch to match upstream. Then check whether the `CLOCKWORK_GUEST` branch needs corresponding changes.
 
-Current `SUPERSONIC` sites in upstream files:
+Current `CLOCKWORK_GUEST` sites in upstream files:
 
 - **SC_Constants.h**: `constexpr` constants (upstream uses runtime `const` with `std::acos` etc.)
-- **SC_World.cpp**: `ss_log` declaration, `fPrint` assignment, `InitializeSynthTables`/`InitializeFFTTables` declarations and calls
-- **SC_fftlib.cpp**: `ss_log` declaration, idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
-- **Samp.cpp**: Idempotency guard in `FillTables`, `InitializeSynthTables` entry point
-- **SC_InterfaceTable.h**: `ss_log` declaration, `DefineSimpleUnit` macro (without trailing semicolon)
-- **SC_SndBuf.h**: `ss_log` declaration
-- **SC_Graph.cpp**: `ss_log` declaration
-- **SC_Lib.cpp**: `ss_log` declaration, direct `SendFailure` error reporting (upstream uses staged `CallSendFailureCommand`)
+- **SC_World.cpp**: `InitializeSynthTables`/`InitializeFFTTables` declarations and calls in `World_New`; the guest's doors to the host (`supersonic_guest_*` in `scsynth_dsp.cpp`) and `sc_malloc`/`sc_free` on the host's heap
+- **SC_fftlib.cpp**: idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
+- **Samp.cpp**: idempotency guard in `FillTables`, `InitializeSynthTables` entry point
+- **SC_InterfaceTable.h**: `DefineSimpleUnit` macro (without trailing semicolon)
+- **SC_Lib.cpp**: direct `SendFailure` error reporting (upstream uses staged `CallSendFailureCommand`)
 - **SC_ReplyImpl.hpp**: `kWeb` protocol enum value
-- **SC_OSC_Commands.h**: `cmd_b_allocPtr` command number
-- **SC_World.cpp**: `supersonic_heap_alloc`/`supersonic_heap_free` for `sc_malloc`/`sc_free` (uses `SUPERSONIC` not `__EMSCRIPTEN__`)
+- **SC_OSC_Commands.h**: `cmd_b_allocPtr` and `cmd_supersonic_piano_wavetable` command numbers
 - **LFUGens.cpp**: signed squared/cubed envelope warps (sonic-pi#169) + zero-safe exponential warp endpoints (sonic-pi#881) — `sc_signed_sqrt`/`sc_signed_square`/`sc_exp_safe` helpers, EnvGen segment init/next/fill, duplicated `GET_ENV_VAL` macro
 - **DemandUGens.cpp**: signed squared/cubed + zero-safe exponential envelope warps — helpers + demand-rate envelope init/next (sonic-pi#169, sonic-pi#881)
+- Empty `#ifdef CLOCKWORK_GUEST` blocks in SC_Graph.cpp, SC_Lib.cpp, SC_MiscCmds.cpp and SC_fftlib.cpp are where the old `ss_log` declarations were.
 
 ### Boost-free conversions — global, unconditional divergence
 
 SuperSonic carries **no Boost** (the vendored bcp subset was removed 2026-08-04;
 there is nothing for a `boost/...` include to resolve against). Unlike the
-`#ifdef SUPERSONIC` sites above, these divergences are deliberately
+`#ifdef CLOCKWORK_GUEST` sites above, these divergences are deliberately
 **unconditional** — an `#else` branch preserving the upstream Boost code could
 never compile here, so this table is the merge reference instead.
 
@@ -1086,7 +1075,7 @@ Files converted (2026-08-04): `plugins/{Pan,Trigger,BinaryOp,Delay,LF,IO,UnaryOp
 `server/SC_CoreAudio.h` + `include/server/SC_CoreAudio.h`, `server/SC_World.cpp`,
 `server/SC_HiddenWorld.h`, `common/malloc_aligned.hpp`, `common/SC_SndFileHelpers.hpp`.
 
-Never reintroduce a `boost/` include into `src/synth` — the build has no
+Never reintroduce a `boost/` include into `dsp/scsynth/synth` — the build has no
 resolver for it, and keeping the engine Boost-free is part of keeping the
 dependency surface auditable (see the licence boundary above).
 
@@ -1096,22 +1085,21 @@ Guards upstream code that requires APIs unavailable in WASM (filesystem, shared 
 
 ```bash
 # Find all platform guards
-grep -rn "ifdef __EMSCRIPTEN__\|ifndef __EMSCRIPTEN__" dsp/scsynth/synth/
+grep -rn "__EMSCRIPTEN__" dsp/scsynth/
 ```
 
-**During upstream syncs:** Update the guarded code to match upstream exactly (uses `scprintf`, not `ss_log`). Don't skip these blocks — they contain the upstream code that native builds use.
+**During upstream syncs:** Update the guarded code to match upstream exactly. Don't skip these blocks — they contain the upstream code that native builds use.
 
 Current `__EMSCRIPTEN__` sites in upstream files:
 
 - **SC_GraphDef.cpp/.h**: `load_file()`, `GraphDef_Load()`, `GraphDef_LoadDir()`, `GraphDef_LoadGlob()`
-- **SC_SequencedCommand.h/.cpp**: `LoadSynthDefCmd` class, `LoadSynthDefDirCmd` class
-- **SC_MiscCmds.cpp**: `meth_d_load()`, `meth_d_loadDir()`, `meth_b_allocRead` (native sample loader hook), and their `NEW_COMMAND` registrations
-- **SC_World.cpp**: `server_shm.hpp` include, `mQuitProgram` semaphore, shared memory init/cleanup, `World_LoadGraphDefs()` body
-- **SC_HiddenWorld.h**: `SC_QuitSemaphore.hpp` (was upstream's `boost/sync/semaphore.hpp`) and `server_shm.hpp` includes, `mQuitProgram` and `mShmem` struct fields
-- **SC_ReplyImpl.hpp**: `boost::asio::ip::address` vs `uint32_t[4]` placeholder in `ReplyAddress`
-- **SC_Reply.cpp**: `operator==` and `operator<` using `memcmp` vs boost address comparison
-- **audio_processor.h**: `destroy_world()`/`rebuild_world()` (native-only device hot-swap)
-- **audio_processor.cpp**: `__errno_location` override, `EMSCRIPTEN_KEEPALIVE` exports, `mSharedMemoryID`, `destroy_world`/`rebuild_world` implementations
+- **SC_CoreAudio.h** (both copies): `SC_AUDIO_API_WEBAUDIO` selection
+- **SC_Endian.h**, **SC_Platform.h**: wasm endianness and `SCP_TARGET_WASM`
+- **SC_Filesystem_unix.cpp**: compiled for wasm as for Linux
+- **SC_OscUtils.hpp**: `kWeb` in the reply-address dump
+- **MdaUGens.cpp**: `EMSCRIPTEN_KEEPALIVE` export
+
+SuperSonic's own files use it too: **SC_Stubs.cpp** (native-only stubs) and **scsynth_dsp.cpp**.
 
 ---
 
@@ -1121,11 +1109,11 @@ If uncertain about a commit:
 
 1. **Check the upstream PR** - Often has discussion about scope/impact
 2. **Ask on SuperCollider forums** - Community can clarify intent
-3. **When in doubt about a _fix_, apply it** - Easier to revert than to miss a critical fix. **But when in doubt about a _license_, leave it out** - incorporating AGPL code (a whole file or a retyped fragment) produces a derivative work whose licence cannot be undone once distributed. See the [License boundary](#license-boundary-agpl-code-stays-out-of-supersonic).
+3. **When in doubt about a _fix_, apply it** - Easier to revert than to miss a critical fix. **But never put upstream code in clockwork** - see the [License boundary](#license-boundary-upstream-code-goes-into-supersonic-never-into-clockwork).
 4. **Test in browser** - Some issues only manifest in WASM environment
 
 ---
 
-**Last Updated**: 2026-06-08
+**Last Updated**: 2026-10-01
 **Maintainer**: See git log for recent contributors
 **Upstream**: https://github.com/supercollider/supercollider
