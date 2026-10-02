@@ -17,6 +17,7 @@
 #include "OscTestUtils.h"
 #include "clockwork_client.h"
 #include "clockwork_audio_file.h"
+#include "shm_audio_buffer.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -196,41 +197,6 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
         CHECK(c.expect("/b_info").argInt(1) > 0);
     }
 
-    // A session recording through the process: the front holds the guest's
-    // tap, the guest feeds it, the file is written here — with a synth
-    // playing so the file is not silence.
-    {
-        const std::string rec = (std::filesystem::temp_directory_path() / ("supersonic-binary-rec-" + std::to_string(::getpid()) + ".wav")).string();
-        osc_test::Builder b;
-        b.begin("/clockwork/record/start") << rec.c_str() << "wav" << int32_t{16};
-        c.send(b.end());
-        const auto started = c.expect("/clockwork/record/start.reply");
-        CHECK(started.argInt(0) == 1);
-        // A synthdef the process can load from the packaged set.
-        const std::string def = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-beep.scsyndef";
-        REQUIRE(std::filesystem::exists(def));
-        c.send(osc_test::message("/d_load", def.c_str()));
-        CHECK(c.expect("/done").argString(0) == "/d_load");
-        osc_test::Builder sn;
-        sn.begin("/s_new") << "sonic-pi-beep" << int32_t{5300} << int32_t{0} << int32_t{0} << "note" << 60.0f << "amp" << 0.8f << "sustain" << 2.0f;
-        c.send(sn.end());
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));
-        c.send(osc_test::message("/clockwork/record/stop"));
-        const auto stopped = c.expect("/clockwork/record/stop.reply");
-        CHECK(stopped.argInt(0) == 1);
-        c.send(osc_test::message("/n_free", int32_t{5300}));
-        ClockworkAudioInfo info {};
-        info.struct_bytes = sizeof info;
-        float* frames = nullptr;
-        REQUIRE(clockwork_audio_decode_file(rec.c_str(), &info, &frames) == CLOCKWORK_OK);
-        CHECK(info.frames > 48000 * 0.2);
-        float peak = 0.f;
-        for (uint64_t i = 0; i < info.frames * info.channels; ++i) peak = std::max(peak, std::fabs(frames[i]));
-        CHECK(peak > 0.05f);
-        clockwork_audio_free(frames);
-        std::filesystem::remove(rec);
-    }
-
     // The segment is served at the endpoint -u derives, and the lane is the
     // size the flag asked for.
     char endpoint[512];
@@ -245,6 +211,64 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     ClockworkRegion inbox {};
     REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_INBOX, &inbox) == CLOCKWORK_OK);
     CHECK(inbox.bytes == 32u * 1024u * 1024u);
+
+    // A session recording through the process: the front holds the guest's
+    // tap, the guest feeds it, the file is written here — with a synth
+    // playing so the file is not silence. Measured in the process's own
+    // frames, read from the tap in the segment (write_position), never the
+    // wall clock's: a loaded runner renders a fraction of a sleep.
+    {
+        ClockworkRegion taps {};
+        REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_AUDIO_TAPS, &taps) == CLOCKWORK_OK);
+        const auto* out = static_cast<const shm_audio_buffer*>(taps.base);
+        REQUIRE(out->enabled.load() == 1);
+        const auto written = [out] { return out->write_position.load(std::memory_order_acquire); };
+        const std::string rec = (std::filesystem::temp_directory_path() / ("supersonic-binary-rec-" + std::to_string(::getpid()) + ".wav")).string();
+        osc_test::Builder b;
+        b.begin("/clockwork/record/start") << rec.c_str() << "wav" << int32_t{16};
+        const uint64_t beforeStart = written();
+        c.send(b.end());
+        const auto started = c.expect("/clockwork/record/start.reply");
+        const uint64_t afterStart = written();
+        CHECK(started.argInt(0) == 1);
+        // A synthdef the process can load from the packaged set.
+        const std::string def = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-beep.scsyndef";
+        REQUIRE(std::filesystem::exists(def));
+        c.send(osc_test::message("/d_load", def.c_str()));
+        CHECK(c.expect("/done").argString(0) == "/d_load");
+        osc_test::Builder sn;
+        sn.begin("/s_new") << "sonic-pi-beep" << int32_t{5300} << int32_t{0} << int32_t{0} << "note" << 60.0f << "amp" << 0.8f << "sustain" << 2.0f;
+        c.send(sn.end());
+        // 0.4 s of the process's frames from here, however long the wall clock takes to show them.
+        const uint64_t playing = written();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (written() - playing < static_cast<uint64_t>(0.4 * out->sample_rate) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        REQUIRE(written() - playing >= static_cast<uint64_t>(0.4 * out->sample_rate));   // the process rendered on
+        const uint64_t beforeStop = written();
+        c.send(osc_test::message("/clockwork/record/stop"));
+        const auto stopped = c.expect("/clockwork/record/stop.reply");
+        const uint64_t afterStop = written();
+        CHECK(stopped.argInt(0) == 1);
+        c.send(osc_test::message("/n_free", int32_t{5300}));
+        ClockworkAudioInfo info {};
+        info.struct_bytes = sizeof info;
+        float* frames = nullptr;
+        REQUIRE(clockwork_audio_decode_file(rec.c_str(), &info, &frames) == CLOCKWORK_OK);
+        // What the tap carried between the start and the stop: at least what it
+        // carried between the start's reply and the stop's request, at most what
+        // it carried between the start's request and the stop's reply.
+        INFO("tap at " << beforeStart << " / " << afterStart << " around the start, " << beforeStop << " / "
+             << afterStop << " around the stop; the file has " << info.frames);
+        CHECK(info.frames >= beforeStop - afterStart);
+        CHECK(info.frames <= afterStop - beforeStart);
+        float peak = 0.f;
+        for (uint64_t i = 0; i < info.frames * info.channels; ++i) peak = std::max(peak, std::fabs(frames[i]));
+        CHECK(peak > 0.05f);
+        clockwork_audio_free(frames);
+        std::filesystem::remove(rec);
+    }
+
     clockwork_client_close(shm);
 
     // Down cleanly on SIGTERM, and the log says whose main this was.

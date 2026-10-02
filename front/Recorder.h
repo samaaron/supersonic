@@ -44,7 +44,7 @@ public:
     uint64_t framesLost() const { return mLost.load(); }
 
 private:
-    void run();
+    void run(shm_audio_buffer* slot, shm_audio_buffer_reader reader);
     shm_audio_buffer* masterSlot();
 
     ClockworkEngine&      mEngine;

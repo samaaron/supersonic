@@ -62,7 +62,12 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
     mLost.store(0);
     mStop.store(false);
     mRunning.store(true);
-    mThread = std::thread([this] { run(); });
+    // From the live position as the start is answered, not as the thread first runs: a recording is of what
+    // happens from the moment it was said to have started. Taken on the thread, a loaded machine — or a test
+    // rendering faster than real time — had the take begin late, its head missing, or all of it.
+    shm_audio_buffer_reader reader(slot);
+    reader.seek_to_live();
+    mThread = std::thread([this, slot, reader] { run(slot, reader); });
     return true;
 }
 
@@ -83,14 +88,11 @@ bool Recorder::stop(std::string* path, std::string* err) {
 }
 
 
-void Recorder::run() {
-    // From the live position: a recording is of what happens from now. The
-    // tap has been flowing since boot, so "now" is simply the writer's
-    // cursor; the one thing that can move it backwards is a device restart,
-    // which re-formats the slot (see pullOnce).
-    shm_audio_buffer* slot = masterSlot();
-    shm_audio_buffer_reader reader(slot);
-    reader.seek_to_live();
+void Recorder::run(shm_audio_buffer* slot, shm_audio_buffer_reader reader) {
+    // `reader` starts at the writer's cursor as start() answered (above). The
+    // tap has been flowing since boot, so that cursor is "now"; the one thing
+    // that can move it backwards is a device restart, which re-formats the
+    // slot (see pullOnce).
     std::vector<float> buf(4096 * SHM_AUDIO_CHANNELS);
     auto pullOnce = [&] {
         // The counter went backwards: the slot was re-formatted under us (a
