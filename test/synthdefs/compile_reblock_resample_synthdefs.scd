@@ -16,6 +16,14 @@
 //   Reblock(32) + Resample(2)      → BlockSize=32,  SampleRate=96000
 //   Reblock(blockSize=N), default  → BlockSize=N,   SampleRate=48000
 //   Resample(factor=N), default    → BlockSize=128, SampleRate=N*48000
+//
+// Since upstream #7707 (commit 11193fb00) a block size may exceed the Server
+// block size as long as the effective block size (blockSize / factor) does not,
+// and may be smaller than the resample factor; a block size whose effective
+// size is too large is reduced to Server block size * factor:
+//   Reblock(256) + Resample(2)     → BlockSize=256, SampleRate=96000
+//   Reblock(512) + Resample(2)     → BlockSize=256, SampleRate=96000 (adjusted)
+//   Reblock(1)   + Resample(2)     → BlockSize=1,   SampleRate=96000
 
 var outDir = thisProcess.nowExecutingPath.dirname +/+ "reblock_resample";
 File.mkdir(outDir);
@@ -76,6 +84,22 @@ SynthDef(\rr_audio_reblock_resample, {
     Out.ar(0, SinOsc.ar(440) * 0.2);
 }).writeDefFile(outDir);
 
-"Done! Wrote 9 reblock/resample fixtures to: %\n".postf(outDir);
+// Reblock and Resample both control-driven (#7707 cases above).
+SynthDef(\rr_probe_reblock_resample_ctrl, { |bus=0, blockSize=32, factor=2|
+    Reblock(blockSize);
+    Resample(factor);
+    Out.kr(bus, [BlockSize.ir, SampleRate.ir]);
+}).writeDefFile(outDir);
+
+// Audio through a Graph whose block size is larger than the Server's:
+// Reblock(256) + Resample(2) by default, so each tick's wire buffers are twice
+// the Server block size.
+SynthDef(\rr_audio_reblock_resample_ctrl, { |blockSize=256, factor=2|
+    Reblock(blockSize);
+    Resample(factor);
+    Out.ar(0, SinOsc.ar(440) * 0.2);
+}).writeDefFile(outDir);
+
+"Done! Wrote 11 reblock/resample fixtures to: %\n".postf(outDir);
 
 0.exit;

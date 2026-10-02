@@ -149,6 +149,37 @@ test.describe("Reblock/Resample — per-Graph rate observation", () => {
     expect(result.block).toBe(128);
     expect(result.rate).toBe(192000);
   });
+
+  // Upstream #7707: the block size may exceed the Server block size as long as
+  // the effective block size (blockSize / factor) does not, and may be smaller
+  // than the resample factor. Too large an effective size is reduced to
+  // Server block size * factor.
+  const COMBOS = [
+    { blockSize: 256, factor: 2, expectBlock: 256, expectRate: 96000 },
+    { blockSize: 512, factor: 4, expectBlock: 512, expectRate: 192000 },
+    { blockSize: 512, factor: 2, expectBlock: 256, expectRate: 96000 },
+    { blockSize:   1, factor: 2, expectBlock:   1, expectRate: 96000 },
+  ];
+  for (const c of COMBOS) {
+    test(`rr_probe_reblock_resample_ctrl blockSize=${c.blockSize} factor=${c.factor} → BlockSize=${c.expectBlock}, SampleRate=${c.expectRate}`, async ({ page, sonicConfig }) => {
+      await page.goto("/test/harness.html");
+      const result = await page.evaluate(async ({ config, fixDir, harness, c }) => {
+        const sonic = new window.SuperSonic(config);
+        const messages = [];
+        sonic.on("in", (m) => messages.push(Array.from(m)));
+        await sonic.init();
+        const bytes = new Uint8Array(await (await fetch(`${fixDir}/rr_probe_reblock_resample_ctrl.scsyndef`)).arrayBuffer());
+        await sonic.loadSynthDef(bytes);
+        eval(harness);
+        const [block, rate] = await probeRates(sonic, messages, "rr_probe_reblock_resample_ctrl", 150,
+          ["blockSize", c.blockSize, "factor", c.factor]);
+        return { block, rate };
+      }, { config: sonicConfig, fixDir: FIX_DIR, harness: PROBE_HARNESS, c });
+
+      expect(result.block).toBe(c.expectBlock);
+      expect(result.rate).toBe(c.expectRate);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -159,39 +190,49 @@ test.describe("Reblock/Resample — audio still flows (SAB only)", () => {
     skipIfPostMessage(sonicMode, "Audio capture requires SAB mode");
   });
 
-  test("rr_audio_reblock_resample produces ~440 Hz sine", async ({ page, sonicConfig }) => {
-    await page.goto("/test/harness.html");
-    const result = await page.evaluate(async ({ config, fixDir }) => {
-      function calculateRMS(s) { let x = 0; for (let i = 0; i < s.length; i++) x += s[i]*s[i]; return Math.sqrt(x/s.length); }
-      function findPeak(s) { let p = 0; for (let i = 0; i < s.length; i++) if (Math.abs(s[i]) > p) p = Math.abs(s[i]); return p; }
-      function estimateFrequency(s, sr) {
-        let c = 0;
-        for (let i = 1; i < s.length; i++) {
-          if ((s[i-1] >= 0 && s[i] < 0) || (s[i-1] < 0 && s[i] >= 0)) c++;
+  // rr_audio_reblock_resample: Reblock(32) + Resample(2).
+  // rr_audio_reblock_resample_ctrl: Reblock(256) + Resample(2) by default — wire
+  // buffers larger than the Server block size (#7707); then Reblock(512) + Resample(4).
+  const AUDIO = [
+    { name: "rr_audio_reblock_resample", args: [] },
+    { name: "rr_audio_reblock_resample_ctrl", args: [] },
+    { name: "rr_audio_reblock_resample_ctrl", args: ["blockSize", 512, "factor", 4] },
+  ];
+  for (const a of AUDIO) {
+    test(`${a.name}${a.args.length ? ` ${a.args.join(" ")}` : ""} produces ~440 Hz sine`, async ({ page, sonicConfig }) => {
+      await page.goto("/test/harness.html");
+      const result = await page.evaluate(async ({ config, fixDir, a }) => {
+        function calculateRMS(s) { let x = 0; for (let i = 0; i < s.length; i++) x += s[i]*s[i]; return Math.sqrt(x/s.length); }
+        function findPeak(s) { let p = 0; for (let i = 0; i < s.length; i++) if (Math.abs(s[i]) > p) p = Math.abs(s[i]); return p; }
+        function estimateFrequency(s, sr) {
+          let c = 0;
+          for (let i = 1; i < s.length; i++) {
+            if ((s[i-1] >= 0 && s[i] < 0) || (s[i-1] < 0 && s[i] >= 0)) c++;
+          }
+          return c / (2 * (s.length / sr));
         }
-        return c / (2 * (s.length / sr));
-      }
-      const sonic = new window.SuperSonic(config);
-      await sonic.init();
-      const bytes = new Uint8Array(await (await fetch(`${fixDir}/rr_audio_reblock_resample.scsyndef`)).arrayBuffer());
-      await sonic.loadSynthDef(bytes);
+        const sonic = new window.SuperSonic(config);
+        await sonic.init();
+        const bytes = new Uint8Array(await (await fetch(`${fixDir}/${a.name}.scsyndef`)).arrayBuffer());
+        await sonic.loadSynthDef(bytes);
 
-      sonic.startCapture();
-      await sonic.send("/s_new", "rr_audio_reblock_resample", 5500, 0, 0);
-      await new Promise((r) => setTimeout(r, 200));
-      const captured = sonic.stopCapture();
-      await sonic.send("/n_free", 5500);
+        sonic.startCapture();
+        await sonic.send("/s_new", a.name, 5500, 0, 0, ...a.args);
+        await new Promise((r) => setTimeout(r, 200));
+        const captured = sonic.stopCapture();
+        await sonic.send("/n_free", 5500);
 
-      const samples = captured.left.subarray(2400, captured.frames);
-      return {
-        rms: calculateRMS(samples),
-        peak: findPeak(samples),
-        freq: estimateFrequency(samples, captured.sampleRate),
-      };
-    }, { config: sonicConfig, fixDir: FIX_DIR });
+        const samples = captured.left.subarray(2400, captured.frames);
+        return {
+          rms: calculateRMS(samples),
+          peak: findPeak(samples),
+          freq: estimateFrequency(samples, captured.sampleRate),
+        };
+      }, { config: sonicConfig, fixDir: FIX_DIR, a });
 
-    expect(result.rms).toBeGreaterThan(0.05);
-    expect(result.peak).toBeLessThanOrEqual(1.0);
-    expect(Math.abs(result.freq - 440)).toBeLessThanOrEqual(30);
-  });
+      expect(result.rms).toBeGreaterThan(0.05);
+      expect(result.peak).toBeLessThanOrEqual(1.0);
+      expect(Math.abs(result.freq - 440)).toBeLessThanOrEqual(30);
+    });
+  }
 });
