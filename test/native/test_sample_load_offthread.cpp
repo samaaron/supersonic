@@ -75,8 +75,42 @@ double decodeMillis(const std::string& path) {
 
 } // namespace
 
-TEST_CASE("a sample enters through the lane: no audio block carries the decode",
-          "[load_sample][realtime]") {
+TEST_CASE("a sample enters through the lane: the engine is handed the frames, never the file",
+          "[load_sample]") {
+    // What keeps the decode out of every block, without a clock: the CLIENT decodes and stages the frames in the
+    // inbox lane, and the engine is sent a commit naming the slot — no path, nothing to read. That the engine could
+    // not read one if it were sent it is test_supersonic_front.cpp's "the engine itself reads no files". Here: the
+    // whole file arrives, at its length, bound from the lane, and goes back to the client on /b_free.
+    const std::string path = writeBigWav(15.0);
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    EngineFixture fx(cfg);
+    REQUIRE(fx.engine().guestInboxBytes() >= 6u * 1024u * 1024u);
+
+    const sample_lane::Staged st = sample_lane::stage(fx, 0, path);
+    REQUIRE(st.ok);
+    fx.send(st.commit);
+    OscReply committed;
+    REQUIRE(fx.waitForReply("/clockwork/asset/committed", committed));
+
+    fx.clearReplies();
+    fx.send(osc_test::message("/b_query", int32_t{0}));
+    OscReply info;
+    REQUIRE(fx.waitForReply("/b_info", info));
+    CHECK(info.parsed().argInt(1) == 15 * 48000);
+
+    fx.clearReplies();
+    fx.send(osc_test::message("/b_free", int32_t{0}));
+    OscReply rel;
+    REQUIRE(fx.waitForReply("/clockwork/asset/released", rel));
+    CHECK(rel.parsed().argInt(0) == 0);
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("benchmark: no audio block carries a lane sample's decode",
+          "[load_sample][realtime][benchmark]") {
+    // The wall-clock side of the case above, run by hand: how long the blocks that carried the commit took. A shared
+    // runner's blocks measure the runner as much as the work.
     // 15 s of stereo at 48 kHz: 2.9 MB on disk, 5.8 MB as float frames in the
     // lane — long enough that a decode inside a block would be unmissable,
     // small enough for the lane as it is sized today.

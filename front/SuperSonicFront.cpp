@@ -10,6 +10,7 @@
 #include "clockwork_asset_pool.h"
 #include "clockwork_audio_file.h"
 #include "AudioFormats.h"
+#include "AudioThreadWitness.h"
 #include "dsp_api.h"
 #include "osc/OscOutboundPacketStream.h"
 #include "osc/OscReceivedElements.h"
@@ -51,6 +52,7 @@ bool wildcardMatch(const char* pat, const char* str) {
 }
 
 bool readFile(const fs::path& p, std::vector<uint8_t>& out) {
+    audio_thread_witness::fileWork();
     std::ifstream f(p, std::ios::binary);
     if (!f) return false;
     out.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
@@ -94,6 +96,7 @@ bool decodeFor(const std::string& path, int32_t start, int32_t want, const std::
     ClockworkAudioInfo info {};
     info.struct_bytes = sizeof info;
     float* decoded = nullptr;
+    audio_thread_witness::fileWork();
     const ClockworkStatus st = clockwork_audio_decode_file(path.c_str(), &info, &decoded);
     if (st != CLOCKWORK_OK) {
         why = "File '" + path + "' could not be opened: " + std::to_string(st);
@@ -396,6 +399,7 @@ void SuperSonicFront::encode(const Job& job) {
     cfg.channels    = job.outChannels;
     cfg.sample_rate = static_cast<uint32_t>(job.outRate + 0.5f);
     ClockworkStatus st = CLOCKWORK_OK;
+    audio_thread_witness::fileWork();
     ClockworkAudioWriter* w = clockwork_audio_writer_open(job.path.c_str(), &cfg, &st);
     if (w) {
         if (job.outFrames > 0) {
@@ -464,6 +468,7 @@ bool SuperSonicFront::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
         out = std::move(load.pending.front());
         load.pending.pop_front();
         load.inFlight = true;
+        mDefsInFlightPeak = std::max(mDefsInFlightPeak, ++mDefsInFlight);
         return true;
     }
     return false;
@@ -532,6 +537,7 @@ bool SuperSonicFront::egress(uint32_t token, const uint8_t* data, uint32_t size)
             for (; it != mDefLoads.end(); ++it) if (it->token == token && it->inFlight) break;
             if (it == mDefLoads.end()) return false;
             it->inFlight = false;
+            --mDefsInFlight;
             if (kind == Fail) ++it->failed;
             if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
             sendNext = takeNextDef(token, next);

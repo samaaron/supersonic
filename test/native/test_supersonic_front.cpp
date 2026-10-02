@@ -29,6 +29,8 @@
 #include <cmath>
 #include "TestPid.h"
 #include "BlockBudget.h"
+#include "AudioThreadWitness.h"
+#include "rt_alloc.h"
 #include <chrono>
 #include <functional>
 #include <fstream>
@@ -280,7 +282,40 @@ TEST_CASE("front: everything else passes through untouched", "[front]") {
     REQUIRE(rig.sink.waitFor("/b_info", kSpider, nullptr, nullptr));
 }
 
-TEST_CASE("front: the audio thread never carries the decode", "[front][load_sample][realtime]") {
+TEST_CASE("front: the audio thread never carries the decode", "[front][load_sample]") {
+    // Where the decode runs, counted rather than timed (AudioThreadWitness.h): on the front's thread, never in a
+    // block. This thread renders the blocks here (manualAudioPump), so a decode a block carried would be counted.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    Rig rig(cfg);
+    auto pump = [&] { rig.fx.pumpBlock(); };
+    const uint64_t before = audio_thread_witness::fileWorkCount();
+    REQUIRE(rig.ingress(allocRead(4, samplePath("bd_haus.flac"))));
+    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000, pump));
+    for (int i = 0; i < 50; ++i) pump();
+    CHECK(audio_thread_witness::fileWorkCount() == before);
+    CHECK(rig.queryFrames(4) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
+}
+
+TEST_CASE("front: file work is counted on the audio thread, and only there", "[front]") {
+    // The instrument the cases above and below read. rt_alloc's flag marks the audio thread while a block renders
+    // (process_audio's guard); file work outside it is the front's own thread's, and is not counted.
+    const uint64_t before = audio_thread_witness::fileWorkCount();
+    audio_thread_witness::fileWork();
+    CHECK(audio_thread_witness::fileWorkCount() == before);
+    {
+        rt_alloc::Guard inBlock;   // as process_audio sets it around the render
+        audio_thread_witness::fileWork();
+    }
+    CHECK(audio_thread_witness::fileWorkCount() == before + 1);
+}
+
+TEST_CASE("front, benchmark: blocks rendered while the front decodes stay within a block's budget",
+          "[front][load_sample][realtime][benchmark]") {
+    // The wall-clock side of the case above: how long the blocks took while the decode ran. A shared runner's
+    // blocks measure the runner as much as the work, so this is a benchmark, run by hand; the claim itself is
+    // counted above.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     block_budget::requireWithin(block_budget::kBlockMs, [&] {
         ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
@@ -380,8 +415,54 @@ double singleDefBlockMs(const std::filesystem::path& def) {
 }
 } // namespace
 
+TEST_CASE("front: the engine itself reads no sample files: a sample sent past the front loads nothing", "[front]") {
+    // The other half of "the audio thread never carries the decode": the front's decode is counted (above), and the
+    // engine has no sound-file reader to carry one with (scsynth's is a stub here). A sample sent straight to it, past
+    // the front, loads nothing.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    Rig rig(cfg);
+    const auto read = allocRead(6, samplePath("bd_haus.flac"));
+    rig.fx.engine().ingest(read.ptr(), read.size(), kSpider);
+    for (int i = 0; i < 100; ++i) rig.fx.pumpBlock();
+    CHECK(rig.queryFrames(6) == 0);
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+}
+
 TEST_CASE("front: /d_loadDir reads the synthdefs on its own thread; no block carries the read",
-          "[front][synthdef][realtime]") {
+          "[front][synthdef]") {
+    // What keeps a block from carrying the directory, counted rather than timed: the files are read on the front's
+    // thread, never in a block (AudioThreadWitness.h; this thread renders the blocks, manualAudioPump), and the
+    // definitions go to the engine one at a time, the next only on the reply to the last, so no block parses more
+    // than one.
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    Rig rig(cfg);
+    auto pump = [&] { rig.fx.pumpBlock(); };
+    REQUIRE_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
+
+    const uint64_t before = audio_thread_witness::fileWorkCount();
+    rig.sink.sent.clear();
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000, pump));
+    for (int i = 0; i < 50; ++i) pump();
+    CHECK(audio_thread_witness::fileWorkCount() == before);
+    CHECK(rig.front.defsInFlightPeak() == 1);
+
+    // One /done for the whole directory — the /d_recv replies stayed behind
+    // the front — and the synthdefs are really there.
+    CHECK(rig.sink.count("/done", kSpider) == 1);
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+    CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
+    CHECK(synthKnown(rig, "sonic-pi-piano", kSpider));
+}
+
+TEST_CASE("front, benchmark: blocks rendered while /d_loadDir loads stay within the budget",
+          "[front][synthdef][realtime][benchmark]") {
+    // The wall-clock side of the case above, run by hand: a shared runner's blocks measure the runner (a Windows
+    // one, 0.89.0's release: 6.8 ms for blocks that carried one 0.2 ms definition each).
     if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
     const double oneDefMs = singleDefBlockMs(biggestSynthDef(CLOCKWORK_SYNTHDEFS_DIR));
     // Within a block's budget, or within twice what this machine pays for

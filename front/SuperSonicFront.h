@@ -73,6 +73,9 @@ public:
     // The session recording, if one is running.
     bool     recording() const { return mRecorder.recording(); }
     uint64_t recordingFramesLost() const { return mRecorder.framesLost(); }
+    // The most /d_recv definitions ever with the engine at once, unanswered. One per asker by design (loadDefs): the
+    // next goes only on the reply to the last, so no block parses more than one of an asker's definitions.
+    uint32_t defsInFlightPeak() { std::lock_guard<std::mutex> lock(mMut); return mDefsInFlightPeak; }
 
 private:
     enum class Kind { AllocRead, AllocReadChannel, ReadInto, ReadIntoChannel, Write, Encode,
@@ -152,6 +155,7 @@ private:
     std::deque<Pending>           mPending;    // in send order
     std::map<int32_t, uint32_t>   mFreeing;    // bufnum → /b_free replies of ours still to swallow
     std::deque<DefLoad>           mDefLoads;   // in order; a /d_recv reply answers the oldest for its token
+    uint32_t                      mDefsInFlight = 0, mDefsInFlightPeak = 0;   // /d_recv with the engine, unanswered
 
     // LAST, and it must stay last. The constructor starts this thread in its
     // member-init list, and members are constructed in DECLARATION order — so

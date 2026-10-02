@@ -4,6 +4,7 @@
 #include "Recorder.h"
 
 #include "AudioFormats.h"
+#include "AudioThreadWitness.h"
 #include "ClockworkEngine.h"
 #include "clockwork_audio_file.h"
 #include "clockwork_client.h"
@@ -52,6 +53,7 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
         return false;
     }
     ClockworkStatus st = CLOCKWORK_OK;
+    audio_thread_witness::fileWork();
     mWriter = clockwork_audio_writer_open(path.c_str(), &cfg, &st);
     if (!mWriter) {
         if (err) *err = "could not open '" + path + "' for writing: " + std::to_string(st);
@@ -102,6 +104,7 @@ void Recorder::run(shm_audio_buffer* slot, shm_audio_buffer_reader reader) {
         uint64_t gap = 0;
         const uint32_t n = reader.pull(buf.data(), 4096, &gap);
         if (gap) mLost.fetch_add(gap);
+        if (n) audio_thread_witness::fileWork();
         if (n && mWriter && clockwork_audio_writer_write(mWriter, buf.data(), n) == CLOCKWORK_OK)
             mWritten.fetch_add(n);
         return n;
