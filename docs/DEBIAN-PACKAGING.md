@@ -52,7 +52,7 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 | stb_vorbis (inside clockwork) | vendored copy (v1.22, unmodified) | `libstb-dev` via `-DCLOCKWORK_SYSTEM_STB=ON` |
 | Audio file codecs | clockwork's own (`clockwork_audio_file`, dr_libs, flac encoder) | same — no libsndfile; dr_libs has no distro package |
 | Catch2 (tests) | FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
-| Ableton Link | FetchContent Link-4.0 + clockwork's 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
+| Ableton Link | FetchContent Link-4.1 + clockwork's 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
 | CLAP / VST3 SDKs (plugin hosting) | fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
 | Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built offline (`-DCLOCKWORK_CARGO_OFFLINE=ON`) |
 | midir (patched fork) | `clockwork/external/midir` (cargo path dep) | same — path deps need no vendoring |

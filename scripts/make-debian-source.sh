@@ -36,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="${1:-$PROJECT_ROOT/build/debian}"
 
-LINK_TAG="Link-4.0"
+LINK_TAG="Link-4.1"
 LINK_REPO="https://github.com/Ableton/link.git"
 
 cd "$PROJECT_ROOT"
