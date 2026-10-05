@@ -4,7 +4,6 @@
 // this is SuperSonic's process, built on clockwork the library.
 #include "EngineHost.h"
 
-#include "DevicePolicy.h"
 #include "EgressRouter.h"
 #include "clockwork_client.h"
 #include "clockwork_product.h"
@@ -183,11 +182,20 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
             case 'Z': cfg.bufferSize            = std::atoi(val); ++i; break;
             case 'z': cfg.blockSize             = std::atoi(val); ++i; break;
             case 'H': {
-                // scsynth's -H: "<in> <out>", or a single name for both.
-                auto req = clockwork::device::parseHardwareFlag(val, nextArg(i + 1, argc, argv));
-                cfg.hardwareDevice = req.outputDevice;
-                cfg.inputDevice    = req.inputDevice;
-                i += req.secondTokenUsed ? 2 : 1;
+                // scsynth's -H: "<in> <out>", or one name for both. The
+                // sentinels keep to their direction: __none__ is an input
+                // (inputs off), __system__ an output (follow the default).
+                const char* second = nextArg(i + 1, argc, argv);
+                if (second && second[0] != '\0' && second[0] != '-') {
+                    cfg.inputDevice    = val;
+                    cfg.hardwareDevice = second;
+                    i += 2;
+                } else {
+                    const std::string name = val;
+                    cfg.inputDevice    = name == "__system__" ? std::string() : name;
+                    cfg.hardwareDevice = name == "__none__"   ? std::string() : name;
+                    ++i;
+                }
                 break;
             }
             // Accepted for scsynth compatibility (ignored):

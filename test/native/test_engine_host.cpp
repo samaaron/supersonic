@@ -143,6 +143,23 @@ TEST_CASE("host args: -H names the devices, scsynth's way", "[host][args]") {
     CHECK(two.cfg.inputDevice == "Mic In");
     CHECK(two.cfg.hardwareDevice == "Speakers Out");
     CHECK(two.cfg.udpPort == 4002);
+
+    // A flag after one name is a flag, not the output.
+    const Options flagged = parse({ "-H", "MOTU M4", "-u", "4003" });
+    CHECK(flagged.cfg.inputDevice == "MOTU M4");
+    CHECK(flagged.cfg.hardwareDevice == "MOTU M4");
+    CHECK(flagged.cfg.udpPort == 4003);
+
+    // The sentinels keep to their direction.
+    const Options noInputs = parse({ "-H", "__none__" });
+    CHECK(noInputs.cfg.inputDevice == "__none__");
+    CHECK(noInputs.cfg.hardwareDevice.empty());
+    const Options followDefault = parse({ "-H", "__system__" });
+    CHECK(followDefault.cfg.hardwareDevice == "__system__");
+    CHECK(followDefault.cfg.inputDevice.empty());
+    const Options both = parse({ "-H", "__none__", "MacBook Pro Speakers" });
+    CHECK(both.cfg.inputDevice == "__none__");
+    CHECK(both.cfg.hardwareDevice == "MacBook Pro Speakers");
 }
 
 TEST_CASE("host args: at most one command transport, and the segment ones need a segment", "[host][args]") {
