@@ -43,10 +43,8 @@ endif()
 # A test belongs with the code it tests. These followed theirs.
 add_executable(SuperSonicNativeTests
     test_main.cpp
-    test_platform.cpp
     test_sc_calc.cpp
     test_boot.cpp
-    test_boot_input_pairing.cpp
     test_osc_commands.cpp
     test_synthdef.cpp
     test_embedded_pools.cpp
@@ -61,15 +59,11 @@ add_executable(SuperSonicNativeTests
     test_synth_commands.cpp
     test_synthdef_versions.cpp
     test_error_handling.cpp
-    test_config_validation.cpp
-    test_engine_lifecycle.cpp
     test_lifecycle_leaks.cpp
     test_callbacks.cpp
     test_metrics.cpp
-    test_metrics_shm.cpp
     test_node_tree_identity.cpp
     test_node_tree_mirror.cpp
-    test_osc_codec.cpp
     test_load_sample.cpp
     test_sample_load_offthread.cpp
     test_load_sample_origin.cpp
@@ -78,7 +72,6 @@ add_executable(SuperSonicNativeTests
     test_engine_host.cpp
     test_supersonic_binary.cpp
     test_front_recording.cpp
-    test_master_tap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../front/SuperSonicFront.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../front/Recorder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../host/EngineHost.cpp
@@ -86,91 +79,36 @@ add_executable(SuperSonicNativeTests
     test_definition_lifecycle.cpp
     test_send_reply.cpp
     test_control_endpoints.cpp
-    test_osc_ingress.cpp
     test_multichannel.cpp
     test_sound_out_fx.cpp
     test_audio_resume.cpp
-    test_fuzzy_match.cpp
     test_scheduling_accuracy.cpp
-    test_engine_state.cpp
+    test_scsynth_heap.cpp
     test_cold_swap.cpp
     test_rebuild_contract.cpp
-    test_cold_swap_recovery.cpp
     test_cold_swap_scope.cpp
     test_timing_accuracy.cpp
     test_cold_swap_buffers.cpp
     test_cold_swap_send_reply.cpp
     test_notify_clients.cpp
     test_stream_client_registration.cpp
-    test_guest_config_layout.cpp
     test_input_channels.cpp
-    test_driver_switch.cpp
     test_rapid_switching.cpp
-    test_callback_watchdog.cpp
-    test_hardening_policy.cpp
-    test_control_plane_liveness.cpp
-    test_time_source.cpp
-    test_device_selection.cpp
-    test_aggregate_buffer_clamp.cpp
-    test_device_policy.cpp
     test_splimiter.cpp
-    test_audio_recovery.cpp
     test_recover_audio.cpp
     test_scope_race.cpp
     test_heap_growth.cpp
-    test_scheduler.cpp
-    test_ring_buffer_write.cpp
-    test_ring_reader.cpp
-    test_ring_concurrency.cpp
     test_benchmark.cpp
     test_bundle_sequential.cpp
-    test_input_fallback.cpp
-    test_no_audio_device.cpp
-    test_swap_characterization.cpp
-    test_rt_alloc.cpp
+    test_rt_alloc_guest.cpp
     test_graphdef_leak.cpp
-    test_reply_routing.cpp
-    test_in_ring_drain.cpp
     test_scope_slot_ownership.cpp
-    test_scope_stream.cpp
-    test_server_shm_security.cpp
     test_buffer_alloc_bounds.cpp
-    test_realtime_thread.cpp
-    test_lanes.cpp
-    test_ring_wire_conformance.cpp
     OscTestUtils.cpp
     EngineFixture.cpp
     FakeLinkPeerProcess.cpp
     test_link_audio_integration.cpp
     test_link_ugen.cpp
-)
-
-# test_midi exercises the gated midir backend (MidiControl/ss_midi); the other MIDI
-# tests cover the always-compiled core (EngineScheduler/MidiClockOut).
-if(CLOCKWORK_ENABLE_MIDI)
-    target_sources(SuperSonicNativeTests PRIVATE test_midi.cpp)
-endif()
-
-# test_gamepad exercises the gated gilrs backend (GamepadControl/ss_gamepad).
-if(CLOCKWORK_ENABLE_GAMEPAD)
-    target_sources(SuperSonicNativeTests PRIVATE test_gamepad.cpp)
-endif()
-
-# test_osc exercises the gated OSC subsystem (OscControl: cue server + outbound).
-# test_transports covers the command transports (stream + UDS dgram), which
-# build into the SuperSonic exe rather than the shared engine lib.
-if(CLOCKWORK_ENABLE_OSC)
-    target_sources(SuperSonicNativeTests PRIVATE
-        test_osc.cpp
-        test_transports.cpp
-    )
-endif()
-
-# SHM command plane (shm_peer_plane.h): in-process round trips + the
-# cross-process crash-safety fuzz (spawns supersonic_test_shm_peer below).
-target_sources(SuperSonicNativeTests PRIVATE
-    test_shm_peer_plane.cpp
-    test_shm_peer_crash.cpp
 )
 
 target_link_libraries(SuperSonicNativeTests PRIVATE
@@ -204,12 +142,6 @@ target_include_directories(SuperSonicNativeTests PRIVATE
 # …and for the same reason, the guest's PUBLIC definition does not arrive
 # either. Its headers change shape under it.
 target_compile_definitions(SuperSonicNativeTests PRIVATE CLOCKWORK_GUEST=1)
-
-# Golden ring-wire corpus shared with the JS conformance test
-# (test/unit/ring_wire_conformance.test.mjs).
-target_compile_definitions(SuperSonicNativeTests PRIVATE
-    RING_WIRE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/ring_wire.txt"
-)
 
 target_compile_definitions(SuperSonicNativeTests PRIVATE
     CLOCKWORK_SYNTHDEFS_DIR="${SUPERSONIC_ROOT}/packages/supersonic-scsynth-synthdefs/synthdefs"
@@ -255,57 +187,6 @@ if(CLOCKWORK_LINK)
     )
     add_dependencies(SuperSonicNativeTests supersonic_test_link_peer)
 endif()
-
-# ─── Out-of-process SHM command-plane peer ──────────────────────────────────
-# Attaches to the engine's segment and writes /sync frames into the peer
-# command ring; test_shm_peer_crash.cpp spawns and SIGKILLs it to prove the
-# plane's crash-safety. Header-only dependencies (server_shm + ring writer).
-add_executable(supersonic_test_shm_peer
-    peer_shm/main.cpp
-)
-target_include_directories(supersonic_test_shm_peer PRIVATE
-    ${SUPERSONIC_ROOT}
-    ${SUPERSONIC_ROOT}/clockwork/src
-)
-# Header-only, so it inherits no usage requirements — including the C++20 the
-# headers it includes need (clockwork_path.h uses std::filesystem). State it.
-set_target_properties(supersonic_test_shm_peer PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-)
-# The peer addresses shm regions by compile-time constants, so it must be built
-# with the engine's exact profile or server_shm's layout guard rejects it. Those
-# knobs (CLOCKWORK_SHM_AUDIO_SECONDS, NODE_TREE_MIRROR_MAX_NODES, ...) ride on
-# clockwork as PUBLIC defs, which the peer can't inherit: it is header-only by
-# design and never links clockwork.
-#
-# Clockwork exports that profile as CLOCKWORK_COMPILE_DEFS — part of its
-# interface, beside CLOCKWORK_DSP and the rest.
-#
-# This said `${CLOCKWORK_COMPILE_DEFS}`, a name set NOWHERE: upstream calls it
-# SUPERSONIC_COMPILE_DEFS at top level, and the extraction renamed it and moved
-# it inside the submodule. CMake expands an unset variable to nothing and says
-# nothing, so the peer was built with NO profile defs at all and every layout
-# constant silently took its default — which the shm layout guard then
-# (correctly) refused at attach.
-if(NOT DEFINED CLOCKWORK_COMPILE_DEFS)
-    message(FATAL_ERROR
-        "CLOCKWORK_COMPILE_DEFS is not set. The shm peer must be built with "
-        "clockwork's compile profile or server_shm's layout guard will reject "
-        "it at attach. This is exported by clockwork/CMakeLists.txt.")
-endif()
-target_compile_definitions(supersonic_test_shm_peer PRIVATE
-    ${CLOCKWORK_COMPILE_DEFS}
-)
-find_package(Threads REQUIRED)
-target_link_libraries(supersonic_test_shm_peer PRIVATE Threads::Threads)
-if(UNIX AND NOT APPLE)
-    target_link_libraries(supersonic_test_shm_peer PRIVATE rt)
-endif()
-target_compile_definitions(SuperSonicNativeTests PRIVATE
-    CLOCKWORK_TEST_SHM_PEER_BINARY="$<TARGET_FILE:supersonic_test_shm_peer>"
-)
-add_dependencies(SuperSonicNativeTests supersonic_test_shm_peer)
 
 include(CTest)
 include(Catch)

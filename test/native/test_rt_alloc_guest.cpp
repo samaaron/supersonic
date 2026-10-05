@@ -1,5 +1,6 @@
 /*
- * test_rt_alloc.cpp — RT-thread allocation detector hooks + tests
+ * test_rt_alloc_guest.cpp — no allocation on the audio thread, with scsynth's
+ * own synths and FX playing (the engine's empty block is Clockwork's to test).
  *
  * Defines the global operator new/delete overrides that read the
  * thread-local flag from rt_alloc.h. The flag is set inside
@@ -172,17 +173,6 @@ TEST_CASE("RT-alloc: detector counts allocations under guard", "[rt_alloc]") {
     }
     CHECK(rt_alloc::g_allocs.load() >= 1);
     CHECK(rt_alloc::g_frees.load() >= 1);
-}
-
-TEST_CASE("RT-alloc: empty world", "[rt_alloc]") {
-    EngineFixture fx;
-    fx.stopHeadlessDriver();
-    warmup();
-
-    auto snap = runGuarded(2000);
-    INFO("allocs=" << snap.allocs << " frees=" << snap.frees);
-    CHECK(snap.allocs == 0);
-    CHECK(snap.frees == 0);
 }
 
 TEST_CASE("RT-alloc: variety of synths in steady state", "[rt_alloc]") {
