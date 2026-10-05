@@ -1105,7 +1105,9 @@ void World_Cleanup(World* world, bool unload_plugins) {
 
     HiddenWorld* hw = world->hw;
 
-    if (hw && world->mRealTime)
+    // A World_New that threw after mRealTime was set but before the driver
+    // was made has no driver to stop.
+    if (hw && world->mRealTime && hw->mAudioDriver)
         hw->mAudioDriver->Stop();
 
     world->mRunning = false;
@@ -1132,7 +1134,11 @@ void World_Cleanup(World* world, bool unload_plugins) {
         reinterpret_cast<SC_Lock*>(world->mDriverLock)->unlock();
         delete reinterpret_cast<SC_Lock*>(world->mDriverLock);
     }
-    World_Free(world, world->mTopGroup);
+    // A World_New that threw before the top group was made — a real-time
+    // pool the heap could not hold, say — has no group to free, and no pool
+    // to free it from.
+    if (world->mTopGroup)
+        World_Free(world, world->mTopGroup);
 
     for (uint32 i = 0; i < world->mNumSndBufs; ++i) {
         SndBuf* nrtbuf = world->mSndBufsNonRealTimeMirror + i;
