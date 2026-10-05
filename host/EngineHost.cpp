@@ -634,7 +634,7 @@ void printDeviceList(ClockworkEngine& engine) {
     auto current = engine.currentDevice();
     fprintf(stdout, "\n  Audio Devices\n  ─────────────\n\n");
     for (auto& dev : devices) {
-        if (dev.isWirelessTransport()) continue;
+        if (dev.wireless) continue;
         const bool isCurrent = (dev.name == current.name && dev.typeName == current.typeName);
         fprintf(stdout, "  %s %s : %s\n", isCurrent ? "▸" : " ", dev.typeName.c_str(), dev.name.c_str());
         if (dev.maxOutputChannels > 0 || dev.maxInputChannels > 0)
