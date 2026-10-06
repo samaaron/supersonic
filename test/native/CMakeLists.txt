@@ -100,6 +100,7 @@ add_executable(SuperSonicNativeTests
     test_heap_growth.cpp
     test_benchmark.cpp
     test_bundle_sequential.cpp
+    test_clear_sched.cpp
     test_rt_alloc_guest.cpp
     test_graphdef_leak.cpp
     test_scope_slot_ownership.cpp

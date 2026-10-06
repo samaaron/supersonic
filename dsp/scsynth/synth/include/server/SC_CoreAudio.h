@@ -207,7 +207,7 @@ public:
     bool Start();
     bool Stop();
 
-    void ClearSched() {}  // SuperSonic: mScheduler removed
+    void ClearSched() {}  // SuperSonic: mScheduler removed; /clearSched asks the host (SC_MiscCmds.cpp)
 
     void RunNonRealTime(float* in, float* out, int numSamples, int64 oscTime);
     void RunThread();

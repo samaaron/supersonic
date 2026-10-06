@@ -1458,10 +1458,15 @@ SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply)
 }
 
 SCErr meth_clearSched(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
+// SuperSonic: the world is not scsynth's real-time one (mRealTime is false:
+// clockwork drives it), and the bundles sent ahead are clockwork's to hold, so
+// clearing the schedule asks the host (scsynth_dsp.cpp, DspHost::flush_schedule).
+extern "C" void supersonic_flush_schedule(void);
 SCErr meth_clearSched(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
-    if (inWorld->mRealTime) {
+    if (inWorld->mRealTime && inWorld->hw->mAudioDriver) {
         inWorld->hw->mAudioDriver->ClearSched();
     }
+    supersonic_flush_schedule();
     return kSCErr_None;
 }
 

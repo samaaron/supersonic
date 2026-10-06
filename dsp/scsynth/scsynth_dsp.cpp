@@ -269,6 +269,14 @@ const DspInfo* dsp_describe(void) { return &kInfo; }
  * plumbing for a guest problem — clockwork sees only its own callbacks.
  */
 static DspHost g_host{};
+
+// scsynth's /clearSched, in a server whose scheduler is clockwork's: the
+// bundles clockwork holds for this guest ahead of their time are dropped
+// (DspHost::flush_schedule). Called from SC_AudioDriver::ClearSched, on the
+// audio thread, where the host says it may be.
+extern "C" void supersonic_flush_schedule(void) {
+    if (g_host.flush_schedule) g_host.flush_schedule(g_host.ctx);
+}
 // The guest's arena (DspConfig::arena): the host placed it for the guest's hot
 // state, and the real-time pool is carved from it when it holds one.
 static void*    g_arena       = nullptr;
