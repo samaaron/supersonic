@@ -92,7 +92,9 @@ jobs:
             name: linux-arm64
           - os: macos-latest
             name: macos-arm64
-          - os: macos-15-intel
+          # macos-26-intel: Xcode 26.6, whose libc++ has std::jthread; the
+          # macOS 15 image's Xcode 16.4 does not (clockwork/CMakeLists.txt).
+          - os: macos-26-intel
             name: macos-x64
           - os: windows-latest
             name: windows-x64
