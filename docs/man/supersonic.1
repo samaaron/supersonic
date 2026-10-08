@@ -80,7 +80,7 @@ tests and CI.
 .BI \-u " port"
 UDP command port (default: 57110). It also numbers the shared-memory segment;
 .B \-u 0
-opens neither.
+opens neither, so give one of the other command transports with it.
 .TP
 .BI \-B " addr"
 Address the UDP and TCP command ports bind (default: 127.0.0.1).
@@ -219,7 +219,9 @@ it exits with status 0. A crash
 prints a FATAL line naming the signal, with a backtrace on macOS and Linux,
 and exits with status 128 plus the signal number.
 .SH EXIT STATUS
-1 when two command transports are given;
+1 when two command transports are given, or
+.B \-u 0
+with none of the others;
 .B \-\-shm\-commands
 or
 .B \-\-shm\-endpoint
