@@ -140,12 +140,15 @@ TEST_CASE("host args: -H names the devices, scsynth's way", "[host][args]") {
     const Options noInputs = parse({ "-H", "__none__" });
     CHECK(noInputs.cfg.inputDevice == "__none__");
     CHECK(noInputs.cfg.hardwareDevice.empty());
+    CHECK(noInputs.cfg.numInputChannels == 0);   // inputs off, as it says
+    CHECK(noInputs.desiredInputChannels == 0);
     const Options followDefault = parse({ "-H", "__system__" });
     CHECK(followDefault.cfg.hardwareDevice == "__system__");
     CHECK(followDefault.cfg.inputDevice.empty());
     const Options both = parse({ "-H", "__none__", "MacBook Pro Speakers" });
     CHECK(both.cfg.inputDevice == "__none__");
     CHECK(both.cfg.hardwareDevice == "MacBook Pro Speakers");
+    CHECK(both.cfg.numInputChannels == 0);
 }
 
 // A mistake on the command line stops the boot, naming the flag: a value that
@@ -189,6 +192,17 @@ TEST_CASE("host args: -V sets scsynth's verbosity", "[host][args]") {
     CHECK(o.cfg.guestConfig.find("verbosity=2") != std::string::npos);
 }
 
+#ifdef __APPLE__
+// Booted with inputs off because the microphone permission was pending, the
+// server turns them on once it is granted — unless inputs were asked to be off.
+TEST_CASE("host: inputs wait for the microphone permission only when they were asked for", "[host]") {
+    using supersonic_host::inputsWaitForPermission;
+    CHECK(inputsWaitForPermission(ClockworkEngine::kAutoChannelCount, "not determined"));
+    CHECK(inputsWaitForPermission(2, "denied"));
+    CHECK_FALSE(inputsWaitForPermission(0, "not determined"));
+    CHECK_FALSE(inputsWaitForPermission(ClockworkEngine::kAutoChannelCount, "authorized"));
+}
+#endif
 
 TEST_CASE("host args: at most one command transport, and the segment ones need a segment", "[host][args]") {
     bool ok = true;

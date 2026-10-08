@@ -167,6 +167,9 @@ void printDeviceList(ClockworkEngine& engine);
 // stream while the permission is pending, and a background helper cannot
 // prompt). Returns the status; the host re-enables inputs when it changes.
 std::string applyMicPermissionGuard(Options& o);
+// Whether inputs, held off at boot by the guard, wait to be turned on when the
+// permission is granted.
+bool inputsWaitForPermission(int desiredInputChannels, const std::string& status);
 std::string micPermissionStatus();
 #endif
 

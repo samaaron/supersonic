@@ -179,7 +179,7 @@ int main(int argc, char* argv[]) {
 #ifdef __APPLE__
     // Booted with inputs off because the microphone permission was pending:
     // watch for the grant and enable them.
-    bool needsInputEnable = (o.cfg.numInputChannels == 0 && micStatus != "authorized");
+    bool needsInputEnable = inputsWaitForPermission(o.desiredInputChannels, micStatus);
     runUntilShutdown(engine, log, [&] {
         if (needsInputEnable && micPermissionStatus() == "authorized") {
             log("[mic-permission] status now authorized — enabling inputs");

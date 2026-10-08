@@ -272,6 +272,7 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
                     cfg.hardwareDevice = name == "__none__"   ? std::string() : name;
                     ++i;
                 }
+                if (cfg.inputDevice == "__none__") cfg.numInputChannels = 0;   // inputs off
                 break;
             }
             // Accepted for scsynth compatibility (ignored):
@@ -782,6 +783,10 @@ std::string applyMicPermissionGuard(Options& o) {
     }
     fflush(stderr);
     return status;
+}
+
+bool inputsWaitForPermission(int desiredInputChannels, const std::string& status) {
+    return desiredInputChannels != 0 && status != "authorized";
 }
 #endif
 
