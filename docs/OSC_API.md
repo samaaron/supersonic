@@ -169,9 +169,9 @@ device report follows a successful change.
 
 `→ /clockwork/devices/report [i:replyPort]`
 
-No argument, or 0: the sender becomes a notify target. `replyPort > 0`
-(UDP only): `127.0.0.1:replyPort` becomes one; a stream transport ignores
-the port, so send none. No direct reply: the report is four pushes to
+No argument, or 0: the sender becomes a notify target. `replyPort > 0`:
+over UDP, `127.0.0.1:replyPort` becomes one; over any other transport the
+sender does, as with no argument. No direct reply: the report is four pushes to
 every notify target, in this order (tolerate any):
 
 1. `← /clockwork/device-table s:currentDriver s:intendedDriver i:numDrivers`,
@@ -237,8 +237,8 @@ success.
 - Input `__none__`: inputs off. A named output in the same message is not
   switched.
 - Otherwise the switch waits 500 ms; a newer switch in that time replaces
-  it, and only the one that runs gets a `switch.done`. Naming an output
-  leaves system mode.
+  it, and only the one that runs gets a `switch.done`. A switch asked for
+  while another runs waits its turn. Naming an output leaves system mode.
 - A name over 1024 bytes is refused through `switch.done` (error
   `no audio device has a name that long`, the names cut to 64 bytes).
 
@@ -326,7 +326,7 @@ The whole clock from one snapshot, answered on the audio thread. Times are
 NTP seconds. `flags`: bit 0 Link enabled, bit 1 start/stop sync, bit 2
 Link Audio publishing.
 
-Hosts: **W**. S and N answer `/clockwork/clock/unsupported`.
+Hosts: **S N W**.
 
 ### Link session
 
@@ -382,9 +382,9 @@ Hosts: **S N W**.
 
 Holds `message` (one OSC message, clockwork's or scsynth's) and handles it
 at `when` as if it had arrived then from the same sender, so its reply
-comes back to you. `when` is an OSC timetag as `h` (the `t` type is not
-accepted) or NTP seconds as `d` or `f`; 0 or 1 means now. No reply. A
-malformed one is dropped and counted in the metrics.
+comes back to you. `when` is an OSC timetag, as `t` or `h`, or NTP
+seconds as `d` or `f`; 0 or 1 means now. No reply. A malformed one is
+refused (`malformed`) and counted in the metrics.
 
 A scheduled MIDI or OSC send leaves at its moment: the time goes with it
 to the port or the socket.
@@ -396,9 +396,10 @@ at its time.
 
 `→ /clockwork/sched/flush [s:tag]`
 
-Hosts: **S N**. W refuses it (`unknown clockwork verb`).
+Hosts: **S N W**.
 
-Drops what is pending under `tag`. No reply. No tag, or `""`, is `default`:
+Drops what is pending under `tag`. No reply; a `tag` that is not a string
+is refused (`malformed`). No tag, or `""`, is `default`:
 everything held by `/clockwork/schedule`. `synth` is the timestamped
 bundles held for scsynth.
 
@@ -431,7 +432,8 @@ Addresses under `/clockwork/midi/`.
 ### Sending
 
 `→ /clockwork/midi/out/<verb> s:port <args> [t:when]`. No reply. A
-trailing timetag sends at that moment.
+trailing timetag sends at that moment. A send whose arguments cannot be
+read is refused (`malformed`).
 
 | Verb | Arguments after `port` |
 |---|---|
@@ -580,8 +582,8 @@ Sends `packet` to `host:port` (IPv4 or IPv6; a hostname is resolved once).
 Inside `/clockwork/schedule` it leaves at its time. No reply on success.
 A send that fails is refused with `host does not resolve`,
 `message of <n> bytes exceeds the sink's widest cell (<m> bytes)` or
-`sink full`. An empty host, a port of 0 or less, or an empty packet is only
-logged.
+`sink full`. An empty host, a port of 0 or less, or an empty packet is
+refused (`malformed`).
 
 ---
 
