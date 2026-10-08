@@ -33,6 +33,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -274,7 +275,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     // Down cleanly on SIGTERM, and the log says whose main this was.
     CHECK(p.kill(SIGTERM) == 0);
     const std::string log = p.logText();
-    CHECK(log.find("front:") != std::string::npos);
+    CHECK(log.find("commands:") != std::string::npos);
     CHECK(log.find("egress: both rings drained here") != std::string::npos);
     CHECK(log.find("shutting down") != std::string::npos);
     std::filesystem::remove(p.log);
@@ -343,6 +344,85 @@ TEST_CASE("the SuperSonic binary: /clockwork/summary sends the version and featu
     CHECK(log.find("port " + std::to_string(tcpPort)) == std::string::npos);
     CHECK(log.find(":" + std::to_string(tcpPort)) == std::string::npos);
     std::filesystem::remove(p.log);
+}
+
+// scsynth's /quit: the server answers /done and ends, as Sonic Pi's daemon
+// expects when it sends one on the way out.
+TEST_CASE("the SuperSonic binary: /quit answers /done and the server shuts down cleanly",
+          "[binary]") {
+    REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
+    const int tcpPort = freePort(SOCK_STREAM);
+    Process p;
+    p.start({ "--headless", "-u", "0", "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1" });
+    Client c;
+    REQUIRE(c.connectWithin(tcpPort, 20000));
+
+    c.send(osc_test::message("/quit"));
+    CHECK(c.expect("/done").argString(0) == "/quit");
+    CHECK(p.kill(0, 10000) == 0);   // signal 0: only waits for it to end by itself
+    CHECK(p.logText().find("shutting down") != std::string::npos);
+    std::filesystem::remove(p.log);
+}
+
+namespace {
+
+// Restores an environment variable on the way out, so a case that sets one for
+// the process it spawns leaves the suite's environment as it found it.
+struct ScopedEnv {
+    std::string name, saved;
+    bool had = false;
+    ScopedEnv(const char* n, const std::string& value) : name(n) {
+        if (const char* v = std::getenv(n)) { had = true; saved = v; }
+        ::setenv(n, value.c_str(), 1);
+    }
+    ~ScopedEnv() { if (had) ::setenv(name.c_str(), saved.c_str(), 1); else ::unsetenv(name.c_str()); }
+};
+
+} // namespace
+
+// scsynth's -D: the definitions in the synthdef directory (SC_SYNTHDEF_PATH, as
+// scsynth reads it) are loaded at boot, before the first command is heard, so a
+// client's first /s_new finds them; -D 0 loads none. What -D loads is what
+// /d_loadDir loads from the same directory: the engine may refuse a file, and
+// does so the same way for both.
+TEST_CASE("the SuperSonic binary: -D 1 loads the synthdef directory before the first command, -D 0 none",
+          "[binary]") {
+    REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
+    const std::string dir = CLOCKWORK_SYNTHDEFS_DIR;
+    ScopedEnv env("SC_SYNTHDEF_PATH", dir);
+    const auto boot = [&](Process& p, Client& c, int loadGraphDefs) {
+        const int tcpPort = freePort(SOCK_STREAM);
+        p.start({ "--headless", "-u", "0", "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1",
+                  "-D", std::to_string(loadGraphDefs) });
+        REQUIRE(c.connectWithin(tcpPort, 20000));
+    };
+    const auto definitions = [](Client& c) {
+        c.send(osc_test::message("/status"));
+        return c.expect("/status.reply").argInt(4);   // numSynthDefs
+    };
+
+    int viaVerb = 0;
+    {
+        Process p;
+        Client c;
+        boot(p, c, 0);
+        CHECK(definitions(c) == 0);
+        c.send(osc_test::message("/d_loadDir", dir.c_str()));
+        CHECK(c.expect("/done").argString(0) == "/d_loadDir");
+        viaVerb = definitions(c);
+        REQUIRE(viaVerb > 0);
+        CHECK(p.kill(SIGTERM) == 0);
+        std::filesystem::remove(p.log);
+    }
+    {
+        Process p;
+        Client c;
+        boot(p, c, 1);
+        INFO(p.logText());
+        CHECK(definitions(c) == viaVerb);
+        CHECK(p.kill(SIGTERM) == 0);
+        std::filesystem::remove(p.log);
+    }
 }
 
 TEST_CASE("the SuperSonic binary: -v names the product and exits at once", "[binary]") {

@@ -296,6 +296,55 @@ defmodule TauTest do
 
   # ── Config options ───────────────────────────────────────────────────────
 
+  # ── Files: answered as the server answers them ──────────────────────────
+  #
+  # The engine reads no files. The NIF sends through supersonic::Commands, as the
+  # native server does, which reads them on a thread of its own and hands the
+  # engine bytes: a BEAM client says /d_load and /b_allocRead as any scsynth
+  # client does, and nothing is read on the audio thread.
+
+  @synthdefs Path.expand("../../../packages/supersonic-scsynth-synthdefs/synthdefs", __DIR__)
+  @samples Path.expand("../../../packages/supersonic-scsynth-samples/samples", __DIR__)
+
+  defp osc_message_s(address, str) do
+    osc_string(address) <> osc_string(",s") <> osc_string(str)
+  end
+
+  defp osc_message_is(address, int_arg, str) do
+    osc_string(address) <> osc_string(",is") <> <<int_arg::signed-big-32>> <> osc_string(str)
+  end
+
+  test "/d_load reads a definition and answers /done, as the server does" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    path = Path.join(@synthdefs, "sonic-pi-beep.scsyndef")
+    assert File.exists?(path)
+    assert :ok = :clockwork.send_osc(osc_message_s("/d_load", path))
+    assert {:ok, reply} = wait_for_reply_matching("/done", 5000)
+    assert String.contains?(reply, "/d_load")
+  end
+
+  test "/b_allocRead reads a sample into a buffer and answers /done, as the server does" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    path = Path.join(@samples, "bd_haus.flac")
+    assert File.exists?(path)
+    assert :ok = :clockwork.send_osc(osc_message_is("/b_allocRead", 0, path))
+    assert {:ok, reply} = wait_for_reply_matching("/done", 5000)
+    assert String.contains?(reply, "/b_allocRead")
+  end
+
+  test "/quit is refused: the NIF's engine is stopped with stop/0" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    assert :ok = :clockwork.send_osc(osc_message("/quit"))
+    assert {:ok, reply} = wait_for_reply_matching("/fail")
+    assert String.contains?(reply, "stop/0")
+    # And the engine carries on.
+    assert :ok = :clockwork.send_osc(osc_message("/version"))
+    assert {:ok, _} = wait_for_reply_matching("/version.reply")
+  end
+
   test "start with custom config" do
     config = start_config(%{
       sample_rate: 44100,

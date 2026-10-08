@@ -94,6 +94,11 @@ set(SCSYNTH_PLUGIN_SOURCES
     synth/plugins/sc3-plugins/DistortionUGens.cpp
     synth/plugins/sc3-plugins/MdaUGens.cpp)
 
+# Where -D looks (a host reads it; the engine reads no files). Native only.
+if(NOT EMSCRIPTEN)
+    list(APPEND SCSYNTH_PLATFORM_SOURCES scsynth_synthdef_dirs.cpp)
+endif()
+
 add_library(scsynth STATIC
     scsynth_dsp.cpp
     scsynth_options.cpp

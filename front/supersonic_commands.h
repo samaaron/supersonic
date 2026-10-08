@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Sam Aaron
 /*
- * SuperSonicFront.h — SuperSonic's socket front.
+ * supersonic_commands.h — supersonic::Commands, what a client of SuperSonic
+ * sends its commands through. The native server sends every command through
+ * it, and so does the NIF.
  *
  * The engine has no files. A sample is decoded by a CLIENT into the inbox
  * lane and handed over as an asset (/clockwork/asset/commit, keyed by buffer
@@ -9,7 +11,7 @@
  * /b_allocRead — Sonic Pi's spider, any scsynth client — is talking to
  * SuperSonic, and SuperSonic is a client of clockwork: it is the one that
  * does the decoding. This is that client, installed at the gateway
- * (clockwork/src/native/OscFront.h) where it sees every packet in and every
+ * (clockwork/src/comms/OscFront.h) where it sees every packet in and every
  * reply out, and it answers every file verb scsynth ever had:
  *
  *   /b_allocRead, /b_allocReadChannel   decode → lane, with the guest's guard
@@ -28,6 +30,9 @@
  *   /clockwork/summary                  the host's version and features, down
  *                                       the debug channel for a GUI's info
  *                                       pane (setSummary)
+ *   /quit                               /done, then the host's own stop
+ *                                       (setQuit): scsynth's way of ending a
+ *                                       server
  *
  * The engine's replies to what the front sent stay behind the front; the
  * asker hears scsynth's words — /done "/b_read" bufnum, /fail "/b_write"
@@ -45,6 +50,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
@@ -55,18 +61,32 @@ class ClockworkEngine;
 class IOscTransport;
 struct ClockworkAssetPool;
 
-class SuperSonicFront final : public OscFront {
+namespace supersonic {
+
+class Commands final : public OscFront {
 public:
     // `replies` is where the front's own answers go: the transport the
     // engine's replies also leave by, so a /done from here and a /b_info
     // from the engine reach the same socket in order.
-    SuperSonicFront(ClockworkEngine& engine, IOscTransport* replies);
-    ~SuperSonicFront() override;
+    Commands(ClockworkEngine& engine, IOscTransport* replies);
+    ~Commands() override;
 
     // What /clockwork/summary answers with: the host's to say (its product,
     // its version, what it was built with). Set before the transport starts;
     // unset, the verb is the engine's to refuse.
     void setSummary(std::string summary) { mSummary = std::move(summary); }
+
+    // What /quit does: with `stop` set, the asker hears /done /quit and then
+    // `stop` runs, as scsynth ends; unset, /quit goes on to the engine, which
+    // refuses it. Set before the transport starts.
+    void setQuit(std::function<void()> stop) { mQuit = std::move(stop); }
+
+    // Loads every definition in `dir` as /d_loadDir does, and returns once the
+    // engine has answered for each: scsynth's -D, before any client is heard.
+    // The engine's replies must already be flowing through egress(). False,
+    // with the reason in `why`, when the directory holds none or the engine
+    // does not answer.
+    bool loadDefinitions(const std::string& dir, std::string* why);
 
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
     bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
@@ -150,6 +170,15 @@ private:
     IOscTransport*   mReplies;
     Recorder         mRecorder;
     std::string      mSummary;
+    std::function<void()> mQuit;
+
+    // loadDefinitions' own asker: a token no transport hands out (theirs are
+    // small and non-zero), so its answer is caught in reply() instead of sent.
+    static constexpr uint32_t kOwnToken = 0xFFFFFFFFu;
+    std::mutex              mOwnMut;
+    std::condition_variable mOwnCv;
+    bool                    mOwnAnswered = false;
+    std::string             mOwnFailure;   // empty: /done
 
     std::mutex              mQueueMut;
     std::condition_variable mQueueCv;
@@ -174,3 +203,5 @@ private:
     // and a SIGABRT in whichever test happened to be running.
     std::thread                   mWorker;
 };
+
+}  // namespace supersonic

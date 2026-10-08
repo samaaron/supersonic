@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2026 Sam Aaron
-// See SuperSonicFront.h.
-#include "SuperSonicFront.h"
+// See supersonic_commands.h.
+#include "supersonic_commands.h"
 
 #include "IOscTransport.h"
 #include "ClockworkEngine.h"
@@ -32,10 +32,6 @@ bool isMessage(const uint8_t* data, uint32_t size, const char* address) {
     const size_t n = std::strlen(address) + 1;   // the NUL too: "/b_allocRead" is not "/b_allocReadChannel"
     return size >= n && std::memcmp(data, address, n) == 0;
 }
-
-// The gap between one /d_recv and the next: a block drains everything that
-// arrived since the last one, and each synthdef is parsed on the audio
-// thread when it does, so this is what bounds how many a block parses.
 
 // `*` and `?` in a file name, the way scsynth's glob read them.
 bool wildcardMatch(const char* pat, const char* str) {
@@ -136,10 +132,12 @@ bool decodeFor(const std::string& path, int32_t start, int32_t want, const std::
 
 } // namespace
 
-SuperSonicFront::SuperSonicFront(ClockworkEngine& engine, IOscTransport* replies)
+namespace supersonic {
+
+Commands::Commands(ClockworkEngine& engine, IOscTransport* replies)
     : mEngine(engine), mReplies(replies), mRecorder(engine), mWorker([this] { run(); }) {}
 
-SuperSonicFront::~SuperSonicFront() {
+Commands::~Commands() {
     {
         std::lock_guard<std::mutex> lock(mQueueMut);
         mStop = true;
@@ -154,8 +152,13 @@ SuperSonicFront::~SuperSonicFront() {
 
 // ── Ingress: the file verbs are ours ─────────────────────────────────────────
 
-bool SuperSonicFront::ingress(const uint8_t* data, uint32_t size, uint32_t token) {
+bool Commands::ingress(const uint8_t* data, uint32_t size, uint32_t token) {
     if (recordVerb(data, size, token)) return true;
+    if (mQuit && isMessage(data, size, "/quit")) {
+        sendDoneCmd(token, "/quit");
+        mQuit();
+        return true;
+    }
     if (!mSummary.empty() && isMessage(data, size, "/clockwork/summary")) {
         // Down the debug channel, where a GUI that tails it shows it in its
         // info pane. The leading \x01 tells it to show the lines as they are,
@@ -242,7 +245,7 @@ bool SuperSonicFront::ingress(const uint8_t* data, uint32_t size, uint32_t token
 
 // ── The worker ───────────────────────────────────────────────────────────────
 
-void SuperSonicFront::run() {
+void Commands::run() {
     for (;;) {
         Job job;
         {
@@ -262,7 +265,7 @@ void SuperSonicFront::run() {
     }
 }
 
-bool SuperSonicFront::ensurePools() {
+bool Commands::ensurePools() {
     const uint32_t in = mEngine.guestInboxBytes(), out = mEngine.guestOutboxBytes();
     if (!mEngine.guestInbox() || in == 0) return false;
     if (!mPool || mPoolBytes != in) {
@@ -279,7 +282,7 @@ bool SuperSonicFront::ensurePools() {
     return mPool != nullptr;
 }
 
-bool SuperSonicFront::takePending(Pending::What what, uint32_t token, int32_t bufnum, Pending* out) {
+bool Commands::takePending(Pending::What what, uint32_t token, int32_t bufnum, Pending* out) {
     for (auto it = mPending.begin(); it != mPending.end(); ++it) {
         if (it->what != what || it->token != token || it->bufnum != bufnum) continue;
         *out = std::move(*it);
@@ -292,7 +295,7 @@ bool SuperSonicFront::takePending(Pending::What what, uint32_t token, int32_t bu
 // /b_allocRead, /b_allocReadChannel, /b_read, /b_readChannel: decode, stage in
 // the lane, and hand over — as an asset that becomes the buffer, or as a range
 // the guest copies into one.
-void SuperSonicFront::loadSample(const Job& job) {
+void Commands::loadSample(const Job& job) {
     const bool alloc = job.kind == Kind::AllocRead || job.kind == Kind::AllocReadChannel;
     const char* cmd = job.kind == Kind::AllocRead        ? "/b_allocRead"
                     : job.kind == Kind::AllocReadChannel ? "/b_allocReadChannel"
@@ -370,7 +373,7 @@ void SuperSonicFront::loadSample(const Job& job) {
 
 // /b_write, first half: the format is checked here at once (as it was checked
 // at Init), then the buffer is asked about, and its /b_info carries on below.
-void SuperSonicFront::startWrite(const Job& job) {
+void Commands::startWrite(const Job& job) {
     if (job.leaveOpen) {
         sendFail(job.token, "/b_write", "/b_write leaveOpen is not available: this engine does not stream to disk", job.bufnum);
         return;
@@ -398,7 +401,7 @@ void SuperSonicFront::startWrite(const Job& job) {
 }
 
 // /b_write, last half: the frames are in the outbox; encode them to the file.
-void SuperSonicFront::encode(const Job& job) {
+void Commands::encode(const Job& job) {
     ClockworkAudioWriterConfig cfg {};
     cfg.struct_bytes = sizeof cfg;
     cfg.format      = job.format;
@@ -438,7 +441,7 @@ void SuperSonicFront::encode(const Job& job) {
 // is that no block ever sees more than one: a pace the engine sets, not a
 // sleep guessed here, which stacked definitions into one block whenever the
 // audio thread ran slower than the guess.
-void SuperSonicFront::loadDefs(const Job& job) {
+void Commands::loadDefs(const Job& job) {
     const char* cmd = job.kind == Kind::SynthDefDir ? "/d_loadDir" : "/d_load";
     std::vector<std::vector<uint8_t>> defs;
     for (const fs::path& p : synthDefFiles(job.path, job.kind == Kind::SynthDefDir)) {
@@ -467,7 +470,7 @@ void SuperSonicFront::loadDefs(const Job& job) {
     if (go) sendDef(job.token, first);
 }
 
-bool SuperSonicFront::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
+bool Commands::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
     for (auto& load : mDefLoads) {
         if (load.token != token) continue;
         if (load.inFlight) return false;          // the oldest is busy: wait for its reply
@@ -481,7 +484,7 @@ bool SuperSonicFront::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
     return false;
 }
 
-void SuperSonicFront::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
+void Commands::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
     std::vector<char> buf(bytes.size() + 64);
     osc::OutboundPacketStream p(buf.data(), buf.size());
     p << osc::BeginMessage("/d_recv")
@@ -492,7 +495,7 @@ void SuperSonicFront::sendDef(uint32_t token, const std::vector<uint8_t>& bytes)
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
 
-bool SuperSonicFront::egress(uint32_t token, const uint8_t* data, uint32_t size) {
+bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
     if (size < 8 || data[0] != '/') return false;
     enum { Committed, Refused, Released, Done, Fail, Info, Published, None } kind = None;
     if      (isMessage(data, size, "/clockwork/asset/committed"))   kind = Committed;
@@ -696,7 +699,7 @@ bool SuperSonicFront::egress(uint32_t token, const uint8_t* data, uint32_t size)
 // answered at once — opening a file is the receive thread's to do — in the
 // shape the engine used to answer them: record/start.reply <ok> <path|error>.
 
-bool SuperSonicFront::recordVerb(const uint8_t* data, uint32_t size, uint32_t token) {
+bool Commands::recordVerb(const uint8_t* data, uint32_t size, uint32_t token) {
     const bool start = isMessage(data, size, "/clockwork/record/start");
     const bool stop  = isMessage(data, size, "/clockwork/record/stop");
     if (!start && !stop) return false;
@@ -727,60 +730,107 @@ bool SuperSonicFront::recordVerb(const uint8_t* data, uint32_t size, uint32_t to
 
 // ── Replies, in scsynth's words ──────────────────────────────────────────────
 
-void SuperSonicFront::reply(uint32_t token, const uint8_t* data, uint32_t size) {
+void Commands::reply(uint32_t token, const uint8_t* data, uint32_t size) {
+    if (token == kOwnToken) {   // loadDefinitions' answer: /done, or /fail and why
+        std::string failure;
+        if (isMessage(data, size, "/fail")) {
+            failure = "the engine refused it";
+            try {
+                osc::ReceivedMessage m(osc::ReceivedPacket(reinterpret_cast<const char*>(data),
+                                                           static_cast<osc::osc_bundle_element_size_t>(size)));
+                auto it = m.ArgumentsBegin();
+                if (it != m.ArgumentsEnd()) ++it;   // the verb
+                if (it != m.ArgumentsEnd() && it->IsString()) failure = it->AsStringUnchecked();
+            } catch (const osc::Exception&) {}
+        }
+        {
+            std::lock_guard<std::mutex> lock(mOwnMut);
+            mOwnFailure = std::move(failure);
+            mOwnAnswered = true;
+        }
+        mOwnCv.notify_all();
+        return;
+    }
     if (mReplies) mReplies->send(token, data, size, /*networkOnly*/ false);
 }
 
-void SuperSonicFront::finish(uint32_t token, const char* cmd, int32_t bufnum, const std::vector<uint8_t>& completion) {
+bool Commands::loadDefinitions(const std::string& dir, std::string* why) {
+    {
+        std::lock_guard<std::mutex> lock(mOwnMut);
+        mOwnAnswered = false;
+        mOwnFailure.clear();
+    }
+    Job job;
+    job.kind  = Kind::SynthDefDir;
+    job.token = kOwnToken;
+    job.path  = dir;
+    {
+        std::lock_guard<std::mutex> lock(mQueueMut);
+        mQueue.push_back(std::move(job));
+    }
+    mQueueCv.notify_one();
+
+    // One definition per block, each answered before the next goes: a few
+    // hundred take well under a second. A minute is an engine not answering.
+    std::unique_lock<std::mutex> lock(mOwnMut);
+    if (!mOwnCv.wait_for(lock, std::chrono::seconds(60), [this] { return mOwnAnswered; })) {
+        if (why) *why = "the engine did not answer";
+        return false;
+    }
+    if (!mOwnFailure.empty()) {
+        if (why) *why = mOwnFailure;
+        return false;
+    }
+    return true;
+}
+
+void Commands::finish(uint32_t token, const char* cmd, int32_t bufnum, const std::vector<uint8_t>& completion) {
     if (!completion.empty())
         mEngine.ingest(completion.data(), static_cast<uint32_t>(completion.size()), token);
     sendDone(token, cmd, bufnum);
 }
 
-void SuperSonicFront::sendDone(uint32_t token, const char* cmd, int32_t bufnum) {
+void Commands::sendDone(uint32_t token, const char* cmd, int32_t bufnum) {
     char buf[128];
     osc::OutboundPacketStream p(buf, sizeof buf);
     p << osc::BeginMessage("/done") << cmd << bufnum << osc::EndMessage;
     reply(token, reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()));
 }
 
-void SuperSonicFront::sendFail(uint32_t token, const char* cmd, const std::string& why, int32_t bufnum) {
+void Commands::sendFail(uint32_t token, const char* cmd, const std::string& why, int32_t bufnum) {
     std::vector<char> buf(why.size() + 128);
     osc::OutboundPacketStream p(buf.data(), buf.size());
     p << osc::BeginMessage("/fail") << cmd << why.c_str() << bufnum << osc::EndMessage;
     reply(token, reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()));
 }
 
-void SuperSonicFront::sendDoneCmd(uint32_t token, const char* cmd) {
+void Commands::sendDoneCmd(uint32_t token, const char* cmd) {
     char buf[128];
     osc::OutboundPacketStream p(buf, sizeof buf);
     p << osc::BeginMessage("/done") << cmd << osc::EndMessage;
     reply(token, reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()));
 }
 
-void SuperSonicFront::sendFailCmd(uint32_t token, const char* cmd, const std::string& what) {
+void Commands::sendFailCmd(uint32_t token, const char* cmd, const std::string& what) {
     std::vector<char> buf(what.size() + 128);
     osc::OutboundPacketStream p(buf.data(), buf.size());
     p << osc::BeginMessage("/fail") << cmd << what.c_str() << osc::EndMessage;
     reply(token, reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()));
 }
 
-uint32_t SuperSonicFront::laneBytes() {
+uint32_t Commands::laneBytes() {
     std::lock_guard<std::mutex> lock(mMut);
     return ensurePools() ? mPoolBytes : 0;
 }
 
-uint32_t SuperSonicFront::laneFreeBytes() {
+uint32_t Commands::laneFreeBytes() {
     std::lock_guard<std::mutex> lock(mMut);
     return ensurePools() ? clockwork_asset_pool_free_bytes(mPool) : 0;
 }
 
-uint32_t SuperSonicFront::outboxFreeBytes() {
+uint32_t Commands::outboxFreeBytes() {
     std::lock_guard<std::mutex> lock(mMut);
     return (ensurePools() && mOutPool) ? clockwork_asset_pool_free_bytes(mOutPool) : 0;
 }
 
-// The product hook Main.cpp calls: SuperSonic's front is this one.
-std::unique_ptr<OscFront> clockwork_product_front(ClockworkEngine& engine, IOscTransport* transport) {
-    return std::unique_ptr<OscFront>(new SuperSonicFront(engine, transport));
-}
+}  // namespace supersonic

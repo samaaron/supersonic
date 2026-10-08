@@ -13,7 +13,7 @@
  */
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "SuperSonicFront.h"
+#include "supersonic_commands.h"
 #include "IOscTransport.h"
 #include "clockwork_audio_file.h"
 #include "clockwork_client.h"
@@ -89,7 +89,7 @@ ClockworkEngine::Config pumpedConfig() {
 struct Rig {
     EngineFixture    fx;
     RecordingSink    sink;
-    SuperSonicFront  front;
+    supersonic::Commands front;
     shm_audio_buffer* slot0 = nullptr;
     explicit Rig(const ClockworkEngine::Config& cfg = pumpedConfig()) : fx(cfg), front(fx.engine(), &sink) {
         fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {

@@ -12,7 +12,7 @@
  * down in an order that leaves no receiving thread writing a freed ring.
  * SuperSonicMain.cpp composes these and adds what is SuperSonic's alone: its
  * name and banner, and the front it stands between the socket and the engine
- * (front/SuperSonicFront.h).
+ * (front/supersonic_commands.h).
  */
 #pragma once
 
@@ -47,6 +47,9 @@ struct Options {
     // Inputs as asked for, before any platform guard zeroes them (macOS mic
     // permission): what to restore once the guard lifts.
     int         desiredInputChannels = ClockworkEngine::kAutoChannelCount;
+    // scsynth's -D: load the synthdef directory at boot (through
+    // supersonic::Commands; the engine reads no files).
+    bool        loadDefinitionsAtBoot = false;
     std::vector<std::string> warnings;    // flags not understood — reported, never applied
 };
 

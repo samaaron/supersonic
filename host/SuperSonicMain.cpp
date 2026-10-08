@@ -5,7 +5,7 @@
  *
  * SuperSonic is a client of clockwork: it embeds the engine as a library,
  * opens the command socket with clockwork's comms client library, and stands
- * its front (front/SuperSonicFront.h) between the two, answering scsynth's
+ * supersonic::Commands (front/supersonic_commands.h) between the two, answering scsynth's
  * file verbs itself. The pieces this composes are in EngineHost.h; what is
  * added here is the order they run in, the name on the banner, and the
  * front. The engine opens no socket and reads no command line: everything a
@@ -16,7 +16,8 @@
  */
 #include "clockwork_product.h"
 #include "EngineHost.h"
-#include "SuperSonicFront.h"
+#include "supersonic_commands.h"
+#include "scsynth_synthdef_dirs.h"
 #include "OscFront.h"
 #include "ClockworkEngine.h"
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
@@ -96,7 +97,7 @@ int main(int argc, char* argv[]) {
         fflush(stderr);
     };
 
-    SuperSonicFront* front = nullptr;
+    supersonic::Commands* front = nullptr;
     IOscTransport* transport = transports.select(o, engine.peerPlaneSlot(),
         [&engine, &front](const uint8_t* d, uint32_t n, uint32_t token) {
             if (front && front->ingress(d, n, token)) return;   // a file verb: the front's
@@ -109,8 +110,9 @@ int main(int argc, char* argv[]) {
     // subscriber registry (the notify audiences are the transport's); the
     // replies themselves are pulled by this process's pump, below.
     const Identity identity { CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_BANNER, SUPERSONIC_VERSION_STRING };
-    SuperSonicFront theFront(engine, transport);
+    supersonic::Commands theFront(engine, transport);
     theFront.setSummary(bannerSummary(identity));
+    theFront.setQuit([] { requestShutdown(); });   // scsynth's /quit ends the server
     front = &theFront;
     fronted.attach(transport, front);
     engine.setTransport(&fronted);
@@ -120,7 +122,7 @@ int main(int argc, char* argv[]) {
     EgressPump pump(engine, fronted, [&log](const std::string& s) {
         log(!s.empty() && s[0] == '\x01' ? s.substr(1) : s);
     });
-    log(std::string("front: ") + theFront.describe());
+    log(std::string("commands: ") + theFront.describe());
 
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
     // Reserve the tracks' lanes before the engine boots: they are laid out
@@ -139,18 +141,33 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    // The engine's replies flow from here, before any client is heard: the -D
+    // load below waits on them, and nothing goes to a client the transport has
+    // not yet met.
+    pump.start();
+    log("egress: both rings drained here, through the client API");
+
+    // scsynth's -D: the synthdef directory, loaded before the transport starts,
+    // so a client's first /s_new finds what is there.
+    if (o.loadDefinitionsAtBoot) {
+        for (const std::string& dir : scsynth_synthdef_directories()) {
+            std::string why;
+            if (theFront.loadDefinitions(dir, &why)) log("synthdefs: loaded " + dir);
+            else                                     log("synthdefs: none from " + dir + " (" + why + ")");
+        }
+    }
+
     // The transport starts now that the engine's rings exist for it to feed.
     // An alternative transport that cannot bind is fatal: the caller chose it
     // for its guarantees and must not get a deaf server.
     if (!transports.start()) {
         log("ERROR: command transport failed to start (" + transports.description() + ")");
+        pump.stop();
         fronted.detachFront();
         front = nullptr;
         engine.shutdown();
         return 1;
     }
-    pump.start();
-    log("egress: both rings drained here, through the client API");
     serveSegment(shmAttach, engine, o, log);
 
     // Inputs as asked for, once the boot-time guard has passed.

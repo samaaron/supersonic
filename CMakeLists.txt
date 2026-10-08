@@ -104,7 +104,25 @@ endif()
 # CLOCKWORK_STANDALONE defaults off for a subdirectory build, so this brings
 # in the library and the guest without clockwork's reference host or its own
 # test suite.
+# SuperSonic's NIF sends through supersonic::Commands, as its server does: the
+# command layer below is added to clockwork's NIF target, which then takes it
+# instead of having none (clockwork/src/nif/clockwork_nif_front.h).
+if(CLOCKWORK_NIF)
+    set(CLOCKWORK_NIF_FRONT ON CACHE BOOL "SuperSonic's NIF sends through supersonic::Commands" FORCE)
+endif()
+
 add_subdirectory(clockwork)
+
+if(TARGET clockwork_nif)
+    target_sources(clockwork_nif PRIVATE
+        front/supersonic_commands.cpp
+        front/Recorder.cpp
+        front/supersonic_nif_commands.cpp)
+    target_include_directories(clockwork_nif PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/front
+        ${CMAKE_CURRENT_SOURCE_DIR}/clockwork/src/native
+        ${CMAKE_CURRENT_SOURCE_DIR}/dsp/scsynth)
+endif()
 
 if(EMSCRIPTEN)
     message(STATUS "SuperSonic ${PROJECT_VERSION}: web module, clockwork + ${CLOCKWORK_DSP}")
@@ -119,7 +137,7 @@ endif()
 add_executable(SuperSonic
     host/SuperSonicMain.cpp
     host/EngineHost.cpp
-    front/SuperSonicFront.cpp
+    front/supersonic_commands.cpp
     front/Recorder.cpp)
 add_dependencies(SuperSonic scsynth)
 target_compile_definitions(SuperSonic PRIVATE

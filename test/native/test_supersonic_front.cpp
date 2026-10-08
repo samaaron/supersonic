@@ -3,7 +3,7 @@
 /*
  * test_supersonic_front.cpp — SuperSonic's socket front: the client gateway
  * that still answers /b_allocRead for a sender who has not heard the engine
- * stopped reading files (front/SuperSonicFront.h).
+ * stopped reading files (front/supersonic_commands.h).
  *
  * Sonic Pi's spider says /b_allocRead bufnum path start frames and waits for
  * /done "/b_allocRead" bufnum, or /fail "/b_allocRead" why bufnum. The front
@@ -19,7 +19,7 @@
  */
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "SuperSonicFront.h"
+#include "supersonic_commands.h"
 #include "clockwork_audio_file.h"
 #include "IOscTransport.h"
 
@@ -132,7 +132,7 @@ struct RecordingSink final : IOscTransport {
 struct Rig {
     EngineFixture   fx;
     RecordingSink   sink;
-    SuperSonicFront front;
+    supersonic::Commands front;
 
     explicit Rig(ClockworkEngine::Config cfg = EngineFixture::defaultConfig())
         : fx(cfg), front(fx.engine(), &sink) {

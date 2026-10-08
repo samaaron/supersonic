@@ -119,8 +119,9 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     cfg.callbackWatchdog = true;
     // The guest's options start from its defaults (scsynth_options.h), with
     // one host choice on top: a native process has a filesystem, so
-    // definitions in the synthdef directory are loaded at boot. -D 0 turns
-    // it off, as it does for scsynth.
+    // definitions in the synthdef directory are loaded at boot, as scsynth
+    // loads them (the host reads the files: Options::loadDefinitionsAtBoot).
+    // -D 0 turns it off, as it does for scsynth.
     clockwork::guest_config_text::set(cfg.guestConfig, "loadGraphDefs", "1");
     long inboxMb = 512;   // the host's default: generous, because it is only address space
 
@@ -255,6 +256,7 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
         const uint64_t heap = scsynth_heap_bytes(guest.realTimeMemorySize);
         cfg.heapBytes = heap > static_cast<uint64_t>(CLOCKWORK_HEAP_SIZE)
                       ? static_cast<size_t>(heap) : 0;
+        o.loadDefinitionsAtBoot = guest.loadGraphDefs != 0;
     }
     return true;
 }
