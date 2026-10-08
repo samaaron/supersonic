@@ -677,7 +677,8 @@ supersonic.send("/s_noid", 1000, 1001);
 
 ### `/g_new`
 
-Create new groups.
+Create new groups. An ID that is already in use fails with `/fail`, wherever
+that node is — including a group already in the place asked for.
 
 | Parameter | Type | Description                    |
 | --------- | ---- | ------------------------------ |

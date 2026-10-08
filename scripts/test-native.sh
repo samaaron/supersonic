@@ -6,7 +6,7 @@
 #   scripts/test-native.sh                          # build + run tests (headless)
 #   scripts/test-native.sh --debug                  # build + run tests (Debug)
 #   scripts/test-native.sh --clean                  # clean rebuild + run tests
-#   scripts/test-native.sh --device "Windows Audio" # test against real hardware
+#   scripts/test-native.sh --device "MacBook Pro Speakers" # test against a real device
 
 set -e
 
@@ -22,14 +22,16 @@ while [[ $# -gt 0 ]]; do
         --debug)    BUILD_TYPE="Debug"; shift ;;
         --clean)    CLEAN=true; shift ;;
         --device)
-            export SUPERSONIC_TEST_DEVICE="$2"
+            # The name test_scheduling_accuracy.cpp reads: without it a
+            # --device run is quietly a headless one.
+            export CLOCKWORK_TEST_DEVICE="$2"
             shift 2
             ;;
         --help|-h)
             echo "Usage: $0 [options]"
             echo "  --debug         Build in Debug mode (default: Release)"
             echo "  --clean         Remove build dir and reconfigure"
-            echo "  --device NAME   Test against a real audio driver (e.g. \"Windows Audio\")"
+            echo "  --device NAME   Test against a real audio device, by name; one that matches none opens the default"
             exit 0
             ;;
         *)

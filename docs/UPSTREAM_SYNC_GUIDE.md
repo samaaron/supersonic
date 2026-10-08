@@ -675,7 +675,7 @@ No adaptation was needed.
 **Testing:**
 - New fixture `randid_two_ids_probe` (`test/synthdefs/compile_randid_synthdefs.scd`), compiled with sclang 3.14.0-rc1: the commit's class library change is whitespace only, so any sclang compiles it the same, and the script reproduces it byte-identical.
 - `test/native/test_randid.cpp` (two RandIDs, seeded the same, draw identically on every block) and a duplicate-group case in `test/native/test_error_handling.cpp`. Against the pre-sync engine both fail — the draws differ by up to 1.94, and the second `/g_new` gets no `/fail` — and with the backports both pass.
-- `scripts/build-all.sh` (native, NIF, web): built. Native (`scripts/test-native.sh`): 560/560, the 3 device cases not run. NIF: 18 passed. Guest boundary: clean, 174 files.
+- `scripts/build-all.sh` (native, NIF, web): built. Native (`scripts/test-native.sh`): 560/560, the 3 `[benchmark]` budget cases left out as the script does. Web (Playwright): 1496 passed, 76 skipped, none failed. NIF: 18 passed. Guest boundary: clean, 174 files.
 
 ### Full sync — first since clockwork's extraction (2026-10-01)
 

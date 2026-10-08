@@ -76,10 +76,22 @@ static std::vector<float> captureTap(shm_audio_buffer* tap, uint32_t neededFrame
     return out;
 }
 
+// On hardware, the engine must really be on it, and say which. An engine that
+// cannot open the device it was given runs headless instead, and the case
+// would then pass on the headless clock having measured no device at all.
+static void requireHardware(EngineFixture& fx, const char* device) {
+    if (!device || device[0] == '\0') return;
+    const auto cur = fx.engine().currentDevice();
+    WARN("measured on " << cur.typeName << " / " << cur.name << " at "
+                        << cur.activeSampleRate << " Hz");
+    REQUIRE(fx.engine().audioSource() == ClockworkEngine::AudioSource::RealCallback);
+}
+
 TEST_CASE("relative scheduling accuracy across multiple bundles",
           "[scheduling][accuracy]") {
-    // Default to headless.  Set CLOCKWORK_TEST_DEVICE to a driver name
-    // (e.g. "Windows Audio") to test against real hardware.
+    // Default to headless.  Set CLOCKWORK_TEST_DEVICE to a device name
+    // (e.g. "MacBook Pro Speakers") to test against real hardware; a name
+    // that matches no device opens the default.
     ClockworkEngine::Config cfg;
     cfg.sampleRate   = 48000;
     cfg.bufferSize   = 128;
@@ -97,6 +109,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
         cfg.headless = true;
     }
     EngineFixture fx(cfg);
+    requireHardware(fx, device);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
 
@@ -234,6 +247,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
         cfg.headless = true;
     }
     EngineFixture fx(cfg);
+    requireHardware(fx, device);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
 
