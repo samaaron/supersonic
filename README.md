@@ -55,8 +55,8 @@ SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwo
 ### NIF
 
 - **BEAM embedded** - *clean OSC binary interface. Same protocol boundary as web and native.*
-- **Dirty scheduler aware** - *engine init never blocks normal BEAM schedulers.*
-- **PID-based notifications** - *receive OSC replies and debug output asynchronously via `enif_send()`.*
+- **Never blocks a scheduler** - *`send_osc` is a ring write; `start` and `stop` hand the slow boot and shutdown to the NIF's own thread and report back by message.*
+- **PID-based notifications** - *any number of processes register, and each receives every OSC reply and debug line as a message.*
 
 ## Demo
 
@@ -80,7 +80,12 @@ Clone with the submodule and build with CMake - see [Building from Source](docs/
 
 ### NIF
 
-Build the BEAM NIF with `cmake -B build/nif -DCLOCKWORK_NIF=ON` — see [Building from Source](docs/BUILDING.md).
+Build the BEAM NIF - no Erlang installation is needed to build it:
+
+    cmake -B build/nif -DCLOCKWORK_NIF=ON -DCMAKE_BUILD_TYPE=Release
+    cmake --build build/nif --target clockwork_nif --config Release --parallel
+
+The library lands at `build/nif/clockwork.so` (`clockwork.dll` on Windows). See the [NIF guide](docs/NIF.md) to load and drive it from Elixir or Erlang.
 
 For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION_WEB.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
 
@@ -95,6 +100,7 @@ For the full list of configuration options, see the [API Reference](docs/API.md#
 - [Workers Guide](docs/WORKERS.md) - Send OSC directly from Web Workers and AudioWorklets for the lowest latency.
 - [Metrics](docs/METRICS.md) - Performance monitoring and debugging
 - [Building from Source](docs/BUILDING.md) - WASM, native, and NIF (Erlang/Elixir) builds
+- [NIF Guide](docs/NIF.md) - Load and drive the engine from Erlang or Elixir
 - [Debian Packaging](docs/DEBIAN-PACKAGING.md) - CI-proven Debian source package: offline build, system dependencies, lintian/autopkgtest
 
 ## Support

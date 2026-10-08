@@ -164,16 +164,32 @@ exported demo site, so a web build must exist first.
 ## NIF (Erlang/Elixir)
 
 The NIF is clockwork's (`clockwork/src/nif`); built here it carries scsynth as
-its guest. clockwork vendors the `erl_nif` headers, so building needs no BEAM:
+its guest. clockwork vendors the `erl_nif` headers, so building needs no BEAM.
+
+**Prerequisites:** the native server's, above — CMake 3.24+, a C++20 compiler,
+a Rust toolchain and, on Linux, the same packages. The NIF drives an audio
+device and links clockwork's Rust subsystems, so configuring it with
+`-DCLOCKWORK_DEVICE=OFF` or `-DCLOCKWORK_RUST=OFF` is refused.
 
 ```bash
 cmake -B build/nif -DCLOCKWORK_NIF=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build/nif --target clockwork_nif --config Release --parallel
 ```
 
-The library is `build/nif/clockwork.so` (`.dll` on Windows); load it with
-`CLOCKWORK_NIF_PATH` pointing at it. `scripts/test-nif.sh` builds it and runs
-the Elixir tests in `test/nif` (Erlang/OTP 27+ and Elixir 1.18+).
+The library lands in the build root for every configuration:
+`build/nif/clockwork.so` on macOS and Linux, `build/nif/clockwork.dll` on
+Windows. It loads into Erlang/OTP 26 or later (the vendored headers are NIF
+API 2.17, which OTP 26 introduced), through the module
+`clockwork/src/nif/clockwork.erl`, which looks for it in the directory named
+by `CLOCKWORK_NIF_PATH` — the directory, not the file. The other places it
+looks, and how to use it, are in the [NIF guide](NIF.md).
+
+### NIF tests
+
+`scripts/test-nif.sh` configures and builds the library as above, then runs
+`mix test` in `test/nif` with `CLOCKWORK_NIF_PATH` set to `build/nif` and
+`SUPERSONIC_HEADLESS=1`, so the tests boot without an audio device. They need
+Elixir 1.15 or later (`test/nif/mix.exs`), on an OTP the library loads into.
 
 ## Output
 
