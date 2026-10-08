@@ -1,6 +1,6 @@
 # supersonic-scsynth-synthdefs
 
-All Sonic Pi synthdefs (120 binary `.scsyndef` files, plus 11 test and utility synthdefs the SuperSonic test suite loads) for [SuperSonic](https://github.com/samaaron/supersonic).
+Sonic Pi's synthdefs as binary `.scsyndef` files, plus a few test and utility synthdefs the SuperSonic test suite loads, for [SuperSonic](https://github.com/samaaron/supersonic).
 
 ## Installation
 
@@ -8,44 +8,47 @@ All Sonic Pi synthdefs (120 binary `.scsyndef` files, plus 11 test and utility s
 npm install supersonic-scsynth-synthdefs
 ```
 
-Use with the core engine:
+Use with the client and the engine:
 
 ```bash
-npm install supersonic-scsynth supersonic-scsynth-synthdefs
+npm install supersonic-scsynth supersonic-scsynth-core supersonic-scsynth-synthdefs
 ```
 
 ## Usage
 
 ```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest/dist/supersonic.js';
 
 const supersonic = new SuperSonic({
+  baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+  coreBaseURL: 'https://unpkg.com/supersonic-scsynth-core@latest/',
   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/'
 });
-await supersonic.init();
 
-// Load synthdefs from CDN
-await supersonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-prophet']);
+// Browsers start audio only after a click, tap or keypress
+document.querySelector('button').onclick = async () => {
+  await supersonic.init();
+
+  // Load synthdefs from CDN
+  await supersonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-tb303', 'sonic-pi-prophet']);
+};
 ```
 
-SuperSonic works directly from CDN with zero configuration.
+`synthdefBaseURL` is where synthdefs loaded by name are fetched from: `loadSynthDef('sonic-pi-beep')` fetches `sonic-pi-beep.scsyndef` from there.
 
-### Using the CDN path helper
+### From Node
+
+The package's `index.js` is a Node module. It exports the directory the files are in, the path of one, and every name:
 
 ```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
-import { SYNTHDEFS_CDN } from 'supersonic-scsynth-synthdefs';
+import { SYNTHDEFS_DIR, getSynthDefPath, SYNTHDEF_NAMES } from 'supersonic-scsynth-synthdefs';
 
-const supersonic = new SuperSonic({
-  synthdefBaseURL: SYNTHDEFS_CDN
-});
-await supersonic.init();
-await supersonic.loadSynthDefs(['sonic-pi-beep']);
+getSynthDefPath('sonic-pi-beep');   // <SYNTHDEFS_DIR>/sonic-pi-beep.scsyndef
 ```
 
 ## Included Synthdefs
 
-All 120 Sonic Pi synthdefs including:
+Sonic Pi's synthdefs, including:
 
 ### Synths
 - Basic: beep, saw, square, tri, pulse
@@ -62,7 +65,7 @@ All 120 Sonic Pi synthdefs including:
 
 ### Plucked & Percussion
 - pluck, kalimba, rhodey
-- ~~piano~~ (temporarily excluded — requires MdaPiano UGen, see build.sh)
+- piano (silent until it is given its sample table with `/supersonic/piano/wavetable`)
 
 ### Effects (fx_*)
 All standard effects:
@@ -71,7 +74,7 @@ All standard effects:
 - Filters: lpf, hpf, bpf, rbpf, nrlpf, nhpf, etc.
 - Modulation: flanger, tremolo, wobble, ring_mod
 - Distortion: distortion, bitcrusher, krush, tanh
-- Dynamics: compressor, normaliser, limiter
+- Dynamics: compressor, normaliser
 - Spatial: pan, panslicer
 - Spectral: pitch_shift, octaver, whammy
 - And more...
@@ -85,7 +88,7 @@ Complete TR-808 drum machine:
 - tom (hi, mid, lo)
 - conga (hi, mid, lo)
 
-See [synthdefs/README.md](synthdefs/README.md) for complete list.
+`SYNTHDEF_NAMES`, exported by `index.js`, lists them all, and the test synthdefs too.
 
 ## Source
 

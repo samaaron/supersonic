@@ -2,21 +2,27 @@
 
 > **Note**: This document describes the difference between two internal communication modes. If you're just starting out, you can ignore this and use SuperSonic without even knowing that the modes exist. Come back and read this when you want to understand the performance characteristics, deploy to production, or troubleshoot latency issues.
 
+These modes are the browser's. For SuperSonic running natively or as a BEAM NIF, see the [Native Guide](NATIVE.md) and the [NIF Guide](NIF.md).
+
 ## SAB and PM
 
 SuperSonic supports two modes: **PM** and **SAB**. Both modes are first-class citizens and are fully supported and tested.
 
-* **PM Mode** _(Default)_.
-  - Can be hosted on a CDN (unpkg, jsDelivr, etc.)
+SuperSonic picks one for you: SAB when the page is cross-origin isolated, PM when it is not. You can also choose (see [Configuration](#configuration)).
+
+* **PM Mode**
+  - Used when the page is not cross-origin isolated
+  - Needs no special headers, so it works on any host
   - Perfect for getting started
   - Good performance
   - Full access to a regularly updated snapshot of the aggregated metrics and scsynth node-tree.
 * **SAB Mode**
-  - Must be self-hosted
+  - Used when the page is cross-origin isolated
   - Highest performance and lowest latency and jitter
-  - Requires specific COOP/COEP HTTP headers
-  - Browser must run in a higher security mode which introduces some restrictions regarding running external JS.
+  - Requires specific COOP/COEP HTTP headers on your page
+  - Cross-origin isolation makes the browser stricter: everything the page loads from another origin must allow it (CORS, or a `Cross-Origin-Resource-Policy` header).
   - Full access to instant live updated aggregation of the metrics and the scsynth node-tree. No snapshots.
+  - Scopes (`getScope()`, `getScopes()`) and audio capture (`startCapture()`) are SAB-only. In PM mode `getScope()` returns `null`, `getScopes()` returns `[]` and `startCapture()` throws.
 
 ## Implementation Differences
 
@@ -30,23 +36,25 @@ This mode works everywhere because postMessage is universally supported. The tra
 
 In SAB mode, all OSC messages in and out of scsynth are transported via a ring buffer. This ring buffer exists within a [SharedArrayBuffer](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/SharedArrayBuffer) - a region of memory that all threads can read from and write to directly.
 
-OSC messages to scsynth go straight into the SAB if they are immediate messages or OSC Bundles (with future NTP timestamps) scheduled for the very near future. OSC Bundles for the far future go to a special holding bay called the prescheduler. All OSC bundles sent to the prescheduler are sent via postMessage (they are not in a hurry). The prescheduler ensures that the OSC Bundles get placed into the SAB ring buffer just ahead of their scheduled time.
+Every OSC message to scsynth goes straight into the ring buffer, bundles included, however far in the future their timestamps are. Timing is the engine's job, in both modes: its audio thread reads each message, and holds a bundle in its scheduler until the bundle's time comes.
 
 This provides lower latency and more consistent timing because there's no serialisation or event loop scheduling overhead on the path to scsynth. However, SharedArrayBuffer requires specific security headers due to [Spectre vulnerability](https://en.wikipedia.org/wiki/Spectre_(security_vulnerability)) mitigations.
 
 ## Configuration
 
-### postMessage Mode (Default)
-
-No configuration needed - just create a SuperSonic instance:
+Without a `mode`, SuperSonic uses SAB if the page is cross-origin isolated and PM otherwise:
 
 ```javascript
 const sonic = new SuperSonic({
-  baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/'
+  baseURL: '/assets/supersonic/'
 });
 ```
 
-Or explicitly specify the mode:
+`sonic.mode` tells you which one it picked.
+
+### postMessage Mode
+
+To use PM even on an isolated page:
 
 ```javascript
 const sonic = new SuperSonic({
@@ -57,7 +65,7 @@ const sonic = new SuperSonic({
 
 ### SAB Mode
 
-Specify `mode: 'sab'` in the constructor:
+To insist on SAB:
 
 ```javascript
 const sonic = new SuperSonic({
@@ -66,7 +74,7 @@ const sonic = new SuperSonic({
 });
 ```
 
-If the required headers are not present, `init()` will throw an error.
+If the page is not cross-origin isolated, `init()` will throw an error.
 
 ## Server Headers for SAB Mode
 
@@ -78,6 +86,8 @@ Cross-Origin-Embedder-Policy: require-corp
 ```
 
 These headers enable [cross-origin isolation](https://web.dev/articles/coop-coep), which is required for SharedArrayBuffer to be available.
+
+They are headers on your own server's responses. SuperSonic's files can still come from a CDN, as long as it sends CORS headers (unpkg and jsDelivr do): the client loads cross-origin workers and the AudioWorklet from blob URLs, which run with your page's isolation.
 
 ### Server Configuration Examples
 
@@ -151,13 +161,12 @@ export default {
 
 ## Hybrid Approach
 
-You can use SAB mode for low-latency communication while still loading samples and synthdefs from a CDN. This gives you the best of both worlds:
+You can serve SuperSonic's client and engine yourself while loading samples and synthdefs from a CDN:
 
 ```javascript
 const sonic = new SuperSonic({
-  // Local core (enables SAB mode with proper headers)
+  // Local client and engine
   baseURL: '/assets/supersonic/',
-  mode: 'sab',
   // CDN for large assets
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/',
   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
@@ -170,31 +179,27 @@ See `example/hybrid.html` for a complete example.
 
 ### Ring Buffer Coordination (SAB Mode)
 
-The SAB ring buffer uses a CAS mutex for coordination. Multiple producers (main thread, workers) can write to the buffer, and a single consumer (audio worklet) reads from it. Lock acquisition has two phases: a brief `compareExchange` spin (avoids a kernel round-trip in uncontended cases), then `Atomics.wait()` which sleeps in the OS scheduler until woken by `Atomics.notify()`.
+Several producers - the main thread, and each worker with an [OscChannel](WORKERS.md) - write to the ring buffer, and a single consumer (the audio worklet) reads from it. Each producer writes the ring itself, running the engine's own ring code over the shared memory.
 
-**Lock contention handling:**
-- Workers use both phases: a brief CAS spin, then `Atomics.wait()` for guaranteed acquisition
-- The main thread cannot call `Atomics.wait()` (a browser restriction), so it uses an optimistic approach: a single CAS attempt, and if the lock isn't immediately available, fall back to sending via the prescheduler worker (which receives messages via postMessage, so the fallback is always non-blocking)
-
-(All messages are guaranteed to be delivered - the `ringBufferDirectWriteFails` metric tracks how often the main thread falls back to the prescheduler path (this is not an error condition).)
+Producers take turns through a spinlock. It is held only for a message header and a copy of the message's bytes, so a producer that finds it taken waits a moment rather than giving up, and nothing calls `Atomics.wait()` to send. A send fails only when the ring is full: that message is dropped and counted in the `ringBufferDirectWriteFails` metric. There is no fallback path.
 
 ### Metrics Collection
 
 Both modes support the same metrics, but collection differs:
 
 - **SAB mode**: Metrics are written directly to a shared memory region. Reading metrics is a cheap `Atomics.load()` from shared memory.
-- **postMessage mode**: Aggregated snapshots of the metrics are sent to the main thread periodically (default: every 150ms). Reading metrics accesses this cached snapshot.
+- **postMessage mode**: Aggregated snapshots of the metrics are sent to the main thread periodically (default: every 150ms, set by `snapshotIntervalMs`). Reading metrics accesses this cached snapshot.
 
 In both modes, calling `getMetrics()` is cheap and safe for high-frequency use (e.g., in `requestAnimationFrame`).
 
 
 ## Troubleshooting
 
-### "SharedArrayBuffer is not defined"
+### "Missing required features for sab mode"
 
-This error occurs when SAB mode is requested but the required headers are missing. Solutions:
+This error occurs when SAB mode is requested but the page is not cross-origin isolated. Solutions:
 
-1. Switch to postMessage mode: `mode: 'postMessage'`
+1. Leave `mode` out, or switch to postMessage mode: `mode: 'postMessage'`
 2. Configure your server to send COOP/COEP headers (see above)
 3. Check that all resources are served with the correct headers
 
@@ -205,18 +210,10 @@ Verify that:
 2. Headers are sent on all responses (HTML, JS, WASM)
 3. You're not loading cross-origin resources without proper CORS headers
 
-### Checking if SAB is available
+### Checking if the page is cross-origin isolated
 
-You can check if SharedArrayBuffer is available before initialising:
+SuperSonic decides with `crossOriginIsolated`, and you can check it yourself before initialising, or in the browser console:
 
 ```javascript
-const sabAvailable = typeof SharedArrayBuffer !== 'undefined';
-console.log('SAB available:', sabAvailable);
+console.log('Cross-origin isolated:', crossOriginIsolated);
 ```
-
-### Browser DevTools
-
-In Chrome DevTools, you can verify cross-origin isolation:
-1. Open DevTools (F12)
-2. Go to Application tab
-3. Check "Cross-Origin Isolated" under Security

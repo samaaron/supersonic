@@ -4,22 +4,20 @@ This document describes the key differences between SuperSonic and the original 
 
 ## Overview
 
-SuperSonic is a port of scsynth designed to run inside a browser's AudioWorklet. While it maintains compatibility with most of the scsynth API, certain features are unfortunately unavailable due to the constraints of the AudioWorklet environment.
+SuperSonic is a port of scsynth that runs on three hosts: inside a browser's AudioWorklet (the web), as a standalone native server on macOS, Windows and Linux, and as a BEAM NIF. It keeps most of the scsynth API. Some features are unavailable, some because of the AudioWorklet and some because the engine has no files on any host. Each difference below says which hosts it applies to; one that names none applies to all three.
 
-## AudioWorklet Constraints
+## Constraints
 
-The AudioWorklet environment imposes strict limitations:
+| Constraint | Hosts | Impact |
+|------------|-------|--------|
+| **No threads of its own** | All | scsynth runs on the audio thread, and its asynchronous commands run inline there |
+| **No malloc in audio thread** | All | Memory comes from pools set up before the engine runs |
+| **No filesystem access** | All | The engine opens no files: the web client, and `supersonic::Commands` on the native server and the NIF, read and decode them for it (see [Filesystem Commands](#filesystem-commands)) |
+| **No network sockets** | Web | OSC comes from JavaScript only. The native server takes UDP, TCP and more |
+| **No DOM access** | Web | No mouse/keyboard state queries |
+| **No main() entry point** | All | SuperSonic's scsynth doesn't "run": it gets called |
 
-| Constraint | Impact |
-|------------|--------|
-| **No thread spawning** | Single-threaded execution only |
-| **No malloc in audio thread** | All memory must be pre-allocated |
-| **No filesystem access** | No disk I/O operations |
-| **No network sockets** | No UDP/TCP communication |
-| **No DOM access** | No mouse/keyboard state queries |
-| **No main() entry point** | SuperSonic's scsynth doesn't "run" it gets called.  |
-
-These constraints mean that certain scsynth features simply cannot work in the browser environment and this document covers the differences.
+These constraints mean that certain scsynth features cannot work, and this document covers the differences.
 
 ---
 
@@ -38,7 +36,7 @@ When you attempt to load a synthdef that references an unsupported UGen (via `/d
 
 This allows you to programmatically detect when a synthdef can't be loaded and handle it appropriately.
 
-**Note:** This is slightly different beheviour to the original scsynth, which silently sends `/done` even when synthdef loading fails due to a missing UGen.
+**Note:** This is slightly different behaviour to the original scsynth, which silently sends `/done` even when synthdef loading fails due to a missing UGen.
 
 ### Unsupported UGen List
 
@@ -46,7 +44,7 @@ The following UGens from standard SuperCollider are not available in SuperSonic:
 
 ### User Interface UGens
 
-These require DOM/window access which is unavailable in AudioWorklet:
+These read the mouse and keyboard from the window system. They are not built on any host, and an AudioWorklet has no window to read in any case:
 
 | UGen | Description |
 |------|-------------|
@@ -55,7 +53,7 @@ These require DOM/window access which is unavailable in AudioWorklet:
 | `MouseButton` | Mouse button state |
 | `KeyState` | Keyboard key state |
 
-**Workaround:** Use control buses updated from JavaScript based on mouse/keyboard events:
+**Workaround:** Use control buses, set by the client from mouse/keyboard events with `/c_set`. On the web:
 ```javascript
 document.addEventListener('mousemove', (e) => {
   const x = e.clientX / window.innerWidth;
@@ -65,7 +63,7 @@ document.addEventListener('mousemove', (e) => {
 
 ### Disk I/O UGens
 
-These require filesystem access:
+These stream from and to files, and the engine has no files on any host:
 
 | UGen | Description |
 |------|-------------|
@@ -73,19 +71,17 @@ These require filesystem access:
 | `DiskOut` | Record audio to disk |
 | `VDiskIn` | Variable-rate disk streaming |
 
-**Workaround:** Pre-load samples into buffers using `loadSample()` or `/b_allocFile`.
+**Workaround:** Pre-load samples into buffers. On the web use `loadSample()` or `/b_allocFile`; on the native server, `/b_allocRead` (see [Filesystem Commands](#filesystem-commands)).
 
-### Network/Link UGens
+### Link UGens
 
-These require network socket access:
+| UGen | Status |
+|------|--------|
+| `LinkTempo` | Built, read-only: the session tempo in cycles per second |
+| `LinkPhase` | Built, read-only: the phase within the quantum given as its input |
+| `LinkJump` | Not available |
 
-| UGen | Description |
-|------|-------------|
-| `LinkTempo` | Ableton Link tempo sync |
-| `LinkPhase` | Ableton Link phase |
-| `LinkJump` | Ableton Link position jump |
-
-**Note:** These were added to upstream SuperCollider in [PR #6947](https://github.com/supercollider/supercollider/pull/6947) and are intentionally excluded from SuperSonic.
+These were added to upstream SuperCollider in [PR #6947](https://github.com/supercollider/supercollider/pull/6947). In SuperSonic `LinkTempo` and `LinkPhase` read clockwork's session clock rather than Ableton Link itself, so they work on every host. Where Link is running (natively), the session clock is Link's; elsewhere, including the web, it is clockwork's own. Upstream's write side is gone: `LinkTempo` cannot set the tempo and `LinkJump` is not built. Change the session's tempo with clockwork's `/clockwork/clock/` verbs instead.
 
 ### Bela Hardware UGens
 
@@ -117,53 +113,60 @@ These UGens are not currently compiled into SuperSonic:
 | `SpecPcile` | Spectral percentile |
 | `SpecCentroid` | Spectral centroid |
 
-**Note:** These could potentially be added in the future as they don't have fundamental AudioWorklet incompatibilities. If you need these, please [open an issue](https://github.com/samaaron/supersonic/issues).
+**Note:** These could potentially be added in the future as they don't have fundamental incompatibilities with any host. If you need these, please [open an issue](https://github.com/samaaron/supersonic/issues).
 
 ---
 
-## OSC Commands the Browser Cannot Serve
+## OSC Commands Some Hosts Cannot Serve
 
-Nothing is refused by the client: every verb goes to the engine, and the
-engine's own `/fail` is the answer for the ones a browser cannot serve. (Until
+On the web, nothing is refused by the client: every verb goes to the engine, and the
+engine's own `/fail` is the answer for the ones it cannot serve. (Until
 2026-09-13 the client refused these itself with a friendlier message; the
 engine's answer is the honest one, and `/error -1`/`-2` — quieting one
-bundle's failures — is a standard scsynth idiom the refusal forbade.)
+bundle's failures — is a standard scsynth idiom the refusal forbade.) The
+exceptions are `/b_alloc`, `/b_allocRead`, `/b_allocReadChannel` and
+`/b_allocFile`, which the client rewrites to `/b_allocPtr` before they are
+sent.
 
 ### Filesystem Commands
 
-No filesystem in the browser, so file-based commands fail:
+The engine has no files on any host. Each host deals with the file verbs differently:
 
-| Command | Alternative |
-|---------|-------------|
-| `/d_load` | `loadSynthDef()` or `/d_recv` with bytes |
-| `/d_loadDir` | `loadSynthDefs()` |
-| `/b_read` | `loadSample()` |
-| `/b_readChannel` | `loadSample()` |
-| `/b_allocRead` | `loadSample()` or `/b_allocFile` |
-| `/b_allocReadChannel` | `loadSample()` (channel selection not supported) |
-| `/b_write` | Not available |
-| `/b_close` | Not available |
+| Command | Web | Native server and NIF |
+|---------|-----|-----------------------|
+| `/d_load` | Refused with `/fail`: use `loadSynthDef()`, or `/d_recv` with the bytes | Reads the file and sends `/d_recv` |
+| `/d_loadDir` | Refused with `/fail`: use `loadSynthDefs()` | Reads each file and sends `/d_recv` |
+| `/b_read` | Fails: use `loadSample()` | Decodes the file |
+| `/b_readChannel` | Fails: use `loadSample()` | Decodes the file |
+| `/b_allocRead` | Rewritten to `/b_allocPtr`: the client fetches and decodes the file | Decodes the file |
+| `/b_allocReadChannel` | Rewritten to `/b_allocPtr`, with channel selection | Decodes the file |
+| `/b_write` | Fails | Encodes the file (`leaveOpen` is not available) |
+| `/b_close` | Fails | Fails |
+
+The native server and the NIF send every command through `supersonic::Commands` (`front/supersonic_commands.h`), which sits between their clients and the engine. It does the file work on a thread of its own and answers with scsynth's replies, such as `/done /b_allocRead bufnum`. On the web, the path given to `/b_allocRead` is fetched over HTTP, through `sampleBaseURL` when it is a bare file name.
+
+A file command that reaches the engine itself — on the web, or over the native server's `--shm-commands` plane — is refused with `/fail`, naming what to send instead.
 
 ### Scheduling and Control Commands
 
 | Command | Note |
 |---------|------|
-| `/clearSched` | Works as in scsynth. `purge()` additionally clears the client's own queue |
-| `/error` | Works as in scsynth: `/error 0` silences `/fail`, which the client's own waits then time out on |
-| `/quit` | There is no process to quit; `destroy()` shuts the engine down |
+| `/clearSched` | Drops the bundles clockwork holds for scsynth (up to v0.89.0 it left them to fire). On the web, `purge()` also drops what is still in the IN ring and everything else the scheduler holds |
+| `/error` | Works as in scsynth: `/error 0` silences `/fail`; on the web, the client's own waits then time out |
+| `/quit` | Native server: answers `/done /quit` and shuts down, as scsynth does. NIF: fails, pointing at `clockwork:stop/0`. Web: fails with "not supported in SuperSonic - use destroy() instead"; `destroy()` shuts the engine down |
 
 ### Plugin Commands
 
 | Command | Status |
 |---------|--------|
-| `/cmd` | No commands currently registered |
-| `/u_cmd` | No UGens currently define commands |
+| `/cmd` | Only upstream's demo command, `pluginCmdDemo`, is registered |
+| `/u_cmd` | Only upstream's demo UGen, `UnitCmdDemo`, defines commands (`setValue`, `testCommand`) |
 
 ### Buffer Commands
 
 | Command | Reason |
 |---------|--------|
-| `/b_setSampleRate` | WebAudio automatically resamples buffers to context sample rate |
+| `/b_setSampleRate` | Not a command of the engine on any host. A buffer's sample rate is set when it is allocated |
 
 For full details, see [SCSYNTH_COMMAND_REFERENCE.md](SCSYNTH_COMMAND_REFERENCE.md#unsupported-commands).
 
@@ -196,11 +199,11 @@ SuperSonic adds functionality not present in standard scsynth:
 
 When RT memory is exhausted during UGen construction, upstream scsynth leaves dead synth nodes that never free themselves — no `DoneAction` fires because all units are marked as done at construction time. These "zombie" nodes consume RT memory indefinitely and can prevent all future synth creation.
 
-SuperSonic detects when all units in a synth are dead at construction time and schedules the node for cleanup automatically, using the same mechanism as `DoneAction=2` (`freeSelf`). This is a no-op when any unit survived construction, preserving upstream behavior exactly.
+SuperSonic detects when all units in a synth are dead at construction time and schedules the node for cleanup automatically, using the same mechanism as `DoneAction=2` (`freeSelf`). This is a no-op when any unit survived construction, preserving upstream behaviour exactly.
 
-### `/b_allocFile` - Inline Audio Loading
+### `/b_allocFile` - Inline Audio Loading (web)
 
-Load audio from inline file data without needing a URL:
+On the web, load audio from inline file data without needing a URL:
 
 ```javascript
 const response = await fetch("sample.flac");
@@ -208,25 +211,23 @@ const fileBytes = new Uint8Array(await response.arrayBuffer());
 supersonic.send("/b_allocFile", 0, fileBytes);
 ```
 
-Supports FLAC, WAV, OGG, MP3, and any format the browser's `decodeAudioData()` handles.
+Supports FLAC, WAV, OGG, MP3, and any format the browser's `decodeAudioData()` handles. The client decodes the file and sends `/b_allocPtr` in its place. The native server and the NIF have no `/b_allocFile`.
 
 ### JavaScript API
 
-SuperSonic provides a high-level JavaScript API that wraps the OSC protocol:
+On the web, SuperSonic provides a high-level JavaScript API that wraps the OSC protocol:
 
 | Method | Description |
 |--------|-------------|
 | `loadSynthDef(name)` | Fetch and load a synthdef by name |
 | `loadSynthDefs(names)` | Load multiple synthdefs |
 | `loadSample(bufnum, url)` | Fetch and load audio into a buffer |
-| `cancelAll()` | Cancel all scheduled OSC bundles |
-| `cancelTag(tag)` | Cancel bundles with specific tag |
-| `cancelSession(session)` | Cancel bundles from specific session |
+| `purge()` | Drop every scheduled bundle and everything still waiting in the IN ring |
 | `destroy()` | Clean shutdown |
 
 ### Dual Communication Modes
 
-SuperSonic supports two communication modes: **postMessage** (default, works everywhere) and **SAB** (lower latency, requires server headers). Both are fully supported and tested. See [Communication Modes](MODES.md) for details.
+On the web, SuperSonic supports two communication modes: **postMessage** (works everywhere) and **SAB** (lower latency, requires server headers). The default is SAB when the page is cross-origin isolated (`crossOriginIsolated`) and postMessage otherwise. Both are fully supported and tested. See [Communication Modes](MODES.md) for details.
 
 ---
 
@@ -245,7 +246,7 @@ with `y * |y|` reconstruction for squared, and `cbrt` for cubed. Non-negative
 envelopes are bit-identical to upstream; negative ranges ramp smoothly with the
 same eased feel mirrored below zero.
 
-Guarded by `#ifdef SUPERSONIC` in `LFUGens.cpp` (EnvGen, `GET_ENV_VAL`) and
+Guarded by `#ifdef CLOCKWORK_GUEST` in `LFUGens.cpp` (EnvGen, `GET_ENV_VAL`) and
 `DemandUGens.cpp` (demand-rate envelopes), with upstream code preserved in the
 `#else` branches. Regression spec: `test/envgen_signed_shapes.spec.mjs`.
 
@@ -272,25 +273,25 @@ Same guard convention as above. Regression spec: `test/envgen_exp_zero.spec.mjs`
 
 | scsynth | SuperSonic |
 |---------|------------|
-| Multi-threaded (audio thread + NRT thread + network thread) | Single-threaded (AudioWorklet) |
-| Thread-safe queues for OSC | SharedArrayBuffer ring buffers |
-| Async command processing on NRT thread | All commands processed synchronously |
+| Multi-threaded (audio thread + NRT thread + network thread) | scsynth is single-threaded on every host: it runs on the audio thread (the AudioWorklet on the web; natively the device callback, or clockwork's headless thread when there is no device). Natively, clockwork's control and network threads sit around it |
+| Thread-safe queues for OSC | Shared-memory ring buffers (on the web, in postMessage mode, the worklet writes posted messages onto the same ring) |
+| Async command processing on NRT thread | All commands processed synchronously, on the audio thread |
 
 ### Memory Model
 
 | scsynth | SuperSonic |
 |---------|------------|
-| Dynamic allocation via malloc | Pre-allocated memory pool |
-| Grows as needed | Fixed size at boot |
-| OS-managed | WASM linear memory |
+| Dynamic allocation via malloc | Pre-allocated memory pools, on every host |
+| Grows as needed | The real-time pool is fixed at boot. On the web, the sample-buffer pool grows as samples load, from 4 MB up to 768 MB by default |
+| OS-managed | Web: WASM linear memory. Native: memory clockwork claims when the engine starts |
 
 ### OSC Transport
 
 | scsynth | SuperSonic |
 |---------|------------|
-| UDP/TCP network sockets | SharedArrayBuffer or postMessage |
-| Multiple network clients | Single JavaScript client |
-| External OSC sources | Only local JavaScript |
+| UDP/TCP network sockets | Web: SharedArrayBuffer or postMessage. Native server: UDP by default, or TCP, a Unix socket, a named pipe or shared memory. NIF: `send_osc/1` |
+| Multiple network clients | Web: a single JavaScript client. Native server: many clients. NIF: every registered process hears every reply |
+| External OSC sources | Web: only local JavaScript. Native server: any OSC client that can reach its port (it listens on 127.0.0.1 unless `-B` names another address) |
 
 ---
 

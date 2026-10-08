@@ -7,23 +7,24 @@
 > clockwork's own docs (`clockwork/docs/`) are the reference for it. What is
 > SuperSonic's is the scsynth guest (`dsp/scsynth`), the JavaScript on top of
 > clockwork's client (`js/supersonic.js` extends `Clockwork`), the native
-> process (`host/`, `front/`) and the packages. The mechanisms below still
-> hold; where a file is named, it now lives under `clockwork/` unless it is
-> one of those.
+> process (`host/`, `front/`) and the packages. Files below are named by
+> their path from the repository root.
 
-SuperSonic ports SuperCollider's scsynth audio engine to run in a WebAssembly AudioWorklet. This document explains the architecture and the design decisions behind it.
+SuperSonic ports SuperCollider's scsynth audio engine to three hosts: the web, where it runs in a WebAssembly AudioWorklet; a standalone native server on macOS, Windows and Linux; and a BEAM NIF. This document covers the web host and the design decisions behind it. The native server is described in [NATIVE.md](NATIVE.md) and the NIF in [NIF.md](NIF.md). Where a section also holds for those hosts, it says so.
 
 ## Core Challenges
 
 ### 1. AudioWorklet Constraints
-The WASM scsynth runs inside an AudioWorklet with strict requirements:
+On the web, the WASM scsynth runs inside an AudioWorklet with strict requirements:
 - No thread spawning
 - No malloc (memory must be pre-allocated)
 - No I/O
 - No main() entry point
 - No automatic C++ initializer calls
 
-The original scsynth was multi-threaded with separate threads for I/O and audio graph calculations. We bypass this by using SharedArrayBuffer memory accessible to both WASM and JS.
+The first three are the rule for the audio thread on every host: natively the device callback (or, with no device, clockwork's headless thread) drives the engine, and the guest may not allocate, lock or do I/O there either (`clockwork/src/dsp_api.h`).
+
+The original scsynth was multi-threaded with separate threads for I/O and audio graph calculations. On every host SuperSonic's scsynth is single-threaded instead: it runs on the audio thread, and its asynchronous commands run their stages inline there (`mRealTime` is false). On the web, OSC travels between JavaScript and the worklet through SharedArrayBuffer memory, or by postMessage where there is none.
 
 ### 2. Memory Management Without SAB
 SharedArrayBuffer requires COOP/COEP headers, preventing CDN deployment. We created **postMessage mode** as an alternative that works anywhere but with slightly higher latency.
@@ -41,9 +42,9 @@ Both modes are first-class citizens. All tests must pass in both modes. See [Com
 
 ### The Problem
 
-OSC bundles carry NTP timestamps indicating when they should execute. All timestamps throughout SuperSonic are NTP-based (seconds since 1900-01-01). However, the AudioWorklet has no access to `performance.now()` or the system clock - it only receives the audio clock timestamp (`currentTime`) passed into `process()`.
+OSC bundles carry NTP timestamps indicating when they should execute. All timestamps throughout SuperSonic are NTP-based (seconds since 1900-01-01), on every host. On the web, however, the AudioWorklet has no access to `performance.now()` or the system clock - it only receives the audio clock timestamp (`currentTime`) passed into `process()`.
 
-The AudioWorklet must translate between audio clock and NTP to know when to dispatch scheduled bundles to scsynth.
+The AudioWorklet must translate between audio clock and NTP to know when to dispatch scheduled bundles to scsynth. The rest of this section is about that translation, so it is web-only: natively there is no AudioContext, and each audio callback takes the block's NTP time from the system clock, smoothed from one callback to the next.
 
 ### OSC Bundle Timestamps
 
@@ -68,8 +69,10 @@ ntpStartTime = currentNTP - audioContext.currentTime
 The AudioWorklet can then convert audio time to NTP:
 
 ```
-currentNTP = audioContextTime + ntpStartTime + driftOffset
+currentNTP = audioContextTime + ntpStartTime + driftOffset + clockOffset
 ```
+
+`clockOffset` is zero unless set with `setClockOffset()`, for syncing with another system.
 
 ### Drift Management
 
@@ -80,10 +83,10 @@ We measure and correct for drift:
 1. **Main thread** periodically (every 1000ms) compares expected vs actual `contextTime`:
    ```
    expectedContextTime = currentNTP - ntpStartTime
-   driftMs = (expectedContextTime - actualContextTime) * 1000
+   driftUs = (expectedContextTime - actualContextTime) * 1000000
    ```
 
-2. **Drift offset** is written to shared memory (SAB mode) or sent via postMessage (PM mode)
+2. **Drift offset** is written to shared memory (SAB mode) or sent via postMessage (PM mode), in microseconds
 
 3. **AudioWorklet** applies drift correction when converting timestamps
 
@@ -112,59 +115,52 @@ Main Thread                          AudioWorklet
 
 | Component | File |
 |-----------|------|
-| NTP timing | `js/lib/ntp_timing.js` |
-| Timing utilities | `js/lib/timing_utils.js` |
-| Timing constants | `js/timing_constants.js` |
+| NTP timing and drift | `clockwork/js/lib/ntp_timing.js` |
 
 ## Component Overview
 
+This is the web host. Natively, the socket or the NIF writes onto the same IN ring, and the engine's control thread drains the egress rings.
+
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           Main Thread                                   │
-│  ┌──────────────┐    ┌─────────────┐                                    │
-│  │  SuperSonic  │───▶│  OSCChannel │──┬─────────────────────────────┐   │
-│  │  (API entry) │    │  (router)   │  │                             │   │
-│  └──────────────┘    └─────────────┘  │                             │   │
-│                                       │                             │   │
-│         Immediate/near-future OSC     │    Far-future bundles       │   │
-│                   │                   │         (>500ms)            │   │
-└───────────────────┼───────────────────┼─────────────────────────────┘   │
-                    │                   │                                 │
-                    ▼                   ▼                                 │
-┌──────────────────────────┐  ┌─────────────────────┐                     │
-│      AudioWorklet        │  │   Prescheduler      │                     │
-│  ┌────────────────────┐  │  │      Worker         │                     │
-│  │ SAB: ring buffer   │  │  │                     │                     │
-│  │ PM: postMessage    │  │  │  Parks bundles,     │                     │
-│  │       queue        │  │  │  dispatches when    │◀────────────────────┘
-│  └─────────┬──────────┘  │  │  ready              │
-│            │             │  └──────────┬──────────┘
-│            ▼             │             │
-│  ┌────────────────────┐  │             │ SAB: ring buffer write
-│  │ WASM Scheduler     │◀─┼─────────────┘ PM: postMessage
-│  │ (sample-accurate)  │  │
-│  └─────────┬──────────┘  │
-│            │             │
-│            ▼             │
-│  ┌────────────────────┐  │
-│  │     scsynth        │  │
-│  │   (audio engine)   │  │
-│  └─────────┬──────────┘  │
-│            │             │
-│     Reply OSC / Debug    │
-│            │             │
-│            ▼             │
-│  ┌────────────────────┐  │
-│  │ OUT/DEBUG buffers  │  │
-│  │   (ring buffers)   │  │
-│  └────────┬───────────┘  │
-│           │ PM: read     │
-│           │ here and     │
-│           │ postMessage  │
-│           │ to main      │
-└───────────┼──────────────┘
-            │ SAB: ring buffer
-            ▼
+┌──────────────────────────────────────────────────┐
+│                   Main Thread                    │
+│  ┌──────────────┐    ┌──────────────┐            │
+│  │  SuperSonic  │───▶│  OscChannel  │            │
+│  │  (API entry) │    │ (transport)  │            │
+│  └──────────────┘    └──────┬───────┘            │
+│                             │                    │
+│          every message, whatever its timetag     │
+└─────────────────────────────┼────────────────────┘
+                              │ SAB: IN ring buffer write
+                              │ PM: postMessage
+                              ▼
+┌──────────────────────────────────────────────────┐
+│                  AudioWorklet                    │
+│  ┌────────────────────────────────────────────┐  │
+│  │ IN ring buffer                             │  │
+│  │ (PM: the worklet writes posted messages)   │  │
+│  └─────────────────────┬──────────────────────┘  │
+│                        ▼                         │
+│  ┌────────────────────────────────────────────┐  │
+│  │ OscIngress: due now → scsynth              │  │
+│  │ timed bundles → scheduler, fired when due  │  │
+│  │ (sample-accurate)                          │  │
+│  └─────────────────────┬──────────────────────┘  │
+│                        ▼                         │
+│  ┌────────────────────────────────────────────┐  │
+│  │     scsynth (audio engine)                 │  │
+│  └─────────────────────┬──────────────────────┘  │
+│                        │                         │
+│              Reply OSC / Debug                   │
+│                        ▼                         │
+│  ┌────────────────────────────────────────────┐  │
+│  │ OUT ring buffer                            │  │
+│  └─────────────────────┬──────────────────────┘  │
+│                        │ PM: read here and       │
+│                        │ postMessage to main     │
+└────────────────────────┼─────────────────────────┘
+                         │ SAB: ring buffer
+                         ▼
 ┌──────────────────────────┐
 │   Reply Worker (SAB)     │
 │                          │
@@ -183,25 +179,18 @@ Main Thread                          AudioWorklet
 
 ### Sending OSC to scsynth
 
-1. **SuperSonic** receives OSC via `send()` or `sendOSC()`
-2. **OSCChannel** classifies the message:
-   - **Immediate/non-bundle**: bypass direct to AudioWorklet
-   - **Near-future bundle** (<=500ms): bypass direct to AudioWorklet
-   - **Late bundle** (past timestamp): bypass direct (already late)
-   - **Far-future bundle** (>500ms): route to Prescheduler
-3. **Direct route** (bypass):
-   - SAB mode: write to IN ring buffer
-   - PM mode: postMessage to AudioWorklet
-4. **Prescheduler route**: stores bundle until ~500ms before timestamp, then dispatches via its own direct connection
-5. **AudioWorklet** receives message:
-   - SAB mode: reads from ring buffer
-   - PM mode: receives via postMessage, queues internally
-6. **WASM Scheduler** receives message with sample-accurate timestamp
-7. **scsynth** processes at the exact sample
+1. **SuperSonic** receives OSC via `send()` or `sendOSC()`. On the web, `/b_alloc`, `/b_allocRead`, `/b_allocReadChannel` and `/b_allocFile` are rewritten to `/b_allocPtr` first: the client fetches and decodes the sample, and the engine is handed its place in memory.
+2. **OscChannel** sends the bytes on without looking at their time:
+   - SAB mode: written to the IN ring buffer
+   - PM mode: postMessage to the AudioWorklet, which writes it onto the same IN ring
+3. **The audio thread** drains the IN ring every block. A message, or a bundle that is due, goes to scsynth at once. A bundle with a later timetag is parked in clockwork's scheduler (`clockwork/src/scheduler/engine_schedule.h`) and handed to scsynth in the block it falls in, at its sample offset within that block. A bundle that arrives late plays at once. This is the same on every host.
+4. **scsynth** processes the message at that sample.
+
+There is no scheduling on the JavaScript side: however far ahead a bundle is timed, it goes onto the ring when it is sent.
 
 ### Receiving OSC from scsynth
 
-scsynth writes replies (e.g. `/done`, `/n_go`) to the OUT ring buffer. This happens in both modes — the C++ code is identical regardless of transport. The difference is how those replies reach JavaScript.
+On the web, scsynth writes replies (e.g. `/done`, `/n_go`) to the OUT ring buffer. This happens in both modes — the C++ code is identical regardless of transport. The difference is how those replies reach JavaScript.
 
 **SAB mode — the reply worker (`osc_in_worker.js`)**
 
@@ -209,56 +198,62 @@ The main thread needs to hear replies, but `Atomics.wait()` is not allowed on th
 
 **PM mode — no reply worker needed**
 
-The AudioWorklet reads the OUT ring buffer directly during `process()` and sends replies to the main thread via its MessagePort. There's no need for a separate worker because the AudioWorklet is already running on a dedicated thread.
+The AudioWorklet reads the OUT ring buffer directly and sends replies to the main thread via its MessagePort. There's no need for a separate worker because the AudioWorklet is already running on a dedicated thread.
 
-**Both modes converge** at the SuperSonic event emitter on the main thread, which decodes the reply and emits `in` and `in:osc` events. Egress is a single OUT ring buffer; the only consumer is the reply path above (worker → main thread in SAB mode, worklet → main thread in PM mode). There is no per-channel reply delivery — every reply reaches clients through the main-thread event emitter.
+**Both modes converge** at the SuperSonic event emitter on the main thread, which decodes the reply and emits `in` and `in:osc` events. On the web every reply rides the OUT ring: the arena also has an NRT-out ring, but the worklet has no second thread to write it. The only consumer is the reply path above (worker → main thread in SAB mode, worklet → main thread in PM mode). There is no per-channel reply delivery — every reply reaches clients through the main-thread event emitter.
 
-**Lapping detection**: In SAB mode, the log worker maintains its own read tail (`IN_LOG_TAIL`) independent of the C++ consumer's tail. If the writer wraps the ring buffer and overtakes the log reader, the log worker detects the invalid magic number at its read position, resyncs to head, and skips the corrupted batch rather than reading corrupt data.
+Natively, replies written off the audio thread go on the NRT-out ring. The engine's control thread reads both rings, OUT first, and sends each reply to the client it answers, or to every subscriber of a broadcast.
+
+**The OSC-out log**: the `out:osc` events show what was sent, read from the IN ring. The engine consumes that ring, so the log watches it through a tap: a read cursor of its own that takes nothing (`openTap`, `tapPoll`, `tapMissed` in `clockwork/js/lib/wasm_client.js`). Writers reserve space against the engine's cursor, not the tap's, so a log that falls behind is overwritten. The tap then resyncs to the newest traffic and counts what went past. In SAB mode the log worker (`osc_out_log_sab_worker.js`) runs the tap; in PM mode the worklet does, on its snapshot heartbeat.
 
 ### Debug Messages
 
-Same pattern as OSC replies but via DEBUG buffer and `onDebug` event.
+Debug lines from the engine ride the egress as `/clockwork/debug` messages, on every host. On the web the client takes them out of the reply stream and emits them as `debug` events (`{ text, sequence, timestamp }`) instead of `in` events. The native server prints them to stderr.
 
 ## Key Files
 
 | Component | File |
 |-----------|------|
 | SuperSonic API | `js/supersonic.js` |
-| OSC routing | `js/lib/osc_channel.js` |
-| OscChannel (AudioWorklet-safe) | `js/osc_channel.js` |
-| Ring buffer read/write | `js/lib/ring_buffer_core.js` |
-| SAB transport | `js/lib/transport/sab_transport.js` |
-| PM transport | `js/lib/transport/postmessage_transport.js` |
-| Reply worker (SAB only) | `js/workers/osc_in_worker.js` |
+| Buffer command rewriting (web) | `js/lib/osc_rewriter.js` |
+| OscChannel | `clockwork/js/lib/osc_channel.js` |
+| OscChannel (AudioWorklet-safe entry) | `clockwork/js/osc_channel.js` |
+| Ring buffer read/write, taps | `clockwork/js/lib/wasm_client.js` over `clockwork/src/clockwork_client.cpp` |
+| SAB transport | `clockwork/js/lib/transport/sab_transport.js` |
+| PM transport | `clockwork/js/lib/transport/postmessage_transport.js` |
+| Reply worker (SAB only) | `clockwork/js/workers/osc_in_worker.js` |
+| OSC-out log worker (SAB only) | `clockwork/js/workers/osc_out_log_sab_worker.js` |
 | AudioWorklet | `clockwork/js/workers/clockwork_audio_worklet.js` |
-| NTP timing | `js/lib/ntp_timing.js` |
-| WASM entry | `src/audio_processor.cpp` |
-| WASM scheduler | `src/scheduler/EngineScheduler.h` |
-| Memory layout | `src/shared_memory.h` |
+| NTP timing | `clockwork/js/lib/ntp_timing.js` |
+| Engine entry (every host) | `clockwork/src/audio_processor.cpp` |
+| Scheduler (every host) | `clockwork/src/scheduler/engine_schedule.h` (`EngineScheduler`) |
+| scsynth guest | `dsp/scsynth/scsynth_dsp.cpp` |
+| Memory layout | `clockwork/src/shared_memory.h`, `clockwork/src/clockwork_arena.h` |
+| Region sizes | `clockwork/src/memory_profile.h` |
 
 ## Memory Layout
 
-Pre-allocated in WASM memory (no runtime allocation):
+Every region is laid out once, before the engine runs: nothing is allocated for them later. The sizes are compile-time and vary by build (`clockwork/src/memory_profile.h`, overridden per product in `CMakeLists.txt`), so a reader finds each region through the arena's table of contents (`clockwork/src/clockwork_arena.h`) rather than by a fixed offset. SuperSonic's web build:
 
-- **IN Ring Buffer**: 768KB (JS -> scsynth)
-- **OUT Ring Buffer**: 128KB (scsynth -> JS replies)
-- **DEBUG Buffer**: 64KB (debug messages)
-- **Control Region**: 48B (atomic pointers/flags)
-- **Metrics Region**: 168B (performance counters)
-- **Node Tree Mirror**: ~73KB (synth hierarchy for visualization, includes UUIDs)
+- **IN Ring Buffer**: 1 MB (JS -> scsynth; 768 KB in the native default)
+- **OUT Ring Buffer**: 128 KB (replies written on the audio thread)
+- **NRT-out Ring Buffer**: 64 KB (replies written on any other thread; natively the control thread's, unused on the web)
+- **Control Region**: 56 B (ring cursors and flags; each egress ring has a read cursor apart from its tail, `out_read` at byte 44 and `nrt_out_read` at byte 48 — the region was 48 B up to v0.89.0)
+- **Metrics Region**: 208 B (52 u32 counters)
+- **Node Tree Mirror**: in the guest window, 98320 B by default: a 16 B header and 1024 entries of 96 B (synth hierarchy for visualization, includes UUIDs)
 
 ## Metrics Collection
 
 Metrics are collected at all points in the system.
 
 - **SAB mode**: written directly to shared metrics region, always current
-- **PM mode**: each worker keeps local tallies, sends snapshot deltas on heartbeat (default 150ms, configurable via `snapshotIntervalMs`)
+- **PM mode**: the worklet posts a copy of the metrics region (and the node tree) on a heartbeat (default 150ms, configurable via `snapshotIntervalMs`); the transport counts the replies it receives itself
 
 This means PM mode metrics can be up to one heartbeat interval stale.
 
 ## Multiple Writers
 
-Multiple `OSCChannel` instances can exist, each with its own direct line to the AudioWorklet. This supports scenarios like multiple instruments or control sources operating independently.
+Multiple `OscChannel` instances can exist — one per worker, say — each sending straight to the audio thread: onto the IN ring in SAB mode, through its own MessagePort in PM mode. This supports scenarios like multiple instruments or control sources operating independently.
 
 ## Node ID Allocation
 
@@ -269,4 +264,4 @@ How it works depends on the transport mode:
 - **SAB mode**: a single `Atomics.add()` on a shared `Int32Array` in the SharedArrayBuffer. One atomic instruction, correct across all threads by hardware guarantee.
 - **PM mode**: range-based allocation. The main thread hands out non-overlapping ranges to each worker (e.g. 1000-1999 to worker A, 2000-2999 to worker B). Workers increment locally within their range and pre-fetch the next range at the halfway point, so there's no round-trip pause under normal use.
 
-IDs start at 1000. Below that: 0 is the root group, 1 is the default group, and 2-999 are reserved for manual use.
+IDs start at 1000. Below that: 0 is the root group, and 1-999 are left free for you to assign by hand.

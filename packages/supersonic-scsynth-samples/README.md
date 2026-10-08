@@ -1,6 +1,6 @@
 # SuperSonic Samples
 
-All 207 audio samples from Sonic Pi in one convenient package.
+Sonic Pi's audio samples in one convenient package, as FLAC files (plus an AIFF copy of `bd_haus`, which SuperSonic's tests load).
 
 ## Installation
 
@@ -11,27 +11,34 @@ npm install supersonic-scsynth-samples
 ## Usage
 
 ```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest/dist/supersonic.js';
 
 const supersonic = new SuperSonic({
+  baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+  coreBaseURL: 'https://unpkg.com/supersonic-scsynth-core@latest/',
+  synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
   sampleBaseURL: 'https://unpkg.com/supersonic-scsynth-samples@latest/samples/'
 });
 
-await supersonic.init();
+// Browsers start audio only after a click, tap or keypress
+document.querySelector('button').onclick = async () => {
+  await supersonic.init();
 
-// Load any sample
-await supersonic.loadSample(0, 'bd_haus.flac');
-await supersonic.loadSample(1, 'loop_amen.flac');
+  // Load any sample
+  await supersonic.loadSample(0, 'bd_haus.flac');
+  await supersonic.loadSample(1, 'loop_amen.flac');
 
-// Play with basic_mono_player synthdef
-supersonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 1, 'buf', 0);
+  // Play it with the basic_mono_player synthdef, in the root group (0)
+  await supersonic.loadSynthDef('sonic-pi-basic_mono_player');
+  supersonic.send('/s_new', 'sonic-pi-basic_mono_player', -1, 0, 0, 'buf', 0);
+};
 ```
 
-SuperSonic works directly from CDN with zero configuration.
+`sampleBaseURL` is where samples named without a path are fetched from.
 
 ## Available Samples
 
-This package includes all 207 samples organized by category:
+This package includes Sonic Pi's samples, organised by category. Their names are also exported, as `SAMPLE_NAMES`, by the package's `index.js` (a Node module).
 
 ### Ambient (11 samples)
 `ambi_choir`, `ambi_dark_woosh`, `ambi_drone`, `ambi_glass_hum`, `ambi_glass_rub`, `ambi_haunted_hum`, `ambi_lunar_land`, `ambi_piano`, `ambi_sauna`, `ambi_soft_buzz`, `ambi_swoosh`
@@ -39,7 +46,7 @@ This package includes all 207 samples organized by category:
 ### Bass Drums (15 samples)
 `bd_808`, `bd_ada`, `bd_boom`, `bd_chip`, `bd_fat`, `bd_gas`, `bd_haus`, `bd_jazz`, `bd_klub`, `bd_mehackit`, `bd_pure`, `bd_sone`, `bd_tek`, `bd_zome`, `bd_zum`
 
-### Loops (18 samples)
+### Loops (17 samples)
 `loop_3d_printer`, `loop_amen`, `loop_amen_full`, `loop_breakbeat`, `loop_compus`, `loop_drone_g_97`, `loop_electric`, `loop_garzul`, `loop_industrial`, `loop_mehackit1`, `loop_mehackit2`, `loop_mika`, `loop_perc1`, `loop_perc2`, `loop_safari`, `loop_tabla`, `loop_weirdo`
 
 ### Electronic (25 samples)
@@ -54,10 +61,9 @@ See [PROVENANCE.md](./PROVENANCE.md) for full attribution and Freesound.org link
 
 ## Package Size
 
-- **Unpacked**: ~34 MB
-- **Download**: ~34 MB (FLAC compression)
+About 35 MB, already compressed as FLAC.
 
-Samples are only downloaded when requested via CDN, so initial page load remains fast.
+Each sample is fetched only when you load it, so initial page load remains fast.
 
 ## License
 
@@ -67,6 +73,7 @@ All samples originally from [Sonic Pi](https://github.com/sonic-pi-net/sonic-pi)
 
 ## Related Packages
 
-- [`supersonic-scsynth`](https://www.npmjs.com/package/supersonic-scsynth) - Core engine
+- [`supersonic-scsynth`](https://www.npmjs.com/package/supersonic-scsynth) - Client API
+- [`supersonic-scsynth-core`](https://www.npmjs.com/package/supersonic-scsynth-core) - WASM engine and AudioWorklet
 - [`supersonic-scsynth-synthdefs`](https://www.npmjs.com/package/supersonic-scsynth-synthdefs) - Synth definitions
 - [`supersonic-scsynth-bundle`](https://www.npmjs.com/package/supersonic-scsynth-bundle) - Everything together

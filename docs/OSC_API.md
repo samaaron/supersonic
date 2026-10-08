@@ -1,574 +1,739 @@
 # SuperSonic OSC API
 
-Wire-protocol reference for the `/supersonic/*` OSC surface that
-SuperSonic exposes alongside the standard scsynth OSC commands.
-scsynth's own commands (`/s_new`, `/d_recv`, `/n_free`, `/status`,
-etc.) are documented upstream by SuperCollider and aren't repeated
-here — this file covers only the SuperSonic-specific management
-extensions for device selection, recording, notifications, and clock.
+The wire reference for the OSC verbs SuperSonic answers beyond scsynth's
+own commands. scsynth's commands (`/s_new`, `/d_recv`, `/b_alloc`, …) are
+in the [scsynth command reference](SCSYNTH_COMMAND_REFERENCE.md); the
+JavaScript embedder API is in [API.md](API.md).
 
-> Looking for the JavaScript/WASM embedder API instead? See
-> [`API.md`](API.md) (auto-generated from `supersonic.d.ts`).
+SuperSonic runs scsynth inside clockwork, its audio runtime. Clockwork's
+verbs all live under `/clockwork/`. The few messages scsynth itself adds
+live under `/supersonic/` ([below](#scsynths-own-messages-supersonic)).
 
-## Transport
+## Notation
 
-- UDP, OSC 1.0 encoding (osc-pack).
-- Default port: **57110** (configurable via `Config::udpPort` /
-  `--udp-port`).
-- Bind address: `127.0.0.1` by default. Override with `--bind` or
-  `Config::bindAddress` for LAN exposure.
-- Messages only — no bundles required for any endpoint. Bundles work
-  but add no semantics.
-- Argument tags follow standard OSC: `i` = int32, `f` = float32,
-  `s` = C string, `b` = blob.
+| | |
+|---|---|
+| `→` | a message you send |
+| `←` | a reply (to the sender) or a push (to an audience) |
+| `i` `h` `f` `d` | int32, int64, float32, float64 |
+| `s` `b` `t` | string, blob, OSC timetag |
+| `[x]` | optional |
+| `x…` | repeated |
+| `[tok]` | an optional trailing int32, echoed last in the reply ([correlation tokens](#correlation-tokens)) |
 
-## Conventions
+Every verb says which hosts answer it:
 
-### Request / reply pattern
-
-Most inbound commands at `/supersonic/<area>/<verb>` produce an
-outbound reply at `/supersonic/<area>/<verb>.reply` sent back to the
-command's sender. Replies are **one-shot** unless the documentation
-for a specific endpoint says otherwise (reopen emits both `.reply`
-and `.done`; `devices/list` emits N `.reply` messages followed by a
-`.done` terminator).
-
-The reply's first argument is typically an `int32` success flag
-(`1` = OK, `0` = error) followed by either the requested data or an
-error string. See each endpoint below.
-
-### Notify targets (push notifications)
-
-Events that aren't responses to a specific command (`statechange`,
-`setup`, `info`, `devices`, `input-devices`, `devices/reopen.done`)
-are pushed to all **registered notify targets**. A client registers
-itself as a target by sending `/supersonic/notify`; register as
-early as possible at boot so the first `statechange` fires against
-your socket.
-
-### Sentinels
-
-Two magic strings appear where a device name is expected:
-
-| Sentinel | Applies to | Meaning |
-| --- | --- | --- |
-| `__system__` | `devices/switch` output name | Follow macOS system default output (engine enters "system" device mode). |
-| `__none__` | `devices/switch` input name | Disable audio inputs. Clears the preferred input device for hot-plug. |
-
-Anything else is treated as a literal device name. JUCE may append
-`" (N)"` to disambiguate duplicate CoreAudio names; SuperSonic's
-matcher accepts either the bare name or the suffixed form.
-
-### Correlation tokens (`/clock` request/reply verbs)
-
-OSC replies carry no correlation id, so with address-only matching a
-reply that arrives after its caller gave up is indistinguishable from
-the reply to the *next* request on that address. For a clock API this
-matters: a stale time answer delivered that way corrupts the client's
-beat↔wall mapping.
-
-Any `/clock` request may therefore carry an **int32 correlation token
-as its final argument** (after the verb's own args). The reply echoes
-it as *its* final argument. Handlers read their arguments
-positionally, so the trailing int is invisible to them; requests
-without a token receive the byte-identical legacy reply format. A
-client that sends tokens must match on them and treat a mismatch as a
-stale reply to be discarded.
-
-### Subscribe acks (`<subsystem>/notify/subscribe`)
-
-The four subsystem subscribe verbs (`/midi`, `/gamepad`, `/osc`,
-`/clock` + `/notify/subscribe`) accept the same trailing int32
-correlation token. A tokened subscribe is acked with
-`<verb>.reply i:token` sent to the subscriber; a token-less subscribe
-keeps its historical no-reply behaviour. Because a subscribe datagram
-lost in transit costs the client every event the subsystem would ever
-push, clients that depend on the stream should send tokened
-subscribes and resend until the token comes back — subscribing is
-idempotent, so resends are harmless.
+| | Host |
+|---|---|
+| **S** | the native server, `supersonic` |
+| **N** | the BEAM NIF ([NIF.md](NIF.md)) |
+| **W** | the web client, in a browser |
 
 ---
 
-## Notify registration
+## Transport and conventions
 
-### `→ /supersonic/notify` *(no args)*
+### Getting messages in
 
-Registers the sender's IP:port as a notify target for all push
-events. On registration, SuperSonic immediately emits a full device
-report (`/supersonic/devices` + `/supersonic/input-devices` +
-`/supersonic/info`) so the new client starts with an accurate
-picture.
+**S.** UDP by default.
 
-**Reply:** `/supersonic/notify.reply i:1`
+| Flag | Default | |
+|---|---|---|
+| `-u <port>` | `57110` | UDP command port. `-u 0` turns UDP off, and the shared-memory segment with it. |
+| `-B <addr>` | `127.0.0.1` | Bind address, for UDP and TCP. |
 
-### `→ /supersonic/notify/unregister` *(no args)*
+UDP is bound before the engine boots. Up to 1024 packets that arrive
+during boot are held and handled in order once it is up.
 
-Removes the sender from the notify target list. Polite shutdown. No
-reply.
+At most one alternative transport may replace the UDP command port:
 
-### `→ /supersonic/notify/clear` *(no args)*
+| Flag | Transport |
+|---|---|
+| `--tcp <port>` | TCP, bound to `-B` |
+| `--uds <path>` | Unix-domain stream socket (macOS, Linux; file mode 0600) |
+| `--uds-dgram <path>` | Unix-domain datagram socket (macOS, Linux; file mode 0600) |
+| `--pipe <name>` | Named pipe (Windows; owner-only) |
+| `--shm-commands` | The shared-memory segment's command plane: one trusted peer on the same machine. Needs `-u > 0`. |
 
-Removes **all** notify targets. Used before a full client restart so
-stale targets from the previous session don't receive events meant
-for the new one. No reply.
+On TCP, UDS stream and named pipes each OSC packet is preceded by its
+length as a 4-byte big-endian integer. A connection is a client: its
+subscriptions end when it closes. `--max-connections <n>` caps them
+(default 4).
 
----
+**N.** No socket. `clockwork:send_osc/1` takes one packet. Every reply and
+push goes to every registered process as `{osc_reply, Binary}`.
 
-## Lifecycle push events
+**W.** Through the client: `send(address, ...args)` or `sendOSC(bytes)`.
+Replies arrive on its `in` and `in:osc` events.
 
-These are broadcast to every registered notify target — no request
-triggers them (though registering or sending `devices/report` makes
-SuperSonic emit the device set immediately).
+### Who answers
 
-### `← /supersonic/statechange s:state s:reason`
+- An address beginning `/clockwork/` (slash included) is clockwork's.
+  Everything else goes to scsynth untouched.
+- A `/clockwork/` verb that nothing answers is refused:
+  `← /clockwork/error s:address s:reason`. Reasons include
+  `unknown clockwork verb` and `malformed`. An unknown `/clockwork/clock/…`
+  verb gets [`/clockwork/clock/unsupported`](#clock-and-link) instead.
+- **A bundle is scsynth's**, whole and unopened. A `/clockwork/` message
+  inside a bundle reaches scsynth and is dropped there. To time a clockwork
+  verb, wrap it in [`/clockwork/schedule`](#scheduling).
+- A reply goes to the sender: a UDP source address, or a stream
+  connection. A push goes to an audience: the notify targets
+  ([`/clockwork/notify`](#notify-and-lifecycle)) or a subsystem's
+  subscribers.
+- `/clockwork/debug s:line` is the engine's log. S prints it to stderr and
+  never sends it on the socket; N delivers it as `{debug, Charlist}`; W
+  raises the client's `debug` event.
+- A reply built off the audio thread is at most 8 KB. The long answers
+  (`track/plugins`, `track/plugin/params`) come in pages.
 
-Engine state transition. `state` is one of:
-`stopped`, `booting`, `running`, `restarting`, `error`.
-`reason` is a human-readable cause (`"init"`, `"boot"`,
-`"rate-change"`, `"swap-failed-rollback"`, `"swap-recovered"`,
-`"shutdown"`).
+### Correlation tokens
 
-### `← /supersonic/setup i:sampleRate i:bufferSize`
+A late reply is otherwise indistinguishable from the reply to the next
+request on the same address. Verbs marked `[tok]` take an int32 as their
+last argument and echo it as the last argument of the reply; a client that
+sends tokens discards a reply whose token does not match. Without a token
+the reply is unchanged. Clock verbs whose own last argument is an int32
+(`transport/set`, `visibility`, `meter` with two arguments) send no reply,
+so the overlap is harmless.
 
-Emitted when the World is (re)built — i.e. after a successful cold
-swap. Clients should use this signal to re-register for notifications
-and rebuild their mixer graph. Not emitted for hot swaps.
+### Subscribe acks
 
-### `← /supersonic/info s:banner i:sampleRate i:bufferSize`  `i:numRates f:rate1..rateN` `i:numBufs i:buf1..bufN` `i:numDrivers s:driver1..driverN` `s:currentDriver` `i:outputChannels i:inputChannels` `s:intendedDriver`
+`/clockwork/clock/notify/subscribe`, `/clockwork/midi/notify/subscribe`,
+`/clockwork/gamepad/notify/subscribe` and `/clockwork/osc/notify/subscribe`
+take an optional trailing int32. With one, the subscribe is acked as
+`<verb>.reply i:token`; without, there is no ack. A lost subscribe costs
+every event the subsystem would push, so a client that depends on the
+stream resends a tokened subscribe until the token comes back. Subscribing
+twice is the same as subscribing once.
 
-Hardware info message. The banner is a multi-line pre-formatted
-string suitable for direct display (driver, sample rate, buffer,
-latency). The structured fields after it are the same data the GUI
-needs for populating dropdowns.
+### Device names
 
-**Rate and buffer lists** are filtered to the canonical useful set
-and, on a drift-compensated aggregate, constrained to the current
-values only. **Channel counts** are per-device (not aggregate sums)
-so a user who picked 2-channel MBP Speakers sees `out 2` even if the
-engine is running on a `MBP + MOTU` aggregate.
+| Name | Where | Meaning |
+|---|---|---|
+| `__system__` | output | Follow the system default output, on every platform. Not a pin: the engine follows the default as it moves. |
+| `System Default` | output | The device table's synthetic row ([`device-table`](#clockworkdevicesreport)). Picking it by name means `__system__`, unless the driver has a real device of that name. |
+| `__none__` | input | Inputs off. |
 
-**`intendedDriver`** is the user's pending `/supersonic/drivers/switch`
-pick when it wasn't followed by a device open yet (ASIO with no
-remembered device, or a driver with no visible devices) — empty
-otherwise. `currentDriver` stays truthful about the audio path; a
-client's driver selector should show `intendedDriver` when non-empty
-and follow `currentDriver` when it's empty. Trailing arg: absent in
-reports from older engines, so read it optionally.
-
-### `← /supersonic/devices s:mode s:current s:device1..deviceN i:sampleRate i:compat1..compatN`
-
-Output device list.
-- `mode` — `"system"` if following the default, otherwise the
-  user-selected device name.
-- `current` — actual device in use right now.
-- `device1..deviceN` — visible output devices (wireless transports
-  are hidden from the dropdown list).
-- `sampleRate` — current rate.
-- `compat1..compatN` — per-device `1` if that device supports the
-  current rate without a cold swap, `0` otherwise. GUI can use this
-  to warn about rate changes.
-
-### `← /supersonic/input-devices s:current i:numDevices s:device1..deviceN`
-
-Input device list. Separate from the output message because input
-and output can diverge (e.g. an aggregate device combines two).
-
----
-
-## Device query
-
-### `→ /supersonic/devices/list` *(no args)*
-
-Returns the full device inventory. Unlike the push
-`/supersonic/devices` report above (which is dropdown-focused and
-hides wireless devices), this gives one reply per visible device
-with detailed metadata.
-
-**Reply stream:**
-- For each device:
-  `← /supersonic/devices/list.reply s:name s:type i:maxOut i:maxIn f:rate1..rateN`
-- Terminator: `← /supersonic/devices/list.done` *(no args)*
-
-### `→ /supersonic/devices/current` *(no args)*
-
-Returns the currently active device.
-
-**Reply:** `← /supersonic/devices/current.reply s:name s:type f:sampleRate i:bufferSize i:activeOutCh i:activeInCh`
-
-### `→ /supersonic/devices/report i:replyPort`
-
-Trigger a full device-state broadcast (the `devices`,
-`input-devices`, and `info` trio). `replyPort` is the port the caller
-wants those messages sent to; it's registered as a notify target as
-a side effect. No direct reply — the three pushes are the answer.
+A name with a `" (N)"` duplicate suffix matches with or without it.
 
 ---
 
-## Device control
+## Liveness
 
-### `→ /supersonic/devices/switch s:outputName f:sampleRate i:bufferSize [s:inputName]`
+Answered on the audio thread, in order with everything else sent.
 
-Switch the active device. All arguments are positional; the input
-name is optional.
-
-**Arguments:**
-- `outputName` — output device name, `""` to leave unchanged, or a
-  sentinel (`__system__`).
-- `sampleRate` — desired rate, `0.0` to keep current / auto-pick.
-- `bufferSize` — desired buffer, `0` to keep current / auto-pick.
-- `inputName` *(optional)* — input device, `""` to leave unchanged,
-  or `__none__` to disable inputs.
-
-**Debouncing:** rapid clicks are coalesced. Each request replaces
-the pending switch; the last one executes after a 500 ms quiet
-period. The GUI gets an immediate ack — the actual swap happens
-asynchronously.
-
-**Reply (immediate):** `← /supersonic/devices/switch.reply i:1`
-— always `1`; the request was accepted into the debounce queue.
-(The `__system__` and `__none__` sentinel paths reply
-synchronously with the real success flag and, on failure, an
-error string.)
-
-**Follow-up:** on successful completion, SuperSonic broadcasts
-`/supersonic/statechange` and `/supersonic/devices` (via
-`sendDeviceReport`) so registered targets see the new state.
-
-### `→ /supersonic/devices/reopen` *(no args)*
-
-Tear down and recreate the current device without changing
-selection. Used when an external config change needs to propagate —
-e.g. the user bumped the "Computer" channel count in MOTU Pro Audio
-Control and wants SuperSonic to re-read the new channel count.
-
-**Debouncing:**
-- Rejected if a reopen is already in flight (`"already in progress"`).
-- Rejected if less than **3000 ms** have elapsed since the previous
-  reopen completed (`"cooldown (<ms> ms since last)"`). The cooldown
-  exists because a reopen cold-swaps the World and the Sonic Pi
-  Spider layer's `cold_swap_reinit!` takes ~1-3 seconds to reload
-  synthdefs and recreate the mixer + groups + scope. A second reopen
-  racing an in-flight reinit leaves the client in an inconsistent
-  state.
-
-**Reply (immediate):** `← /supersonic/devices/reopen.reply i:accepted s:reason`
-- `accepted=1, reason="started"` — queued, worker thread running.
-- `accepted=0, reason="already in progress"` or `"cooldown (N ms since last)"`.
-
-**Reply (completion, pushed to notify targets):**
-`← /supersonic/devices/reopen.done i:success s:device f:sampleRate i:bufferSize s:error`
-- `success=1`: `device`, `sampleRate`, `bufferSize` describe the
-  reopened device; `error` is `""`.
-- `success=0`: `error` contains a message; the other fields may be
-  zeroed.
-
-### `→ /supersonic/devices/mode s:mode`
-
-Set / clear the manual device mode. `mode=""` means "follow system
-default output"; anything else pins SuperSonic to that device name
-across hot-plug cycles.
-
-**Reply:** `← /supersonic/devices/mode.reply s:currentMode i:success [s:error]`
-
-### `→ /supersonic/inputs/enable i:numChannels`
-
-Enable or disable audio inputs.
-- `numChannels == 0` — disable inputs (triggers cold swap).
-- `numChannels > 0` — enable that many input channels (triggers
-  cold swap if the count differs from the current one).
-- `numChannels == -1` — re-enable with the configured boot channel
-  count.
-
-**Reply:** `← /supersonic/inputs/enable.reply i:success [i:numChannels | s:error]`
+| → | ← | Hosts |
+|---|---|---|
+| `/clockwork/ping [i:id]` | `/clockwork/pong [i:id]` | S N W |
+| `/clockwork/echo s:text` or `b:bytes` | `/clockwork/echo.reply` with the same argument | S N W |
+| `/clockwork/sync [i:id]` | `/clockwork/synced i:id` (0 when none was sent), once everything sent before it has reached scsynth | S N W |
 
 ---
 
-## Driver
+## Notify and lifecycle
 
-### `→ /supersonic/drivers/list` *(no args)*
+Hosts: **S N**. W refuses these (`unknown clockwork verb`); the web client
+raises events instead.
 
-Enumerate available audio drivers (CoreAudio, WASAPI, ALSA, etc.).
+| → | ← |
+|---|---|
+| `/clockwork/notify` | `/clockwork/notify.reply i:1 s:commit`, then `/clockwork/statechange` with the current state to the caller |
+| `/clockwork/notify/unregister` | — |
+| `/clockwork/notify/clear` | — (removes every notify target) |
 
-**Reply:** `← /supersonic/drivers/list.reply s:currentDriver s:driver1..driverN`
+`/clockwork/notify` makes the sender a notify target. `commit` names the
+clockwork build. It enumerates no devices: send
+[`/clockwork/devices/report`](#clockworkdevicesreport) for the device
+list. The replayed state carries the reason `snapshot`, or the error text
+when the state is `error`. `/clockwork/setup` is never replayed.
 
-### `→ /supersonic/drivers/switch s:driverName`
+Pushed to notify targets:
 
-Switch audio driver. Forces a cold swap if the new driver's default
-device runs at a different rate.
-
-**Reply:**
-- `← /supersonic/drivers/switch.reply i:1 s:currentDriver f:sampleRate i:bufferSize` on success.
-- `← /supersonic/drivers/switch.reply i:0 s:error` on failure.
-
----
-
-## Recording
-
-### `→ /supersonic/record/start s:path [s:format] [i:bitDepth]`
-
-Start recording the main output mix to disk.
-- `path` — absolute file path.
-- `format` — `"wav"` (default), `"flac"`, `"aiff"`, `"ogg"`.
-- `bitDepth` — 16 / 24 / 32 (default 24). Ignored for `ogg`.
-
-**Reply:** `← /supersonic/record/start.reply i:success s:pathOrError`
-
-### `→ /supersonic/record/stop` *(no args)*
-
-Stop the active recording and flush the file.
-
-**Reply:** `← /supersonic/record/stop.reply i:success s:pathOrError`
+| ← | |
+|---|---|
+| `/clockwork/statechange s:state s:reason` | `state`: `stopped` `booting` `running` `restarting` `error`. `reason`: `init` `boot` `shutdown` `rate-change` `swap-failed-rollback` `swap-no-audio` `swap-recovered` `rebuild-failed` `snapshot`, or scsynth's own text when it failed to build. |
+| `/clockwork/setup i:sampleRate i:bufferSize i:generation` | scsynth was rebuilt (a cold swap): everything it held is gone. `generation` counts builds; the first rebuild is 2. |
 
 ---
 
-## Clock
+## Devices and drivers
 
-### `→ /supersonic/clock/offset f:offsetSeconds`
+Hosts: **S N**. W refuses every verb here (`unknown clockwork verb`): the
+page owns the output.
 
-Apply a global NTP-time offset to the engine's scheduler. Used by
-Sonic Pi's Spider layer to align SuperSonic's clock with its own
-event time. No reply.
+The verbs that change the device do their work off the control thread. A
+device report follows a successful change.
 
-### `→ /clock/capabilities/get` *(no args)*
+### `/clockwork/devices/report`
 
-**Reply:** `← /clock/capabilities.reply s:name i:value …`
+`→ /clockwork/devices/report [i:replyPort]`
 
-Compile-time backend capabilities as name/value pairs (extensible —
-match by name, not position). Current pairs: `link` (the Ableton
-session surface: visibility, peers, notify), `link_audio` (the
-`/clock/audio/*` surface), `midi` (the MIDI subsystem feeding the
-follower timelines). The clock core (tempo / transport / rpc /
-timelines / start_stop_sync / time) is answered on every build.
+No argument, or 0: the sender becomes a notify target. `replyPort > 0`
+(UDP only): `127.0.0.1:replyPort` becomes one; a stream transport ignores
+the port, so send none. No direct reply: the report is four pushes to
+every notify target, in this order (tolerate any):
 
-### `→ /clock/[tl/]rpc/beat_at_time h:ntpMicros f:quantum`
+1. `← /clockwork/device-table s:currentDriver s:intendedDriver i:numDrivers`,
+   then per driver `s:driver i:numOutputs (s:name s:flags)… i:numInputs (s:name s:flags)…`.
+   One row per driver and device, not deduplicated. `flags` is
+   comma-separated: `follows-default`, `exclusive-duplex`, `synthetic`; `""`
+   for none. A driver with no default-following device gets a synthetic
+   `System Default` output row.
+2. `← /clockwork/devices s:mode s:current s:name… i:sampleRate i:compat… s:type…`.
+   `mode` is `system` when following the default, otherwise the pinned
+   device; `current` is the open output. The names are the strings before
+   the first int; then the current rate; then per device `1` if it runs at
+   that rate without a rate change; then per device its driver. Wireless
+   outputs are hidden; a name shared across drivers appears once, the
+   active driver's.
+3. `← /clockwork/input-devices s:current i:n s:name… s:type…`
+4. `← /clockwork/info s:banner i:sampleRate i:bufferSize i:numRates i:rate… i:numBufs i:buf… i:numDrivers s:driver… s:currentDriver i:outputChannels i:inputChannels i:outputLatencySamples s:intendedDriver`
+   - `banner`: several lines of text, for display.
+   - Rates: those the output and the open input both offer.
+   - Buffer sizes: the powers of two from 16 to 2048 that the device
+     offers (everything it offers, when none is), plus the active size when
+     it is not among them.
+   - `outputChannels`, `inputChannels`: the device's counts; inputs are 0
+     when no input is open.
+   - `intendedDriver`: a `drivers/switch` pick not yet followed by an open
+     device, otherwise `""`. A driver selector shows it when non-empty,
+     and `currentDriver` when empty.
+   - Fields are only ever appended. Read positionally.
 
-**Reply:** `← …rpc/beat_at_time.reply d:beat`
+A report is skipped while the enumeration looks mid-change (an open input
+missing from the list).
 
-The timeline's beat at an NTP time.
+### Queries
 
-### `→ /clock/[tl/]rpc/phase_at_time h:ntpMicros f:quantum`
+| → | ← |
+|---|---|
+| `/clockwork/devices/list` | per device `/clockwork/devices/list.reply s:name s:type i:maxOutputs i:maxInputs f:rate…`, then `/clockwork/devices/list.done`. Wireless devices are skipped. |
+| `/clockwork/devices/current` | `/clockwork/devices/current.reply s:name s:type f:sampleRate i:bufferSize i:activeOutputs i:activeInputs` |
+| `/clockwork/drivers/list` | `/clockwork/drivers/list.reply s:currentDriver s:driver…` |
 
-**Reply:** `← …rpc/phase_at_time.reply d:phase`
+### `/clockwork/devices/switch`
 
-The timeline's phase within `quantum` at an NTP time — the beat above
-wrapped into `[0, quantum)`.
+`→ /clockwork/devices/switch s:output f:sampleRate i:bufferSize [s:input]`
 
-### `→ /clock/[tl/]rpc/time_at_beat h:microbeats f:quantum`
+- `output`: a device, `""` for no change, `__system__` or `System Default`.
+- `sampleRate`, `bufferSize`: `0` keeps the current value or lets the engine
+  choose.
+- `input`: a device, `""` for no change, or `__none__`.
 
-**Reply:** `← …rpc/time_at_beat.reply h:ntpMicros`
+`← /clockwork/devices/switch.reply i:1` at once, always: the request was
+heard. The outcome is one push to the notify targets (none is sent when
+there are none):
 
-The NTP time of a beat: the inverse of `rpc/beat_at_time`.
+`← /clockwork/devices/switch.done i:success s:requestedOutput s:requestedInput s:actualOutput s:actualInput s:error i:inputUnavailable s:inputUnavailableReason`
 
-The beat arrives as int64 **microbeats** (1 beat = 1e6), Link's own beat
-unit. `f:beat` is also accepted for older clients, but is lossy: float32
-resolves a beat to 2**-8 once the count passes 32768, which is 3.9ms at
-60 BPM. Replies carry beats as `d`, so a client that reads a beat here
-and sends it back must scale it to microbeats to keep it.
+`actualOutput` is where the engine is, whether or not the switch
+succeeded: record the user's choice from it. `inputUnavailable` is 1 when
+the output opened but the input could not. A device report follows on
+success.
 
-### `→ /clock/[tl/]rpc/beat_phase_at_time h:ntpMicros f:quantum`
+- `__system__` / `System Default`: follow the default (as
+  `devices/mode ""`).
+- Input `__none__`: inputs off. A named output in the same message is not
+  switched.
+- Otherwise the switch waits 500 ms; a newer switch in that time replaces
+  it, and only the one that runs gets a `switch.done`. Naming an output
+  leaves system mode.
+- A name over 1024 bytes is refused through `switch.done` (error
+  `no audio device has a name that long`, the names cut to 64 bytes).
 
-**Reply:** `← …rpc/beat_phase_at_time.reply d:beat d:phase`
+### Other device verbs
 
-Beat and phase at a time in one round-trip (equivalent to chaining
-`rpc/beat_at_time` + `rpc/phase_at_time`).
+| → | ← |
+|---|---|
+| `/clockwork/devices/mode s:mode` | `/clockwork/devices/mode.reply s:mode i:ok [s:error]`. `""` follows the system default; a name pins that device across hot-plugs. |
+| `/clockwork/devices/reopen` | `/clockwork/devices/reopen.reply i:accepted s:reason`, then `/clockwork/devices/reopen.done i:success s:device f:sampleRate i:bufferSize s:error` to the notify targets |
+| `/clockwork/drivers/switch s:driver` | `/clockwork/drivers/switch.reply i:1 s:currentDriver f:sampleRate i:bufferSize`, or `i:0 s:error` |
 
-### `→ /clock/[tl/]rpc/beat_phase_now f:quantum`
+`devices/reopen` closes and reopens the current device to re-read it (a
+channel count changed in the interface's own control panel, say). `reason`
+is `started`, `already in progress` or `cooldown (<n> ms since last)`: a
+reopen starts at least 3 s after the last one finished.
 
-**Reply:** `← …rpc/beat_phase_now.reply h:ntpMicros d:beat d:phase`
+---
 
-The engine's "now" (NTP micros) plus beat and phase at that instant —
-one round-trip where clients previously chained `time/now/get` +
-`rpc/beat_at_time` + `rpc/phase_at_time`.
+## Inputs
 
-### `← /clock/unsupported s:address`
+Hosts: **S N**. W refuses it.
 
-Sent in place of a reply when a `/clock` verb reaches a build that
-does not answer it (e.g. the native-only Link-session verbs on the
-web build) or matches nothing at all. Distinguishes "unsupported
-here" from a lost datagram; pair with `/clock/capabilities/get`.
-Echoes the request's trailing correlation token like any other
-`/clock` reply.
+`→ /clockwork/inputs/enable i:channels` →
+`← /clockwork/inputs/enable.reply i:1 i:channels`, or `i:0 s:error`.
 
-### `← /clock/notify/transport i:playing h:atNtpMicros`
+`0` turns inputs off, `n > 0` opens n channels, `-1` restores the count the
+engine booted with. The output mode is left alone. A device report follows
+on success.
 
-Transport push to notify subscribers. The timestamp is in NTP micros
-like every other `/clock` wire time (it was previously raw Link-clock
-micros, which are per-boot and meaningless to a client).
+---
+
+## Clock and Link
+
+Addresses in this section are under `/clockwork/clock/`. Times on the wire
+are NTP microseconds as `h`, except in `state.reply`.
+
+### Timelines
+
+A verb marked † may name a timeline: `/clockwork/clock/<timeline>/<verb>`.
+
+| Timeline | |
+|---|---|
+| `link` | The session clock (Ableton Link when enabled). The default when none is named. |
+| `midi` | The primary MIDI clock follower. |
+| `midi:<port>` | The follower for one MIDI input's clock. A write (`tempo/set`, `transport/set`, `meter`, `midi/clock/follow`) claims one that has not clocked yet. |
+
+The reply carries the same segment, e.g. `/clockwork/clock/midi:foo/tempo.reply`.
+
+### Core verbs
+
+Hosts: **S N W**.
+
+| → | ← | |
+|---|---|---|
+| `tempo/set f:bpm [h:atNtpMicros]` † | — | From now, or from the instant given (the beat then is held). On a `midi…` timeline, an override until its clock next ticks. |
+| `tempo/get [tok]` † | `tempo.reply d:bpm [tok]` | |
+| `transport/set i:playing` † | — | On a `midi…` timeline, play is a Start at beat 0. |
+| `transport/get [tok]` † | `transport.reply i:playing i:anchored [tok]` | `anchored`: a Start or Song Position has fixed the beat origin (always 1 for `link`). |
+| `transport/time/get [tok]` † | `transport/time.reply h:ntpMicros [tok]` | The last transport change; 0 if none. |
+| `meter i:num i:den` † | — | |
+| `meter [tok]` † | `meter.reply i:num i:den [tok]` | |
+| `bar [tok]` † | `bar.reply d:bar d:beatInBar i:num i:den [tok]` | Now. Bar 0 starts at beat 0. |
+| `rpc/beat_at_time h:ntpMicros f:quantum [tok]` † | `rpc/beat_at_time.reply d:beat [tok]` | |
+| `rpc/phase_at_time h:ntpMicros f:quantum [tok]` † | `rpc/phase_at_time.reply d:phase [tok]` | In `[0, quantum)`. |
+| `rpc/time_at_beat h:microbeats f:quantum [tok]` † | `rpc/time_at_beat.reply h:ntpMicros [tok]` | 1 beat = 1 000 000 microbeats. `f:beat` is accepted but loses precision past beat 32768. |
+| `rpc/beat_phase_at_time h:ntpMicros f:quantum [tok]` † | `rpc/beat_phase_at_time.reply d:beat d:phase [tok]` | |
+| `rpc/beat_phase_now f:quantum [tok]` † | `rpc/beat_phase_now.reply h:ntpMicros d:beat d:phase [tok]` | |
+| `timelines/get [tok]` | `timelines.reply (s:name s:label f:bpm i:clocking i:stale i:primary)… [tok]` | `label` is the OS device name. |
+| `start_stop_sync/set i:on` | — | Link start/stop sync. |
+| `start_stop_sync/get [tok]` | `start_stop_sync.reply i:on [tok]` | |
+| `enabled/get [tok]` | `enabled.reply i:linkEnabled [tok]` | |
+| `time/now/get [tok]` | `time/now.reply h:ntpMicros [tok]` | |
+| `peers/count/get [tok]` | `peers/count.reply i:n [tok]` | |
+| `capabilities/get [tok]` | `capabilities.reply (s:name i:value)… [tok]` | `link`, `link_audio`, `midi`. Match by name. All 0 on W. |
+
+`← /clockwork/clock/unsupported s:address [tok]` answers a clock verb this
+host does not have (the Link verbs on W) or that does not exist.
+
+### `state/get`
+
+`→ /clockwork/clock/state/get [tok]` →
+`← /clockwork/clock/state.reply d:bpm i:playing d:beatOriginNtp d:playingChangedAtNtp i:flags i:meterNum i:meterDen [tok]`
+
+The whole clock from one snapshot, answered on the audio thread. Times are
+NTP seconds. `flags`: bit 0 Link enabled, bit 1 start/stop sync, bit 2
+Link Audio publishing.
+
+Hosts: **W**. S and N answer `/clockwork/clock/unsupported`.
+
+### Link session
+
+Hosts: **S N** (capability `link`).
+
+| → | ← | |
+|---|---|---|
+| `visibility i:mode` | — | 0 off, 1 this machine only, 2 the network. |
+| `visibility/get [tok]` | `visibility.reply i:mode [tok]` | |
+| `peer_name/set s:name` | — | The name other peers see. |
+| `peer_name/get [tok]` | `peer_name.reply s:name [tok]` | |
+| `peers/get` | `peers.reply i:n (s:nodeId s:gatewayIp i:isLoopback s:measurementIp i:measurementPort s:audioIp i:audioPort)…` | `audioIp` is `""` for a peer without Link Audio. |
+| `reset` | — | Leave the session and rejoin it. |
+| `notify/subscribe [i:token]` | `notify/subscribe.reply i:token` if tokened, then `notify/tempo` and `notify/peers` to the caller | |
+| `notify/unsubscribe` | — | |
+
+Pushed to clock subscribers:
+
+| ← | |
+|---|---|
+| `/clockwork/clock/notify/tempo d:bpm` | |
+| `/clockwork/clock/notify/peers i:n` | |
+| `/clockwork/clock/notify/transport i:playing h:atNtpMicros` | |
+| `/clockwork/clock/timelines (s:name s:label f:bpm i:clocking i:stale i:primary)…` | The set of timelines changed (builds with MIDI). |
+
+### Link Audio
+
+Hosts: **S N** (capability `link_audio`).
+
+| → | ← | |
+|---|---|---|
+| `audio/publish/set i:on` | — | Publish this engine's audio to peers. |
+| `audio/publish/get [tok]` | `audio/publish.reply i:on [tok]` | |
+| `audio/channels/get` | `audio/channels.reply i:n (s:channelId s:channelName s:peerId s:peerName)…` | Channels the peers offer. |
+| `audio/input/add s:peer s:channel i:inputChannel` | `audio/input/add.reply i:ok` | The peer's channel onto input channels `inputChannel` and `+1` (mono is mirrored). Refused unless the channel exists and the pair is free. |
+| `audio/input/remove s:peer s:channel` | — | |
+| `audio/input/clear` | — | |
+| `audio/input/latency/set s:peer s:channel f:seconds` | `audio/input/latency/set.reply i:ok` | |
+| `audio/inputs/get` | `audio/inputs.reply i:n (s:peer s:channel i:inputChannel i:sampleRate i:sourceChannels f:bufferedMs i:state i:droppedSourceBuffers i:networkGapBuffers i:totalSourceBufferCalls i:duplicateCountCalls f:latencySeconds)…` | `state`: 0 not subscribed, 1 connecting, 2 connected, 3 dropout. `sourceChannels` is 0 until the first buffer. |
+| `audio/sink/add s:name i:channel i:numChannels` | `audio/sink/add.reply i:ok` | An extra published channel, from `numChannels` channels starting at `channel`. |
+| `audio/sink/remove s:name` | — | |
+| `audio/sinks/get` | `audio/sinks.reply i:n (s:name i:channel i:numChannels i:hasSubscriber)…` | |
+
+---
+
+## Scheduling
+
+### `/clockwork/schedule`
+
+`→ /clockwork/schedule h:when b:message`
+
+Hosts: **S N W**.
+
+Holds `message` (one OSC message, clockwork's or scsynth's) and handles it
+at `when` as if it had arrived then from the same sender, so its reply
+comes back to you. `when` is an OSC timetag as `h` (the `t` type is not
+accepted) or NTP seconds as `d` or `f`; 0 or 1 means now. No reply. A
+malformed one is dropped and counted in the metrics.
+
+A scheduled MIDI or OSC send leaves at its moment: the time goes with it
+to the port or the socket.
+
+A bundle with a future timetag is also held, and handed to scsynth whole
+at its time.
+
+### `/clockwork/sched/flush`
+
+`→ /clockwork/sched/flush [s:tag]`
+
+Hosts: **S N**. W refuses it (`unknown clockwork verb`).
+
+Drops what is pending under `tag`. No reply. No tag, or `""`, is `default`:
+everything held by `/clockwork/schedule`. `synth` is the timestamped
+bundles held for scsynth.
 
 ---
 
 ## MIDI
 
-A native MIDI subsystem (Rust + `midir`: CoreMIDI / ALSA / WinMM) folded into the
-engine, replacing the external `sp_midi` NIF and the Tau MIDI glue. It is a
-peripheral that exchanges `/midi/*` OSC with the engine. Ports are addressed by a
-**normalised handle** (lowercase, OSC-unsafe chars → `_`, duplicates suffixed
-`_2`, `_3`); `port = "*"` means all open ports; MIDI channels are **1-based**
-(1–16), and `channel = -1` on output means "all 16". Available only on native
-builds (gated by `CLOCKWORK_MIDI`).
+Hosts: **S N**, and **W** when the page opts in with `midi: true` in the
+client's options. Without it, W refuses every `/clockwork/midi/` verb with
+`MIDI is not enabled on this host: new Clockwork({ midi: true })`.
 
-### Device management
+- A port is a normalised handle: lowercase, with space `# * , / ? [ ] { } :`
+  replaced by `_`, and duplicates suffixed `_2`, `_3`, …
+- `"*"` is every open port.
+- Channels are 1 to 16; `-1` on output is all 16.
 
-| `→` Request | Effect / Reply |
-| --- | --- |
-| `/midi/ports/list` | Reply `← /midi/ports.reply i:nIn [s:name i:open]* i:nOut [s:name i:open]*` |
-| `/midi/in/enable s:port i:0\|1` | Open/close an input (`"*"` = all). Pushes `/midi/ports`. |
-| `/midi/out/enable s:port i:0\|1` | Open/close an output (`"*"` = all). Pushes `/midi/ports`. |
-| `/midi/refresh` | Re-enumerate devices; pushes `/midi/ports`. |
-| `/midi/notify/subscribe` | Subscribe to `/midi/in/*` events + `/midi/ports` pushes; replies with a `/midi/ports.reply` snapshot. Tokened requests are acked (see "Subscribe acks"). |
-| `/midi/notify/unsubscribe` | Stop notifications. |
+### Ports
 
-### Output (engine → device)
+Addresses under `/clockwork/midi/`.
 
-`→ /midi/out/<verb> s:port [i:channel] <args…>` — no reply. Verbs:
+| → | ← | Hosts |
+|---|---|---|
+| `ports/list` (or `ports/get`) | `ports.reply i:nIn (s:port i:open)… i:nOut (s:port i:open)…` | S N W |
+| `in/enable s:port i:on` | — (pushes `ports`) | S N W |
+| `out/enable s:port i:on` | — (pushes `ports`) | S N W |
+| `refresh` | — (re-enumerates, pushes `ports`) | S N W |
+| `notify/subscribe [i:token]` | a `ports.reply` snapshot, then `notify/subscribe.reply i:token` if tokened | S N W |
+| `notify/unsubscribe` | — | S N W |
 
-| Verb | Args after `port` |
-| --- | --- |
-| `note_on` / `note_off` | `i:channel i:note i:velocity` |
+### Sending
+
+`→ /clockwork/midi/out/<verb> s:port <args> [t:when]`. No reply. A
+trailing timetag sends at that moment.
+
+| Verb | Arguments after `port` |
+|---|---|
+| `note_on`, `note_off` | `i:channel i:note i:velocity` |
 | `control_change` | `i:channel i:controller i:value` |
 | `program_change` | `i:channel i:program` |
 | `channel_pressure` | `i:channel i:value` |
 | `poly_pressure` | `i:channel i:note i:value` |
-| `pitch_bend` | `i:channel i:value` (14-bit, 0–16383) |
-| `raw` / `sysex` | `i:byte …` (or a single `b:blob`) |
-| `clock` / `start` / `stop` / `continue` | *(port only)* — single system-real-time byte (Sonic Pi's `midi_clock_tick`/`midi_start`/`midi_stop`/`midi_continue`) |
+| `pitch_bend` | `i:channel i:value` (0–16383) |
+| `raw`, `sysex` | `i:byte…`, or one `b:bytes` |
+| `clock`, `start`, `stop`, `continue` | none |
 
-`channel = -1` fans a channel-voice message out to all 16 channels.
+Hosts: **S N W**.
 
-### Scheduling (sample-locked to audio)
+### Clock out
 
-`→ /midi/at t:oscTimetag b:<inner /midi/out OSC>` — schedule an outgoing MIDI
-event for a future time. The timetag is in SuperClock's OSC-timetag domain (the
-same one scsynth bundles use), so scheduled MIDI stays locked to the audio. The
-engine's deferred-event scheduler (ticked in `process_audio`) holds the event and
-dispatches it on time. (A `d:ntpSeconds` form is also accepted, e.g. by tests.)
+| → | ← | Hosts |
+|---|---|---|
+| `clock/tick s:port` | — | S N W |
+| `clock/beat s:port f:durationMs` | — | S N |
+| `clock/follow s:port [s:timeline] [tok]` | `clock/follow.reply s:port s:timeline [tok]` | S N |
+| `clock/unfollow s:port [tok]` | `clock/unfollow.reply s:port [tok]` | S N |
+| `clock/followers [tok]` | `clock/followers.reply (s:port s:timeline)… [tok]` | S N |
 
-### Clock output
+- `clock/tick`: one clock byte (0xF8) now.
+- `clock/beat`: one beat of 24 ticks, spread over `durationMs` from now. No
+  transport byte: send `out/start` / `out/stop` / `out/continue` yourself.
+- `clock/follow`: a continuous 24-per-beat clock on the timeline's grid
+  (`link` by default, `midi` or `midi:<port>`), with Start and Stop sent at
+  its transport changes. A port already following is re-targeted. At most 8
+  ports. An unknown timeline or a ninth port is refused in the log, with no
+  reply.
+- W refuses `clock/beat`, `clock/follow`, `clock/unfollow` and
+  `clock/followers` with `not available on the web host`.
 
-A beat of MIDI clock is scheduled off SuperClock (into the deferred-event
-scheduler, so the ticks stay sample-locked to scsynth audio). The beat verb is
-clock-only — no transport byte is sent; drive `Start` / `Stop` / `Continue`
-separately via `/midi/out/start|stop|continue`. `port = "*"` fans the ticks to
-every open output port.
+### Clock in
 
-| `→` Request | Effect |
-| --- | --- |
-| `/midi/clock/beat s:port f:durationMs` | One beat of 24 evenly-spaced ticks spread over `durationMs` (Sonic Pi's `midi_clock_beat`). |
-| `/midi/clock/tick s:port` | One immediate tick (`0xF8`); also the address the beat verb's scheduled ticks re-enter the dispatch path on. |
+`→ /clockwork/midi/clock/sync s:port i:on`: heed (1, the default) or ignore
+(0) the MIDI clock arriving on an input. Hosts: **S N W**.
 
-### Input (device → engine → subscribers)
+On S and N an input's clock drives its `midi:<port>` timeline: the pulses
+set its tempo, and Start, Continue, Stop and Song Position its transport.
+On W the estimated tempo arrives as `/clockwork/midi/in/clock_bpm`.
 
-Pushed to `/midi/notify` subscribers as `← /midi/in/<verb> s:port [i:channel] <args…>`,
-mirroring the output verbs, plus the system messages: `sysex s:port b:blob`,
-`song_position s:port i:sixteenths`, `song_select s:port i:n`,
-`time_code s:port i:data`, `tune_request s:port`, and the realtime transport
-`start` / `continue` / `stop` / `reset` (`s:port`). Clock pulses (0xF8) are **not**
-forwarded — see below. (This is full parity with the Tau layer it replaces, which
-also ignored bare clock + active-sensing.)
+### Events
 
-### Clock input (sync SuperClock to external MIDI clock)
+Pushed to MIDI subscribers as `← /clockwork/midi/in/<kind> s:port <args>`:
 
-| `→` Request | Effect |
-| --- | --- |
-| `/midi/clock/sync s:port i:0\|1` | Use incoming clock on `port` as the SuperClock tempo source. |
+| Kind | Arguments after `port` |
+|---|---|
+| `note_on`, `note_off` | `i:channel i:note i:velocity` |
+| `control_change` | `i:channel i:controller i:value` |
+| `program_change` | `i:channel i:program` |
+| `channel_pressure` | `i:channel i:value` |
+| `poly_pressure` | `i:channel i:note i:value` |
+| `pitch_bend` | `i:channel i:value` |
+| `sysex` | `b:bytes` |
+| `song_position` | `i:sixteenths` |
+| `song_select` | `i:song` |
+| `time_code` | `i:data` |
+| `tune_request`, `start`, `continue`, `stop`, `active_sensing`, `reset` | none |
+| `clock_bpm` | `f:bpm` (W only) |
 
-When enabled, clock pulses are timestamped and run through a median-filtered
-estimator to derive BPM (pushed to SuperClock, not forwarded as events); `Start` /
-`Continue` / `Stop` / Song-Position drive SuperClock's transport and beat origin.
+Clock pulses (0xF8) are not forwarded. On W each event but `clock_bpm`
+carries a trailing `t`: when it arrived.
+
+`← /clockwork/midi/ports` (the `ports.reply` payload) is pushed when a port
+appears, goes or is enabled.
 
 ---
 
 ## Gamepad
 
-A native game-controller subsystem (Rust: `gilrs` — evdev / XInput, with the
-SDL controller-mapping database — and Apple's GameController framework on
-macOS) folded into the engine, structured like the MIDI one. It is a peripheral that exchanges `/gamepad/*` OSC with the engine.
-Pads are addressed by a stable normalised handle (lowercased, unsafe chars →
-`_`, duplicates suffixed `_2`, `_3`); `pad = "*"` means all connected pads.
-Native builds only (gated by `CLOCKWORK_GAMEPAD`); on the web the
-main-thread `GamepadManager` (JS Gamepad API I/O + the shared Rust core
-compiled to wasm) serves the **input-event and rumble subset** of this
-contract — device lists arrive as structured JS callbacks rather than OSC,
-and the management verbs (`/gamepad/enable`, `/gamepad/devices/list`,
-`/gamepad/refresh`, `/gamepad/notify/*`) are native-only.
+Hosts: **S N**, and **W** when the page opts in with `gamepad: true`.
+Without it, W refuses every `/clockwork/gamepad/` verb with
+`gamepad is not enabled on this host: new Clockwork({ gamepad: true })`.
 
-On macOS, controller discovery requires the host process to pump the main
-CFRunLoop. The standalone engine does; an embedding that never pumps it (e.g.
-a BEAM/NIF host) serves `/gamepad/*` normally but reports an empty device
-list.
+A pad is a normalised handle, as a MIDI port is; `"*"` is every connected
+pad. Hot-plug is automatic. A pad is enabled when it connects, unless
+`enable "*" 0` said otherwise.
 
-Hotplug is automatic (no refresh needed); pads are **enabled by default** on
-connect.
+On macOS, discovery needs the host process to pump the main run loop. The
+server does; the NIF does not, so on macOS it answers every verb but lists
+no pads.
 
-### Device management
+| → | ← | Hosts |
+|---|---|---|
+| `/clockwork/gamepad/devices/list` (or `devices/get`) | `/clockwork/gamepad/devices.reply i:n (s:pad i:enabled)…` | S N W |
+| `/clockwork/gamepad/enable s:pad i:on` | — (pushes `devices`). `"*"` also sets the default for pads that connect later. | S N W |
+| `/clockwork/gamepad/refresh` | — (pushes `devices`) | S N W |
+| `/clockwork/gamepad/notify/subscribe [i:token]` | a `devices.reply` snapshot, then `notify/subscribe.reply i:token` if tokened | S N W |
+| `/clockwork/gamepad/notify/unsubscribe` | — | S N W |
+| `/clockwork/gamepad/out/rumble s:pad f:strong f:weak i:durationMs` | — | S N W |
+| `/clockwork/gamepad/out/rumble_stop s:pad` | — | S N W |
 
-| `→` Request | Effect |
-| --- | --- |
-| `/gamepad/devices/list` | Reply `← /gamepad/devices.reply i:n [s:name i:enabled]*` |
-| `/gamepad/enable s:pad i:0\|1` | Mute/unmute a pad's `/gamepad/in/*` events (`"*"` = all + the default for pads that connect later). Pushes `/gamepad/devices`. |
-| `/gamepad/refresh` | Re-broadcast the device snapshot (`/gamepad/devices`). |
-| `/gamepad/notify/subscribe` | Subscribe to `/gamepad/in/*` events + `/gamepad/devices` pushes; replies with a `/gamepad/devices.reply` snapshot. Tokened requests are acked (see "Subscribe acks"). |
-| `/gamepad/notify/unsubscribe` | Stop notifications. |
+Rumble magnitudes are 0 to 1; `durationMs <= 0` rumbles until stopped. It
+is ignored on macOS and by pads without force feedback; on W it uses
+`Gamepad.vibrationActuator`.
 
-### Input events
+Pushed to gamepad subscribers:
 
-Pushed to `/gamepad/notify` subscribers. Buttons and axes use a canonical
-cross-platform vocabulary (identical on web and native):
+| ← | |
+|---|---|
+| `/clockwork/gamepad/in/button s:pad s:button i:pressed f:value` | `value` 0 to 1; triggers sweep, other buttons jump. |
+| `/clockwork/gamepad/in/axis s:pad s:axis f:value` | `value` −1 to 1, up and right positive. |
+| `/clockwork/gamepad/devices i:n (s:pad i:enabled)…` | A pad connected, went or was enabled. |
 
-| `←` Event | Meaning |
-| --- | --- |
-| `/gamepad/in/button s:pad s:button i:pressed f:value` | Button edge or analog sweep. `value` is 0..=1 (digital buttons jump 0/1; the triggers sweep). |
-| `/gamepad/in/axis s:pad s:axis f:value` | Stick movement. `value` is -1..=1, **up/right positive**. |
-| `/gamepad/devices i:n [s:name i:enabled]*` | Pushed on connect / disconnect / enable change. |
-
-Button names (W3C standard-mapping order): `south east west north
-left_shoulder right_shoulder left_trigger right_trigger select start
-left_thumb right_thumb dpad_up dpad_down dpad_left dpad_right mode`. Axis
-names: `left_x left_y right_x right_y` (plus `dpad_x`/`dpad_y` for the rare
-native devices whose d-pad reports as a hat axis). Elements beyond the
-canonical tables surface as `button_<i>` / `axis_<i>` (e.g. non-standard web
-mappings).
-
-Values are quantised to 1/127 steps and only changes are emitted (with an 0.08
-stick deadzone and press hysteresis for analog triggers), so a resting stick is
-silent and a sweep can't flood subscribers.
-
-### Output (rumble)
-
-| `→` Request | Effect |
-| --- | --- |
-| `/gamepad/out/rumble s:pad f:strong f:weak i:durationMs` | Start (or retrigger) rumble; motor magnitudes 0..=1. `durationMs <= 0` = until stopped. |
-| `/gamepad/out/rumble_stop s:pad` | Stop any active rumble. |
-
-Best-effort: pads (or platforms — notably macOS) without force-feedback support
-ignore it. On the web, rumble uses `Gamepad.vibrationActuator` (Chromium).
+Buttons: `south east west north left_shoulder right_shoulder left_trigger
+right_trigger select start left_thumb right_thumb dpad_up dpad_down
+dpad_left dpad_right mode`. Axes: `left_x left_y right_x right_y`, and
+`dpad_x dpad_y` for a pad whose d-pad is a hat. Anything beyond is
+`button_<i>` or `axis_<i>`. Values move in steps of 1/127 and only changes
+are sent (with a 0.08 stick dead zone). On W each event carries a trailing
+`t`: when it was seen.
 
 ---
 
-## Sonic Pi daemon relay
+## OSC cues and sending
 
-Sonic Pi's GUI can't send to SuperSonic's UDP port directly (the
-daemon holds the auth token and brokers on its behalf). For that
-architecture, Sonic Pi's `daemon.rb` exposes a parallel `/daemon/audio/*`
-surface that simply forwards after token validation:
+Hosts: **S N**. W refuses these.
 
-| Daemon endpoint                 | Forwards to                    |
-| ------------------------------- | ------------------------------ |
-| `/daemon/audio/switch-device`   | `/supersonic/devices/switch`   |
-| `/daemon/audio/switch-driver`   | `/supersonic/drivers/switch`   |
-| `/daemon/audio/request-devices` | `/supersonic/devices/list`     |
-| `/daemon/audio/reopen-device`   | `/supersonic/devices/reopen`   |
+| → | ← |
+|---|---|
+| `/clockwork/osc/cue-server/config i:port i:loopback i:cuesOn` | — |
+| `/clockwork/osc/cue-server/cues-on i:on` | — |
+| `/clockwork/osc/cue-server/loopback i:on` | — |
+| `/clockwork/osc/notify/subscribe [i:token]` | `/clockwork/osc/notify/subscribe.reply i:token` if tokened |
+| `/clockwork/osc/notify/unsubscribe` | — |
 
-Arguments past the daemon token are passed through unchanged.
-SuperSonic's notify-target registration and forwarding logic is
-unaware of the daemon — from SuperSonic's perspective, the daemon
-is the notify target.
+The cue server listens on `port` (0: not at all, the default), on
+127.0.0.1 and ::1 when `loopback` is 1 (the default), on every interface
+when 0. The flags also take `T`/`F`. With cues on (off by default), every
+message it receives is pushed to OSC subscribers as
+
+`← /external-osc-cue s:ip i:port s:address <the message's arguments>`
+
+outside the `/clockwork/` namespace; a bundle arrives as its messages.
+
+On N a tokened subscribe is acked, but no cue is ever delivered.
+
+### `/clockwork/osc/send`
+
+`→ /clockwork/osc/send s:host i:port b:packet`
+
+Sends `packet` to `host:port` (IPv4 or IPv6; a hostname is resolved once).
+Inside `/clockwork/schedule` it leaves at its time. No reply on success.
+A send that fails is refused with `host does not resolve`,
+`message of <n> bytes exceeds the sink's widest cell (<m> bytes)` or
+`sink full`. An empty host, a port of 0 or less, or an empty packet is only
+logged.
 
 ---
 
-## Versioning
+## Recording
 
-There is no explicit protocol version. Breaking changes should
-bump the major version in the engine banner (visible in
-`/supersonic/info`) and be documented here. Current callers are
-Sonic Pi (via `daemon.rb` + `osc_handler.cpp`) and the JS embedder.
+Hosts: **S** and **N**, which both send through `supersonic::Commands`. W
+refuses these (`unknown clockwork verb`), and so does S over `--shm-commands`.
+
+| → | ← |
+|---|---|
+| `/clockwork/record/start s:path [s:format] [i:bits]` | `/clockwork/record/start.reply i:ok s:pathOrError` |
+| `/clockwork/record/stop` | `/clockwork/record/stop.reply i:ok s:pathOrError` |
+
+Records the main output from the moment `start` is answered, at the
+device's rate and channel count. `path` is UTF-8 on every platform,
+Windows included.
+
+| `format` | `bits` |
+|---|---|
+| `wav` (default; also `wave`) | 16, 24 (default), 32 (float) |
+| `flac` | 16, 24 |
+
+`aiff`, `w64` and `rf64` are recognised but refused, as is any other pair:
+`unsupported format/bitDepth: <format>/<bits>`. Other errors:
+`already recording`, `not recording`, `could not open '<path>' for writing: <status>`,
+`'<path>' could not be finished: <status>`.
+
+---
+
+## Tracks and plugins
+
+Hosts: **S**. W refuses these. N accepts them, but its tracks do not play
+yet.
+
+A track is a named chain of CLAP and VST3 plugins with a stereo send and
+return lane; the plugins run in a separate bridge process.
+[clockwork/docs/TRACKS.md](../clockwork/docs/TRACKS.md) has the model.
+Addresses are under `/clockwork/track/`. `<track>` is `i:id` or `s:name`.
+An unknown track verb is refused with `unknown track verb`.
+
+### Playing
+
+Handled inside the audio block, so `/clockwork/schedule` places them on
+their sample. No replies.
+
+| → | |
+|---|---|
+| `note <track> i:on i:pitch f:velocity [i:channel]` | `velocity` 0 to 1, or `i` 0 to 127. |
+| `cc <track> i:number f:value [i:channel]` | `value` 0 to 1, or `i` 0 to 127. |
+| `bend <track> f:bend [i:channel]` | −1 to 1. |
+| `notes_off [<track>]` | No track, or `"*"`: every track. |
+| `param <track> s:name f:value [i:handle]` | By parameter name: the first plugin in the chain that has it, or the one `handle` names. |
+| `plugin/param i:handle i:id f:value` | By parameter id, in the plugin's own range. |
+
+`channel` 1 to 16 reaches the instruments listening on that channel
+(`plugin/channel`); 0 or none reaches all. Channel 16 is read as 0.
+
+### Editing
+
+| → | ← |
+|---|---|
+| `list` | `list.reply` (the `track/list` payload), and a `track/list` broadcast |
+| `create s:name` | `create.reply i:id i:ok s:nameOrError` |
+| `remove <track>` | `remove.reply i:id i:removed` |
+| `rename <track> s:name` | `rename.reply i:id i:ok s:nameOrError` |
+| `move <track> i:index` | — |
+| `clear` | — |
+| `gain <track> f:gain` | — (linear, 1 is unity) |
+| `mute <track> i:mute` | — |
+| `timeline <track> [s:timeline]` | `timeline.reply i:id i:ok s:timelineOrError`. `link` (the default) or `midi:<port>`; no name asks. |
+| `plugin/add <track> s:path [i:index] [i:at]` | `plugin/add.reply i:handle i:ok s:nameOrError s:path`. `index`: which plugin in the file; `at`: chain position (the end by default). |
+| `plugin/remove i:handle` | `plugin/remove.reply i:handle i:removed` |
+| `plugin/move i:handle i:index` | — |
+| `plugin/bypass i:handle i:bypass` | — |
+| `plugin/channel i:handle i:channel` | — (1 to 16; 0 is every channel) |
+| `plugin/editor i:handle i:show` | — (the plugin's own window) |
+| `plugin/params i:handle [i:offset]` | one `track/plugin/params` page, broadcast |
+| `rig/save s:path` | `rig/save.reply i:ok s:pathOrError` |
+| `rig/load s:path` | `rig/load.reply i:ok i:missing s:pathOrError`. Replaces every track. |
+| `folders` | `folders.reply i:nExtra s:dir… i:nPlatform s:dir…`, and a broadcast |
+| `folders/add s:dir`, `folders/remove s:dir` | — |
+| `scan` | `plugins.reply i:total i:offset i:count (s:name s:vendor s:format s:path i:index i:isInstrument)…` in pages of up to 64, each also broadcast as `track/plugins`. Takes seconds. |
+
+### Broadcasts
+
+To the notify targets, after every change:
+
+| ← | |
+|---|---|
+| `/clockwork/track/list i:laneBase i:count …` | Per track `i:id i:slot s:name i:sendChannel i:returnChannel f:gain i:mute i:nodeCount`, then per plugin `i:handle i:isInstrument i:bypass i:channel s:name s:vendor s:format s:path i:index i:latency`; after the last track, per track `s:timeline`. Channels are 0-based. |
+| `/clockwork/track/state i:id f:gain i:mute s:timeline` | Gain or mute changed. |
+| `/clockwork/track/folders …` | As `folders.reply`. |
+| `/clockwork/track/plugins …` | As `plugins.reply`. |
+| `/clockwork/track/plugin/params i:handle i:total i:offset i:count (i:id s:name f:min f:max f:value i:group s:groupName i:automatable)…` | Up to 48 per page: ask for `offset + count` next. Every subscriber hears every page. |
+| `/clockwork/track/plugin/param/edit i:handle i:id f:normalised` | The plugin's own window moved a control. |
+| `/clockwork/track/plugin/param/value i:handle i:id f:normalised` | A parameter set by name. |
+| `/clockwork/track/error s:verb s:detail i:handle` | A verb failed; `handle` is the plugin concerned, or 0. `verb` `bridge`: the plugin process died, hung or could not start, and is restarting. |
+
+---
+
+## Assets
+
+Hosts: **S W**. N answers, but gives a client no way to write the inbox.
+
+`→ /clockwork/asset/commit i:id i:kind i:offset i:bytes i:channels i:frames f:rate`
+
+Hands scsynth bytes the client wrote into the inbox lane at
+`offset`…`offset + bytes`. SuperSonic's scsynth takes `id` as the buffer
+number. On S the inbox is in the shared-memory segment, sized by
+`--inbox-mb` (default 512); on W it is in the module's memory.
+
+| `kind` | |
+|---|---|
+| 0 | Raw bytes. `channels`, `frames` and `rate` are ignored. |
+| 1 | Interleaved float32 audio. `frames × channels × 4` must equal `bytes`; `rate > 0`. |
+
+| ← | |
+|---|---|
+| `/clockwork/asset/committed i:id` | scsynth has it. |
+| `/clockwork/asset/refused i:id s:reason` | e.g. `range runs past the inbox`, `id is still held; release it first`, `the guest refused it`. |
+| `/clockwork/asset/released i:id` | Later, to the committing client: scsynth let it go (a `/b_free`, or a rebuild). The range may be reused. |
+
+---
+
+## Misc
+
+### `/clockwork/summary`
+
+Hosts: **S**. N and W refuse it.
+
+No reply. Writes two lines to the server's log: its name and version, and
+what was compiled in. For a GUI that shows the log.
+
+### Versioning
+
+There is no protocol version. `/clockwork/notify.reply` names the
+clockwork build, `supersonic -v` prints the server's version, and
+`/clockwork/clock/capabilities/get` says which clock features a build has.
+Replies grow only by appending arguments: read positionally, and ignore
+what follows the fields you know.
+
+---
+
+## scsynth's own messages (`/supersonic/`)
+
+scsynth answers these itself, on every host.
+
+| | |
+|---|---|
+| `← /supersonic/buffer/allocated s:uuid i:bufnum` | After a `/b_allocPtr`. |
+| `← /supersonic/buffer/freed i:bufnum h:pointer` | A buffer's memory was freed. |
+| `← /supersonic/synthdef/loaded s:name` | Per definition after a `/d_recv`. W only. |
+| `→ /supersonic/buffer/read i:bufnum i:bufOffset i:inboxOffset i:frames i:channels f:rate` | Copies interleaved frames from the inbox into an allocated buffer. `/done` or `/fail`. |
+| `→ /supersonic/buffer/publish i:bufnum i:bufOffset i:frames i:outboxOffset` | Copies a buffer's frames into the outbox (`frames < 0`: to the end). `← /supersonic/buffer/published i:bufnum i:channels i:frames f:rate`, or `/fail`. |
+| `→ /supersonic/piano/wavetable [i:bufnum]` | The piano UGen plays from channel 0 of `bufnum`; none, or -1, takes the table away. `/done` or `/fail`. |

@@ -20,14 +20,18 @@ build.
 
 ```bash
 scripts/export-site.sh          # -> build/site
+scripts/export-site.sh --cdn    # -> build/site, as sonic-pi.net/supersonic serves it
 ```
 
-`build/site` is this directory with `dist` copied in as a real directory —
-what sonic-pi.net/supersonic serves. The host must send
+Without `--cdn`, `build/site` is this directory with `dist` copied in as a
+real directory. The test suite boots that copy as well as this one.
+
+With `--cdn` it is what sonic-pi.net/supersonic serves: `demo.html` and the
+library, with the samples and synthdefs fetched from the npm packages on
+jsDelivr, at the versions in `packages/` — so those must be published first.
+
+Either way, the host must send
 `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp` (`serve.json` does this for
-`npx serve`). The test suite boots the exported copy as well as this one.
-
-
-
-
+`npx serve`). The demo asks for the SAB transport (`mode: "sab"`), so
+without them it does not boot.

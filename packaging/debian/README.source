@@ -4,12 +4,14 @@ supersonic — source package layout
 This source package uses format 3.0 (quilt) with three upstream tarballs:
 
   supersonic_<v>.orig.tar.xz
-      The upstream repository (git archive of the release tag) with the
-      clockwork git submodule archived into clockwork/ at its pinned commit,
-      minus the Files-Excluded entries listed in debian/copyright.
+      The upstream repository (git archive of HEAD, which for a release is
+      the commit tagged v<v>) with the clockwork git submodule archived into
+      clockwork/ at the commit checked out there (the pinned one, in a clean
+      checkout), minus the Files-Excluded entries listed in debian/copyright.
+      Uncommitted changes are not included.
 
   supersonic_<v>.orig-link.tar.xz
-      Pristine Ableton Link 4.0 including its asio-standalone submodule
+      Pristine Ableton Link 4.1 including its asio-standalone submodule
       (the GitHub tag tarball does NOT contain the submodule, so this is
       assembled from a recursive clone). Unpacks to link/. clockwork's four
       Link patches (kept in clockwork/external/*.patch as the single source

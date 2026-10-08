@@ -1,6 +1,8 @@
-.\" Man page for supersonic. Keep the option list in sync with the --help text
-.\" in host/EngineHost.cpp — that text is the source of truth.
-.TH SUPERSONIC 1 "July 2026" "supersonic" "User Commands"
+.\" Man page for supersonic. Keep the option list in step with the parser
+.\" (parseArgs) and the --help text (usage) in host/EngineHost.cpp, and with
+.\" the engine's own options in dsp/scsynth/scsynth_options.h. The parser is
+.\" what the flags do; check a statement there before writing it here.
+.TH SUPERSONIC 1 "October 2026" "supersonic" "User Commands"
 .SH NAME
 supersonic \- low-latency scsynth-compatible audio synthesis server
 .SH SYNOPSIS
@@ -14,37 +16,92 @@ scsynth OSC command set, so SuperCollider clients (such as Sonic Pi) can
 launch and drive it as a drop-in replacement for
 .BR scsynth (1).
 .PP
-Commands arrive as OSC over UDP by default; alternative command transports
-(TCP, Unix sockets, shared memory) can be selected with the transport options
-below. Ableton Link session sync (including Link Audio streaming), MIDI I/O,
-game controller input, and OSC cue networking are built in.
+Commands arrive as OSC over UDP by default, on 127.0.0.1 only. Alternative
+command transports (TCP, Unix sockets, a Windows named pipe, shared memory)
+can be selected with the transport options below. Ableton Link session sync
+(including Link Audio streaming), MIDI I/O, game controller input, and OSC cue
+networking are built in; a client turns them on, or subscribes to them,
+with OSC commands.
+.PP
+The log goes to standard error. There is no log file.
 .SH OPTIONS
+.SS Audio
 .TP
-.BI \-u " port"
-UDP port (default: 57110). Also numbers the server's shared-memory segment;
-.B \-u 0
-disables shared memory.
+.BI \-H " name"
+.TQ
+.BI \-H " in out"
+Audio device. One name names the output and the input; two name the input
+and then the output. The output is a fuzzy match on
+\[dq]Driver : Device\[dq], as
+.B \-\-list\-devices
+prints it: every word must appear, case ignored, and the shortest match
+wins. The input name must be the device's name as listed.
+.B __system__
+as the output follows the system default output, as giving no
+.B \-H
+does. The named device is remembered by that name: while it is missing or
+unplugged the server plays on the default, and it switches back when a device
+of that name appears.
 .TP
 .BI \-S " rate"
-Sample rate (default: 48000).
+Sample rate (default: 48000). If the device does not offer it, the device's
+own rate is kept.
 .TP
 .BI \-Z " size"
-Hardware buffer size (default: auto).
+Hardware buffer size (default: automatic: the smallest size of 128 or more
+that the device offers).
 .TP
 .BI \-z " size"
-scsynth control block size, 32\-1024 (default: 128).
+DSP control block size, clamped to 32\-1024 (default: automatic: the device's
+buffer size when it is 32 to 128, otherwise 128).
 .TP
 .BI \-i " num"
-Input channels (default: device max; 0 = disable).
+Input channels (default: all the device has; 0 turns inputs off).
 .TP
 .BI \-o " num"
-Output channels (default: device max).
+Output channels (default: all the device has).
 .TP
-.BI \-n " num"
-Maximum nodes (default: 1024).
+.BI \-\-audio\-driver " name"
+Driver to boot on, such as CoreAudio, Windows Audio, DirectSound, ASIO,
+PipeWire, ALSA or JACK: the exact name, or a unique case-insensitive match.
+An unknown name is logged and the platform's default kept. ASIO needs a
+device named with
+.BR \-H .
+.TP
+.B \-\-list\-devices
+List the audio devices, with their channels, sample rates and buffer sizes,
+and exit. Other options are ignored.
+.TP
+.B \-\-headless
+No audio device; a timer renders the audio and OSC is still answered. For
+tests and CI.
+.SS Network
+.TP
+.BI \-u " port"
+UDP command port (default: 57110). It also numbers the shared-memory segment;
+.B \-u 0
+opens neither.
+.TP
+.BI \-B " addr"
+Address the UDP and TCP command ports bind (default: 127.0.0.1).
+.B 0.0.0.0
+binds every IPv4 interface. An empty address binds every IPv4 and IPv6
+interface for UDP, and every IPv4 interface for TCP.
+.SS Engine
+Each value goes to the engine, which refuses one outside its range with a
+log line naming it. The process then stays up without a running synth.
 .TP
 .BI \-b " num"
-Sample buffers (default: 1024).
+Sample buffers (default: 1024; 1\-65535).
+.TP
+.BI \-n " num"
+Nodes (synths and groups) that may exist at once (default: 1024).
+.TP
+.BI \-d " num"
+Synth definitions that may be loaded at once (default: 1024).
+.TP
+.BI \-w " num"
+Wire buffers for a synth's internal connections (default: 64).
 .TP
 .BI \-a " num"
 Audio bus channels (default: 1024).
@@ -53,57 +110,127 @@ Audio bus channels (default: 1024).
 Control bus channels (default: 16384).
 .TP
 .BI \-m " size"
-Real-time memory in KB (default: 8192).
+Real-time memory pool in KB (default: 8192). The engine's heap is sized to
+hold it.
 .TP
-.BI \-w " num"
-Maximum wire buffers (default: 64).
+.BI \-r " num"
+Random number generators (default: 64).
 .TP
-.BI \-B " addr"
-Bind address (default: all interfaces).
-.TP
-.BI \-H " words"
-Audio device (fuzzy match on \[dq]Driver : Device\[dq]).
-.TP
-.B \-v
-Print version and exit.
+.BI \-D " 0|1"
+Load the synth definitions in the synthdef directory at boot, before the
+command port opens (default: 1). The directory is each one in
+.B SC_SYNTHDEF_PATH
+when that is set, else
+.I synthdefs
+in the user's application-support directory.
+.SS Other
 .TP
 .BI \-\-default\-bpm " n"
 Opening session tempo (default: 120).
 .TP
-.BI \-\-piano\-wavetable " path"
-MdaPiano sample table (raw int16).
+.BI \-\-app\-name " name"
+Name published to the operating system's audio and MIDI registries: PipeWire
+nodes, ALSA sequencer clients, macOS aggregate devices and Link peers
+(default: SuperSonic).
 .TP
-.B \-\-list\-devices
-List audio devices and exit.
+.BI \-\-inbox\-mb " n"
+The inbox lane, where loaded samples and other assets live, in MB
+(default: 512; 1\-3072). Address space, not memory: pages are committed as
+they are written.
+.TP
+.B \-v
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print the options and exit.
+.TP
+\fB\-U\fP, \fB\-R\fP, \fB\-l\fP, \fB\-I\fP, \fB\-O\fP \fIvalue\fP
+scsynth's options, accepted and ignored.
+.PP
+An unknown option is reported in the log and skipped.
 .SS Command transports
 Pick at most one; it replaces the UDP command port. The cue server and
 outbound OSC are unaffected, and
 .B \-u
-still numbers the server's shared-memory segment.
+still numbers the shared-memory segment.
 .TP
 .BI \-\-tcp " port"
-TCP, length-prefixed OSC (respects
-.BR \-B ).
+TCP; each OSC packet is preceded by its length as a 4-byte big-endian
+integer. Binds the
+.B \-B
+address.
 .TP
 .BI \-\-uds " path"
-Unix socket, stream (file mode 0600).
+Unix socket, stream, framed as for TCP (macOS and Linux; file mode 0600).
 .TP
 .BI \-\-uds\-dgram " path"
-Unix socket, datagram (file mode 0600).
+Unix socket, datagram, one OSC packet each (macOS and Linux; file mode 0600).
+A client that wants replies binds a path of its own.
+.TP
+.BI \-\-pipe " name"
+Windows named pipe
+.RI \[rs]\[rs].\[rs]pipe\[rs] name ,
+framed as for TCP. Only the user running the server (and SYSTEM) may
+connect, and remote clients are refused.
 .TP
 .B \-\-shm\-commands
-Shared-memory segment's peer command plane for one trusted co-located peer
-(requires \-u > 0).
+The shared-memory segment's peer command plane, for one trusted peer on the
+same machine (requires
+.B \-u
+> 0).
 .TP
 .BI \-\-max\-connections " n"
-Stream connection cap (default: 4).
-.SS Headless operation
+Connection cap for TCP, Unix stream sockets and named pipes (default: 4;
+1\-1024).
+.SS Shared memory
+With
+.B \-u
+> 0 the engine's memory is a shared-memory segment, served to processes of
+the same user at an attach endpoint.
 .TP
-.B \-\-headless
-No audio device; timer-driven render (CI/tests).
+.BI \-\-shm\-endpoint " path|pipe"
+Where to serve it. The default is
+.RI clockwork\-shm\- port .sock
+in
+.BR $XDG_RUNTIME_DIR ,
+else
+.BR $TMPDIR ,
+else
+.RI /tmp/clockwork\-shm\- uid \- port .sock;
+on Windows,
+.RI \[rs]\[rs].\[rs]pipe\[rs]clockwork\-shm\- port .
+.SH ENVIRONMENT
+.TP
+.B CLOCKWORK_DEV_LOG
+Set to 1 for extra developer log lines (any value counts but an empty
+one or one starting with 0).
+.TP
+.B CLOCKWORK_PLUGIN_BRIDGE
+Path of the plugin bridge, in a build with plugin hosting. Otherwise it is
+looked for beside the server, then in the directory the build was configured
+with.
+.SH SIGNALS
+SIGINT and SIGTERM stop the server cleanly, as does the OSC command
+.BR /quit ;
+it exits with status 0. A crash
+prints a FATAL line naming the signal, with a backtrace on macOS and Linux,
+and exits with status 128 plus the signal number.
+.SH EXIT STATUS
+1 when two command transports are given;
+.B \-\-shm\-commands
+or
+.B \-\-shm\-endpoint
+is given with
+.BR "\-u 0" ;
+the engine cannot start; or a TCP, Unix socket, named pipe or shared-memory
+command transport cannot start. A UDP port that cannot be bound is logged and
+the server carries on.
 .SH SEE ALSO
 .BR scsynth (1),
 .BR jackd (1)
+.PP
+The native server guide, docs/NATIVE.md, and the OSC reference,
+docs/OSC_API.md, in the source tree.
 .PP
 Project home:
 .UR https://github.com/samaaron/supersonic

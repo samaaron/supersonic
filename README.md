@@ -24,17 +24,16 @@ This is SuperSonic. All the synthesis power of the original **scsynth** - rearch
 
 ### Built on clockwork
 
-SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwork). clockwork provides the audio device IO, MIDI, OSC, gamepad input, transport clock and Ableton Link; scsynth provides the synthesis engine, node tree and UGens. The two connect through Clockwork's DSP API in `dsp_api.h`.
+SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwork). clockwork provides the audio device IO, MIDI, OSC, gamepad input, the transport clock and, natively, Ableton Link; scsynth provides the synthesis engine, node tree and UGens. The two connect through Clockwork's DSP API in `dsp_api.h`.
 
 ### Core
 
 - **scsynth compatible** - *full OSC command compatibility with SuperCollider's scsynth. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
 - **Live metrics** - *cheap, zero-copy telemetry in both transport modes: OSC throughput, scheduler depth and lateness, ring buffer fill and a live node-tree mirror. See [metrics](docs/METRICS.md).*
 - **Malloc-free audio path** - *zero allocation or blocking on the audio thread.*
-- **Scheduling in the engine** - *far-future bundles are held by the engine itself, timestamped to the sample; `/clockwork/sched/flush` cancels what is still waiting.*
+- **Scheduling in the engine** - *far-future bundles are held by the engine itself, timestamped to the sample; `/clearSched` cancels what is still waiting.*
 - **Cold swap** - *the engine can be rebuilt under a running client, for a device or rate change, with synthdefs and buffers restored by the client.*
 - **Upstream compatible** - *kept in sync with the official SuperCollider scsynth server.*
-- **Tested** - *1400+ browser tests, each run in both transport modes, plus clockwork's own 3000+ native cases.*
 
 ### Web
 
@@ -50,7 +49,9 @@ SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwo
 - **Ableton Link v4** - *tempo sync across the network plus streaming Link Audio in and out.*
 - **Live device and driver switching** - *hot-swap at runtime with automatic cold swap on rate mismatch.*
 - **Headless mode** - *high-resolution timer-driven processing for CI and containers.*
-- **UDP OSC server** - *drop-in scsynth replacement, with clockwork's `/clockwork/*` verbs for MIDI, gamepad, the clock, tracks and recording alongside.*
+- **scsynth's command line and OSC** - *a drop-in scsynth replacement over UDP, or TCP, Unix sockets, a named pipe or shared memory, with clockwork's `/clockwork/*` verbs for devices, MIDI, gamepad and the clock alongside. See the [native guide](docs/NATIVE.md).*
+- **Plugin hosting** - *tracks of CLAP and VST3 plugins, run in a separate bridge process.*
+- **Session recording** - *the main output to WAV or FLAC.*
 
 ### NIF
 
@@ -66,17 +67,17 @@ Try the live demo: [**sonic-pi.net/supersonic/demo.html**](https://sonic-pi.net/
 
 ### Web
 
-SuperSonic can be fetched remotely via CDN, locally via npm or self-built — see [Installation](docs/INSTALLATION_WEB.md).
+SuperSonic can be fetched remotely via CDN, locally via npm or self-built — see [Installation](docs/INSTALLATION_WEB.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound; every configuration option is in the [API Reference](docs/API.md#constructor-options).
 
 ### Native
 
 Clone with the submodule and build with CMake - see [Building from Source](docs/BUILDING.md).
 
     git clone --recurse-submodules https://github.com/samaaron/supersonic
-    cmake -B build -DCMAKE_BUILD_TYPE=Release
-    cmake --build build --target SuperSonic
+    cmake -B build/native -DCMAKE_BUILD_TYPE=Release
+    cmake --build build/native --target SuperSonic
 
-`CMakeLists.txt` here names the guest and links the host; everything else is clockwork's own build - see [clockwork/docs/BUILDING.md](clockwork/docs/BUILDING.md) for the options.
+`CMakeLists.txt` here names the guest and links the host; everything else is clockwork's own build - see [clockwork/docs/BUILDING.md](clockwork/docs/BUILDING.md) for the options. The [native guide](docs/NATIVE.md) covers running it: options, devices, transports and logs. On Debian, [Debian Packaging](docs/DEBIAN-PACKAGING.md) builds a package from source.
 
 ### NIF
 
@@ -87,21 +88,34 @@ Build the BEAM NIF - no Erlang installation is needed to build it:
 
 The library lands at `build/nif/clockwork.so` (`clockwork.dll` on Windows). See the [NIF guide](docs/NIF.md) to load and drive it from Elixir or Erlang.
 
-For the full list of configuration options, see the [API Reference](docs/API.md#constructor-options). For installation options see the [Installation Guide](docs/INSTALLATION_WEB.md). Once installed, head to the [Quick Start](docs/QUICKSTART.md) to make your first sound.
-
-
 ## Documentation
 
+### Every platform
+
+- [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - scsynth's OSC commands, and what each platform answers
+- [Differences from scsynth](docs/SCSYNTH_DIFFERENCES.md) - what SuperSonic does differently, platform by platform
+- [OSC API](docs/OSC_API.md) - clockwork's `/clockwork/*` verbs: devices, clock and Link, MIDI, recording, tracks
+- [Metrics](docs/METRICS.md) - performance monitoring and debugging
+- [Building from Source](docs/BUILDING.md) - web, native and NIF builds
+
+### Web
+
 - [Installation](docs/INSTALLATION_WEB.md) - CDN, npm, self-hosting, browser requirements
-- [Quick Start](docs/QUICKSTART.md) - Boot and play your first synth
-- [API Reference](docs/API.md) - Methods, callbacks, and configuration
-- [Communication Modes](docs/MODES.md) - SAB vs postMessage, server configuration
-- [scsynth Command Reference](docs/SCSYNTH_COMMAND_REFERENCE.md) - OSC commands for controlling scsynth
-- [Workers Guide](docs/WORKERS.md) - Send OSC directly from Web Workers and AudioWorklets for the lowest latency.
-- [Metrics](docs/METRICS.md) - Performance monitoring and debugging
-- [Building from Source](docs/BUILDING.md) - WASM, native, and NIF (Erlang/Elixir) builds
-- [NIF Guide](docs/NIF.md) - Load and drive the engine from Erlang or Elixir
-- [Debian Packaging](docs/DEBIAN-PACKAGING.md) - CI-proven Debian source package: offline build, system dependencies, lintian/autopkgtest
+- [Quick Start](docs/QUICKSTART.md) - boot and play your first synth
+- [API Reference](docs/API.md) - methods, events and configuration
+- [Guide](docs/GUIDE.md) - OSC encoding, lifecycle and recovery, audio routing, samples
+- [Communication Modes](docs/MODES.md) - SAB and postMessage
+- [Workers Guide](docs/WORKERS.md) - send OSC directly from Web Workers and AudioWorklets
+- [Architecture](docs/ARCHITECTURE.md) - how the web host fits together
+
+### Native
+
+- [Native Guide](docs/NATIVE.md) - running the server: options, devices, transports, logs
+- [Debian Packaging](docs/DEBIAN-PACKAGING.md) - the Debian source package: offline build, system dependencies, lintian/autopkgtest
+
+### NIF
+
+- [NIF Guide](docs/NIF.md) - load and drive the engine from Erlang or Elixir
 
 ## Support
 

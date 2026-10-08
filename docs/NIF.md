@@ -5,7 +5,9 @@ scsynth running inside the VM. OSC goes in as binaries and comes back as
 Erlang messages. There is no command port and no separate process.
 
 The NIF is clockwork's (`clockwork/src/nif`): `clockwork_nif.cpp` is the
-library, and `clockwork.erl` is the Erlang module that loads it.
+library, and `clockwork.erl` is the Erlang module that loads it. Built here,
+it sends every packet through `supersonic::Commands`, as SuperSonic's server
+does, so a BEAM client is answered as a socket client is.
 
 ## Build
 
@@ -138,8 +140,16 @@ The engine takes scsynth's OSC commands: see the
 [scsynth command reference](SCSYNTH_COMMAND_REFERENCE.md). A few to start
 with:
 
-- `/d_recv`, with the bytes of a `.scsyndef` file as a blob, loads a synth
-  definition and answers `/done /d_recv`.
+- `/d_load` with a `.scsyndef` path, or `/d_loadDir` with a directory, loads
+  synth definitions and answers `/done`. `/d_recv`, with the bytes of a
+  `.scsyndef` file as a blob, does the same without a file.
+- `/b_allocRead` and the other buffer file commands, and
+  `/clockwork/record/start` and `/stop`, work as they do on the server
+  ([native guide](NATIVE.md#files)). Paths are on the machine the VM runs on,
+  and the files are read off the audio thread.
+- `/quit` is refused with `/fail`: stop the engine with `stop/0`.
+- A command scsynth does not know is answered with
+  `/fail <command> "Command not found"`.
 - `/notify 1` sends node events (`/n_go`, `/n_end`, ...) to the registered
   processes.
 - `/status` and `/version` answer `/status.reply` and `/version.reply`.

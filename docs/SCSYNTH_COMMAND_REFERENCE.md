@@ -1,15 +1,15 @@
 # Scsynth Command Reference
 
-You control SuperSonic by sending **OSC** (Open Sound Control) messages which are then forwarded onto the scsynth AudioWorklet which will then act on them. This message-based API gives you full control of the synthesis engine from sending new synth designs, triggering synths, controlling running synths, loading buffers, etc.
+You control SuperSonic by sending **OSC** (Open Sound Control) messages to its scsynth engine, which acts on them. On the web the engine runs in an AudioWorklet and the messages come from JavaScript; the native server takes them on a socket, and the NIF through `send_osc/1`. This message-based API gives you full control of the synthesis engine from sending new synth designs, triggering synths, controlling running synths, loading buffers, etc.
 
 OSC messages can also sent as a bundle along with a fine-grained timestamp for accurate scheduling.
 
-> This reference covers all the OSC messages that SuperSonic understands. It is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html). However, it is not identical due to implementation differences between the original scsynth and SuperSonic's AudioWorklet. See [Unsupported Commands](#unsupported-commands) for what's not available, and [SCSYNTH_DIFFERENCES.md](SCSYNTH_DIFFERENCES.md) for a comprehensive guide to all differences including unsupported UGens.
+> This reference covers all the OSC messages that SuperSonic understands. It is based on the [SuperCollider Server Command Reference](https://doc.sccode.org/Reference/Server-Command-Reference.html). However, it is not identical due to implementation differences between the original scsynth and SuperSonic. See [Unsupported Commands](#unsupported-commands) for what's not available, and [SCSYNTH_DIFFERENCES.md](SCSYNTH_DIFFERENCES.md) for a comprehensive guide to all differences including unsupported UGens.
 
 
 ## How to Send OSC
 
-Send commands using `send()` which auto-detects types:
+On the web, send commands using `send()` which auto-detects types:
 
 ```javascript
 supersonic.send("/s_new", "sonic-pi-beep", 1000, 0, 0, "note", 60);
@@ -20,6 +20,8 @@ Or directly send OSC bytes that you have already pre-encoded via `sendOSC()`:
 ```javascript
 supersonic.sendOSC(oscBytes);
 ```
+
+The examples in this reference use `send()`. Natively, any OSC client can send the same messages to the server's port (UDP 57110 by default), and an Erlang or Elixir process can pass the encoded bytes to the NIF's `send_osc/1`.
 
 ## Useful Terms
 
@@ -100,7 +102,7 @@ If you're new to audio synthesis and SuperCollider in particular, here are some 
 | [`/c_get`](#c_get)                           | Get bus values                                     |
 | [`/c_getn`](#c_getn)                         | Get sequential bus values                          |
 | **SuperSonic Extensions**                    |                                                    |
-| [`/b_allocFile`](#b_allocfile)               | Load audio from inline file data (SuperSonic only) |
+| [`/b_allocFile`](#b_allocfile)               | Load audio from inline file data (web only)        |
 
 ---
 
@@ -153,7 +155,7 @@ Controls can be set by index (integer) or name (string). Values can be:
 
 ### Asynchronous Commands
 
-Commands marked **Async** execute on a background thread. They reply with `/done` on success or `/fail` on error. Use `/sync` to wait for all async commands to complete.
+Commands marked **Async** reply with `/done` on success or `/fail` on error. In the original scsynth they run partly on a background thread; in SuperSonic they run all their stages inline, on the audio thread, on every host. Use `/sync` to wait for all async commands to complete.
 
 ---
 
@@ -195,15 +197,17 @@ supersonic.send("/status");
 
 | Position | Type   | Description                        |
 | -------- | ------ | ---------------------------------- |
-| 0        | int    | (unused)                           |
+| 0        | int    | Always 1 (unused)                  |
 | 1        | int    | Number of unit generators          |
 | 2        | int    | Number of synths                   |
 | 3        | int    | Number of groups                   |
 | 4        | int    | Number of loaded synth definitions |
-| 5        | float  | Average CPU usage (%)              |
-| 6        | float  | Peak CPU usage (%)                 |
+| 5        | float  | Average CPU usage: always 0.0      |
+| 6        | float  | Peak CPU usage: always 0.0         |
 | 7        | double | Nominal sample rate                |
 | 8        | double | Actual sample rate                 |
+
+The engine has no audio driver of its own to measure CPU, so both CPU fields read 0.0 on every host, and both sample rates are the engine's rate. Natively, DSP load is in the engine's stats (`cpuAvgCenti`, `cpuPeakCenti`): see [Metrics](METRICS.md).
 
 ---
 
@@ -215,7 +219,7 @@ Enable/disable OSC message dumping to the debug output.
 | --------- | ---- | ------------------------------------------------ |
 | mode      | int  | 0 = off, 1 = parsed, 2 = hex, 3 = parsed and hex |
 
-When enabled, all incoming OSC messages are printed to the debug output (visible in the Debug Info panel).
+When enabled, all incoming OSC messages are printed to the debug output (on the web, the `debug` event; the native server prints it to stderr).
 
 ```javascript
 supersonic.send("/dumpOSC", 1); // Enable parsed output
@@ -314,7 +318,7 @@ Receive a synth definition from bytes.
 // Send raw synthdef bytes
 supersonic.send("/d_recv", synthdefBytes);
 
-// In SuperSonic, prefer loadSynthDef() which handles fetching:
+// On the web, prefer loadSynthDef() which handles fetching:
 await supersonic.loadSynthDef("sonic-pi-beep");
 ```
 
@@ -708,7 +712,7 @@ Create new parallel groups.
 | target    | int  | Target node ID                 |
 | ...       |      | (repeat for more groups)       |
 
-Parallel groups evaluate their children in unspecified order, allowing for parallel processing optimizations.
+In SuperSonic `/p_new` is the same command as `/g_new`: the new group runs its children in order, like any group, and an ID that is already in use fails with `/fail`.
 
 ```javascript
 supersonic.send("/p_new", 100, 0, 0); // Create parallel group 100 at head of root
@@ -837,7 +841,9 @@ Allocate a buffer.
 | sampleRate | float | Sample rate (optional, default: server rate) |
 
 **Async:** Yes
-**Reply:** `/done /b_allocPtr bufnum` (SuperSonic rewrites `/b_alloc` to `/b_allocPtr` internally)
+**Reply:** `/done /b_alloc bufnum` natively. On the web, `/done /b_allocPtr bufnum`: the client rewrites `/b_alloc` to `/b_allocPtr`
+
+On the web the client drops the completion message and passes the sample rate on. Natively the completion message runs, and the buffer always takes the server's sample rate.
 
 ```javascript
 // Allocate mono buffer with 44100 frames
@@ -851,17 +857,21 @@ supersonic.send("/b_alloc", 1, 44100, 2);
 
 ### `/b_allocRead`
 
-Allocate a buffer and read an audio file into it. The path is fetched via the configured `sampleBaseURL`. SuperSonic rewrites this internally to `/b_allocPtr` using the buffer pipeline — no filesystem access needed.
+Allocate a buffer and read an audio file into it. The engine itself reads no files, so this is served in front of it:
 
-| Parameter  | Type   | Description                            |
-| ---------- | ------ | -------------------------------------- |
-| bufnum     | int    | Buffer number                          |
-| path       | string | Audio file path (fetched via HTTP)     |
-| startFrame | int    | Starting frame to read (default: 0)    |
-| numFrames  | int    | Number of frames to read (0 = all)     |
+- **Web:** the client fetches the path over HTTP (a bare file name through the configured `sampleBaseURL`), decodes it, and sends `/b_allocPtr` in its place.
+- **Native server:** the server's front reads and decodes the file.
+- **NIF:** fails.
+
+| Parameter  | Type   | Description                                   |
+| ---------- | ------ | --------------------------------------------- |
+| bufnum     | int    | Buffer number                                 |
+| path       | string | Audio file path (a URL or path on the web)    |
+| startFrame | int    | Starting frame to read (default: 0)           |
+| numFrames  | int    | Number of frames to read (0 = all)            |
 
 **Async:** Yes
-**Reply:** `/done /b_allocPtr bufnum`
+**Reply:** `/done /b_allocRead bufnum` on the native server; `/done /b_allocPtr bufnum` on the web
 
 ```javascript
 supersonic.send("/b_allocRead", 0, "kick.wav");
@@ -874,18 +884,18 @@ supersonic.send("/b_allocRead", 1, "loop_amen.flac", 0, 44100);
 
 ### `/b_allocReadChannel`
 
-Allocate a buffer and read specific channels from an audio file. Like `/b_allocRead` but with channel selection.
+Allocate a buffer and read specific channels from an audio file. Like `/b_allocRead` but with channel selection, and served the same way on each host.
 
-| Parameter  | Type   | Description                            |
-| ---------- | ------ | -------------------------------------- |
-| bufnum     | int    | Buffer number                          |
-| path       | string | Audio file path (fetched via HTTP)     |
-| startFrame | int    | Starting frame to read (default: 0)    |
-| numFrames  | int    | Number of frames to read (0 = all)     |
-| channels   | int... | Channel indices to read (0-indexed)    |
+| Parameter  | Type   | Description                                   |
+| ---------- | ------ | --------------------------------------------- |
+| bufnum     | int    | Buffer number                                 |
+| path       | string | Audio file path (a URL or path on the web)    |
+| startFrame | int    | Starting frame to read (default: 0)           |
+| numFrames  | int    | Number of frames to read (0 = all)            |
+| channels   | int... | Channel indices to read (0-indexed)           |
 
 **Async:** Yes
-**Reply:** `/done /b_allocPtr bufnum`
+**Reply:** `/done /b_allocReadChannel bufnum` on the native server; `/done /b_allocPtr bufnum` on the web
 
 ```javascript
 // Read only the left channel from a stereo file
@@ -1334,7 +1344,7 @@ These commands are specific to SuperSonic and not part of the standard scsynth p
 
 ### `/b_allocFile`
 
-Load audio from inline file data. The blob contains raw file bytes (FLAC, WAV, OGG, MP3, etc.) which are decoded using the browser's `decodeAudioData()`.
+Web only. Load audio from inline file data. The blob contains raw file bytes (FLAC, WAV, OGG, MP3, etc.) which are decoded using the browser's `decodeAudioData()`. The native server and the NIF have no such command.
 
 | Parameter | Type | Description          |
 | --------- | ---- | -------------------- |
@@ -1348,55 +1358,55 @@ const fileBytes = new Uint8Array(await response.arrayBuffer());
 supersonic.send("/b_allocFile", 0, fileBytes);
 ```
 
-This is useful when you want to send sample data directly via OSC without needing a URL - for example, from an external controller or when embedding audio data.
+This is useful when you want to send sample data directly via OSC without needing a URL - for example, when embedding audio data.
 
-**Reply:** `/done /b_allocPtr bufnum` (SuperSonic rewrites `/b_allocFile` to `/b_allocPtr` internally)
+**Reply:** `/done /b_allocPtr bufnum` (the client rewrites `/b_allocFile` to `/b_allocPtr`)
 
 ---
 
 ## Unsupported Commands
 
-These commands don't work in SuperSonic due to browser/AudioWorklet constraints.
+These commands don't work in SuperSonic, or work only on some hosts.
 
 > For a complete guide to all differences between SuperSonic and scsynth—including unsupported UGens, architectural differences, and error handling—see [SCSYNTH_DIFFERENCES.md](SCSYNTH_DIFFERENCES.md).
+
+`/clearSched` and `/error` work on every host. `/clearSched` drops the bundles clockwork holds for scsynth (up to v0.89.0 it left them to fire), and on the web `purge()` clears the rest of what is waiting too. `/error` works as in scsynth.
 
 ### Scheduling and Debug Commands
 
 | Command       | Reason                                                                                                                |
 | ------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `/clearSched` | Use `cancelAll()` or the fine-grained `cancelTag()`, `cancelSession()`, `cancelSessionTag()` methods instead |
-| `/error`      | SuperSonic always enables error notifications so you never miss a `/fail` message                                     |
-| `/quit`       | Use `destroy()` to shut down the SuperSonic instance                                                                  |
+| `/quit`       | Native server: answers `/done /quit` and shuts down, as scsynth does. NIF: fails; stop the engine with `clockwork:stop/0`. Web: fails; use `destroy()` to shut down the SuperSonic instance |
 
 ### Plugin Commands
 
 | Command  | Status                                                               |
 | -------- | -------------------------------------------------------------------- |
-| `/cmd`   | No commands currently registered                                     |
-| `/u_cmd` | No UGens currently define commands                                   |
+| `/cmd`   | Only upstream's demo command, `pluginCmdDemo`, is registered         |
+| `/u_cmd` | Only upstream's demo UGen, `UnitCmdDemo`, defines commands           |
 
-These commands allow plugins to register custom functionality beyond the standard OSC API. None of the built-in UGens use them, but the mechanism exists if compelling use cases emerge. If you have a need for custom plugin commands, [open an issue](https://github.com/samaaron/supersonic/issues) describing your use case.
+These commands allow plugins to register custom functionality beyond the standard OSC API. None of the built-in UGens use them apart from those demos, but the mechanism exists if compelling use cases emerge. If you have a need for custom plugin commands, [open an issue](https://github.com/samaaron/supersonic/issues) describing your use case.
 
 ### Filesystem Commands
 
-No filesystem in browser/WASM, so file-based commands aren't available:
+The engine has no files on any host. On the web these commands are not available; use the alternatives below. On the native server and the NIF, `supersonic::Commands` serves all of them except `/b_close`, reading and writing the files itself: see [SCSYNTH_DIFFERENCES.md](SCSYNTH_DIFFERENCES.md#filesystem-commands).
 
-| Command              | Alternative                                                               |
+| Command              | Alternative on the web                                                    |
 | -------------------- | ------------------------------------------------------------------------- |
 | `/d_load`            | `loadSynthDef()` or `/d_recv` with bytes                                  |
 | `/d_loadDir`         | `loadSynthDefs()`                                                         |
 | `/b_read`            | `loadSample()`                                                            |
 | `/b_readChannel`     | `loadSample()`                                                            |
 | `/b_write`           | Not available                                                             |
-| `/b_close`           | Not available                                                             |
+| `/b_close`           | Not available (on any host)                                               |
 
 ### Buffer Commands
 
 | Command           | Reason                                                                           |
 | ----------------- | -------------------------------------------------------------------------------- |
-| `/b_setSampleRate`| Not implemented - WebAudio automatically resamples buffers to context sample rate |
+| `/b_setSampleRate`| Not a command of the engine on any host                                          |
 
-Use the JavaScript API to load assets - it fetches via HTTP and sends the data to scsynth:
+On the web, use the JavaScript API to load assets - it fetches via HTTP and sends the data to scsynth:
 
 ```javascript
 await supersonic.loadSynthDef("sonic-pi-beep");

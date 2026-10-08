@@ -1,4 +1,4 @@
-# Scope streams + the SuperClock sample clock
+# Scope streams + the ClockworkClock sample clock
 
 Status: shipped. Replaced the triple-buffered
 scope slots with the same lossless cursor-ring protocol the audio-capture taps
@@ -13,17 +13,19 @@ sample to the moment it becomes audible. Every consumer that wanted a stream
 (the Sonic Pi inline live-loop scopes, card scopes, main scope) needed
 GUI-side workarounds: publish-race polling faster than the writer,
 arrival-time latency guessing, per-widget reassembly rings. `shm_audio_buffer`
-(the capture taps written by `AudioOut2`) already implements the right
-protocol: a fixed-layout SPSC ring with a monotonic 64-bit `write_position`,
-lossless catch-up reads and gap detection.
+(the capture taps clockwork writes at the device edge, on every host) already
+implements the right protocol: a fixed-layout SPSC ring with a monotonic
+64-bit `write_position`, lossless catch-up reads and gap detection.
 
 Scope slots now use that protocol, which gives every consumer deterministic
 windows and latency alignment without per-widget reconstruction.
 
 ## The sample-clock region
 
-A new 32-byte region appended at the end of the arena (nothing shifts; the
-segment stays self-describing via `shm_segment_header`):
+A 32-byte region in the clockwork block of the arena, after the clock state
+(`SAMPLE_CLOCK_START` in `clockwork/src/shared_memory.h`). A reader finds it
+through the arena's table of contents, as the entry
+`CLOCKWORK_ARENA_SAMPLE_CLOCK` (`clockwork/src/clockwork_arena.h`):
 
 ```
 [0..3]   u32 seq        seqlock: odd = writer mid-update
@@ -35,7 +37,7 @@ segment stays self-describing via `shm_segment_header`):
 [28..31] u32 reserved
 ```
 
-Owned by SuperClock (`bindSampleClockToShm` at engine init;
+Owned by ClockworkClock (`bindSampleClockToShm` at engine init;
 `publishSampleClock` once per hardware callback from each audio driver, with
 `advanceEngineFrames` per rendered block keeping stream anchors exact),
 seqlock-ordered. Any reader can convert "now" (its own `system_clock` read,
@@ -52,8 +54,21 @@ also usable for recording markers and visual sync.
 
 The scope region's slots change from `header + 3 × region` to a
 `shm_audio_buffer`-shaped ring (own struct so scope ring size is an
-independent memory_profile knob, `SHM_SCOPE_RING_FRAMES`, default 16384 ≈
-340ms @ 48k; embedded profiles set it small):
+independent memory_profile knob, `SHM_SCOPE_RING_FRAMES`). Its size per host
+(`clockwork/src/memory_profile.h`):
+
+- **Native:** 131072 frames, ≈ 2.7 s at 48 kHz (16384 up to v0.89.0). A
+  consumer draws the window being heard, which sits the device's output
+  latency behind the writer, and a wireless output can report two seconds
+  of it.
+- **Web:** 16384 frames, ≈ 340 ms at 48 kHz.
+- **Embedded profiles** (ESP32-S3, Teensy 4.1): 512 frames.
+
+The ring must hold the output latency, the longest display window (250 ms)
+and the reader's margin (`shm_scope_ring_covers` in
+`clockwork/src/shm_scope_stream.hpp`). The native engine checks this at every
+device start and logs a warning when the device's output latency is more than
+the ring covers: scopes would show nothing on that device.
 
 ```
 [0..3]   u32 state (atomic; 0=free, 1=active)
@@ -71,14 +86,20 @@ independent memory_profile knob, `SHM_SCOPE_RING_FRAMES`, default 16384 ≈
 
 ## Writer: ScopeOut2
 
-`ScopeOut2_Ctor` claims and activates its slot through `fGetScopeBuffer`
-(which retains only claim/release-ownership semantics — see the contract
-note in `SC_InterfaceTable.h`), then `ScopeOut2_next` appends every block
-directly via a `shm_scope_stream_writer`, anchoring on `g_engine_frames`.
-The first write sets `base_engine_frames`; later writes heal forward cursor
-gaps (paused node groups). The old period/accumulation machinery is gone and
-`fPushScopeBuffer` is a no-op. Slot-owner guarding (a superseded unit's late
-dtor must not stomp a re-claimed slot) is unchanged.
+Clockwork owns the slots and writes them; scsynth reaches them only through
+`DspHost` (`clockwork/src/dsp_api.h`). `ScopeOut2_Ctor` claims and activates
+its slot through `fGetScopeBuffer` (which retains only claim/release-ownership
+semantics — see the contract note in `SC_InterfaceTable.h`), which becomes
+`DspHost::scope_open`. Then `ScopeOut2_next` hands every block to
+`supersonic_scope_write` (`dsp/scsynth/scsynth_dsp.cpp`), which calls
+`DspHost::scope_write`. On clockwork's side (`dsp_host_scope_write` in
+`clockwork/src/audio_processor.cpp`) a `shm_scope_stream_writer` appends the
+block, anchoring on `g_engine_frames`. The first write sets
+`base_engine_frames`; later writes heal forward cursor gaps (paused node
+groups). The old period/accumulation machinery is gone and `fPushScopeBuffer`
+is a no-op. Slot-owner guarding (a superseded unit's late dtor must not stomp
+a re-claimed slot) is unchanged: a release is owner-guarded by the handle's
+address.
 
 ## Readers
 
@@ -87,15 +108,18 @@ dtor must not stomp a re-claimed slot) is unchanged.
   `copy_window(end_cursor, frames, out, &used_channels)` — zero-fills what
   the ring no longer holds and stays `SHM_SCOPE_READ_MARGIN_FRAMES` clear of
   the writer.
-- `sample_clock_view` from `server_shared_memory_client::get_sample_clock()`:
-  seqlock-consistent `{engine_frames, dac_ntp, sample_rate,
-  output_latency_frames}` plus `audible_end(reader)` — the canonical window
-  end for every scope consumer.
+- `sample_clock_view` from `shm_segment_client::get_sample_clock()`
+  (`clockwork/src/shm_segment.hpp`): seqlock-consistent `{engine_frames,
+  dac_ntp, sample_rate, output_latency_frames}` plus `audible_end(reader)` —
+  the canonical window end for every scope consumer. A C client gets the
+  same through `clockwork_client_scope_audible_end`
+  (`clockwork/src/clockwork_client.h`).
 - GUI widgets: each repaint tick calls `audible_end` and copies the display
   window. Poll rate affects only frame rate, never correctness.
-- js/supersonic.js `getScope` reads the ring by cursor (layout keeps coming
-  from `get_buffer_layout()`); the read margin formula must stay in step
-  with the C++ constant.
+- `getScope` in `clockwork/js/clockwork.js` reads the ring by cursor, SAB mode
+  only, and returns the window ending at the write cursor, not at the audible
+  sample. Its layout comes from the arena's table of contents; the read
+  margin formula must stay in step with the C++ constant.
 
 ## Consumers migrated
 
@@ -107,10 +131,13 @@ dtor must not stomp a re-claimed slot) is unchanged.
 ## Compatibility
 
 - Segment layout is self-describing; both sides compile from one header.
-- WASM: the JS reader is ported, but no worklet driver publishes the sample
-  clock yet — web streams fall back to raw-cursor windows (unaligned) and
-  the paused-group heal is inert there.
-- The GUI↔engine `/supersonic/info` outputLatencySamples field stays: the
+- WASM: the worklet publishes the sample clock once per rendered block, from
+  the time the host has written the engine's NTP start, with an output
+  latency of 0 (it knows no device latency, so a frame is stamped as
+  rendered). `g_engine_frames` advances with it, so stream anchors and the
+  paused-group heal work there too. `clockwork/js/lib/sample_clock.js` reads
+  the region from JavaScript; `getScope` does not use it yet.
+- The GUI↔engine `/clockwork/info` outputLatencySamples field stays: the
   code-flash delay uses it. Scope alignment no longer does.
 - Known limitation: the engine sample counter is per-driver and resets on
   device restart, so streams that survive a warm swap / pause-resume keep a

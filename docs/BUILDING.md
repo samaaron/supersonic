@@ -27,38 +27,60 @@ after changing the header).
 
 The native build produces `SuperSonic`, the standalone server Sonic Pi
 launches, plus `clockwork-plugin-bridge`, the out-of-process plugin host the
-engine spawns beside it.
+engine spawns beside it (built when `CLOCKWORK_PLUGINS` is on, the default).
+How to run the server is in the [native server guide](NATIVE.md).
 
-**Prerequisites:** CMake 3.24+, a C++20 compiler, and a Rust toolchain
-(stable; [rustup](https://rustup.rs) is the easiest way). On Linux, the audio
-and windowing headers clockwork's device layer needs:
+**Prerequisites, every platform:**
+
+- CMake 3.24+.
+- A C++20 compiler whose standard library has `std::jthread` and
+  `std::stop_token`: libc++ 20 or later (Xcode 26.6 or later on macOS),
+  libstdc++ 10 or later, or MSVC 2019 16.10 or later. Configure stops with
+  that list if the library lacks them; Xcode 16.4 and earlier do.
+- A Rust toolchain (stable; [rustup](https://rustup.rs) is the easiest way).
+- Network access for the first configure and build. CMake fetches Ableton
+  Link (`CLOCKWORK_LINK`, on by default) and, for plugin hosting, the CLAP and
+  VST3 SDK headers unless installed ones are found; a build with tests fetches
+  Catch2 unless Catch2 3 is installed; cargo fetches the Rust crates.
+
+**Linux** also needs these packages:
 
 ```bash
 sudo apt-get install -y build-essential cmake pkg-config \
-  libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
-  libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-  libxinerama-dev libxcursor-dev libxcomposite-dev
+  libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 ```
 
-**macOS/Windows:** CMake, a C++20 compiler and Rust. No additional dependencies.
+ALSA is the device layer's and the MIDI subsystem's, and udev the gamepad
+subsystem's. The JACK headers are required: the JACK backend is always
+compiled in, and libjack is loaded at run time if it is installed.
+`libpipewire-0.3-dev` is optional: without it there is no PipeWire driver
+(configure says "PipeWire backend: disabled"); with it, libpipewire is loaded
+at run time.
+
+**macOS and Windows** need nothing beyond the list above. ASIO is off by
+default on Windows; `-DCLOCKWORK_ASIO=ON` compiles it in, with the Steinberg
+SDK clockwork carries.
 
 ```bash
 cmake -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native --config Release --parallel --target SuperSonic
 ```
 
-or the wrapper scripts, which do the same:
+or the wrapper scripts, which configure and build the whole tree:
 
 ```bash
 scripts/build-native.sh            # Release build
 scripts/build-native.sh --debug    # Debug build
 scripts/build-native.sh --clean    # Clean rebuild
-scripts/build-native.bat           # Windows
+scripts/build-native.sh --tests    # with the native test suite
+scripts/build-native.sh --jobs=8   # the number of parallel build jobs
+scripts/build-native.bat           # Windows (--debug, --clean, --tests)
 ```
 
 The binary lands at `build/native/SuperSonic` (`build/native/Release/SuperSonic.exe`
-on Windows). `cmake --install build/native` installs it as `supersonic` with
-the plugin bridge and the man page.
+on Windows). `cmake --install build/native` installs it as `bin/supersonic`
+under the install prefix, with the man page (`share/man/man1/supersonic.1`)
+and, when plugin hosting is built, the plugin bridge.
 
 Ableton Link (tempo sync and Link Audio) is on by default; pass
 `-DCLOCKWORK_LINK=OFF` for a build without it. Everything else about the build

@@ -1,12 +1,14 @@
 # Debian Packaging
 
 SuperSonic carries everything needed to build it as a proper Debian package,
-and CI proves it works on every push: `.github/workflows/debian.yml` builds a
-real source package, compiles it in a **network-disconnected** container on
-**trixie** (stable), runs the full native test
-suite against Debian-archive dependency versions during the build, then runs
-`lintian --fail-on error,warning`, `autopkgtest`, and an install-and-boot
-smoke test in a pristine container.
+and CI proves it works: `.github/workflows/debian.yml` builds a real source
+package, compiles it in a **network-disconnected** container on **trixie**
+(stable), runs the full native test suite against Debian-archive dependency
+versions during the build, then runs `lintian --fail-on error,warning`,
+`autopkgtest`, and an install-and-boot smoke test in a pristine container.
+It runs on pushes to `main`, on `v*` tags, on pull requests to `main` that
+change a path it lists (the sources, the native tests, the packaging and the
+man page among them), and by hand.
 
 The goal is that a Debian maintainer can package SuperSonic with near-zero
 friction: the repo demonstrates the whole pipeline rather than asking them to
@@ -51,17 +53,23 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 | zlib (inside smoothie) | vendored copy | `zlib1g-dev` via `-DCLOCKWORK_SYSTEM_ZLIB=ON` |
 | stb_vorbis (inside clockwork) | vendored copy (v1.22, unmodified) | `libstb-dev` via `-DCLOCKWORK_SYSTEM_STB=ON` |
 | Audio file codecs | clockwork's own (`clockwork_audio_file`, dr_libs, flac encoder) | same — no libsndfile; dr_libs has no distro package |
-| Catch2 (tests) | FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
+| Catch2 (tests) | an installed Catch2 3, else FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
 | Ableton Link | FetchContent Link-4.1 + clockwork's 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
-| CLAP / VST3 SDKs (plugin hosting) | fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
+| CLAP / VST3 SDKs (plugin hosting) | installed headers, else fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
 | Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built offline (`-DCLOCKWORK_CARGO_OFFLINE=ON`) |
 | midir (patched fork) | `clockwork/external/midir` (cargo path dep) | same — path deps need no vendoring |
 | tlsf / oscpack / nova-simd | in-tree (as in Debian's own supercollider package) | same |
 
-The relevant CMake switches are all independent and default OFF, so
-macOS/Windows/developer builds are untouched. `--locked` is now unconditional
-for every cargo invocation (the lockfile is committed; drift errors out
-instead of silently rewriting it).
+The switches the Debian build turns on — `CLOCKWORK_SYSTEM_ZLIB`,
+`CLOCKWORK_SYSTEM_STB`, `CLOCKWORK_CARGO_OFFLINE` — are independent and
+default OFF, so macOS, Windows and developer builds are untouched by them.
+`CLOCKWORK_PLUGINS` is the other way round: it defaults ON, and the Debian
+build turns it off.
+
+The CMake build passes `--locked` to every cargo build it runs (the lockfile
+is committed; drift errors out instead of silently rewriting it).
+`test/transport-harness/run.sh`, which autopkgtest runs, builds its probe
+client with a plain `cargo build`.
 
 ## Source package layout
 
@@ -71,7 +79,7 @@ Format 3.0 (quilt), three upstream tarballs (see
 - `supersonic_<v>.orig.tar.xz` — git archive with the clockwork submodule
   archived into `clockwork/`, minus `Files-Excluded` (currently only the
   Steinberg ASIO SDK inside clockwork: Windows-only, dual-licensed)
-- `supersonic_<v>.orig-link.tar.xz` — pristine Link 4.0 **with the
+- `supersonic_<v>.orig-link.tar.xz` — pristine Link 4.1 **with the
   asio-standalone submodule** (GitHub tag tarballs omit submodules)
 - `supersonic_<v>.orig-rust-vendor.tar.xz` — `cargo vendor` for the
   committed `clockwork/rust/Cargo.lock`
@@ -80,8 +88,13 @@ The four Link patches remain single-sourced in `clockwork/external/*.patch`;
 the assembly script path-shifts them under `link/` into `debian/patches/`, so
 they flow through the normal quilt machinery.
 
-Snapshot builds are versioned `<v>+git<date>.<sha>-1~ci1` so they sort below
-the eventual `<v>-1` release.
+`scripts/make-debian-source.sh` archives HEAD. When HEAD is tagged
+`v<v>` the package is `<v>-1`; anything else is a snapshot,
+`<v>+git<date>.<sha>-1~ci1`. `<v>` is the version in `package.json`, which
+between releases is the last release's, and `+git` sorts after the end of a
+version in dpkg: a snapshot sorts above the `<v>-1` release it follows and
+below the next one. (`~git` would sort below `<v>-1`.) The snapshot's Debian
+revision, `1~ci1`, sorts below `1`.
 
 ## Testing in the pipeline
 
@@ -101,10 +114,12 @@ the eventual `<v>-1` release.
 
 ## Running it
 
-CI: every push/PR, or manually via the workflow's *Run workflow* button
-(`workflow_dispatch`). Locally (needs Docker; the phases mirror the workflow
-steps — network-disconnect between `source` and `build` is what makes the
-offline proof real):
+CI: on the triggers above; the workflow's *Run workflow* button
+(`workflow_dispatch`) runs it by hand. CI builds trixie only. The local
+recipe below uses sid, where maintainer uploads land; use `debian:trixie` in
+both `docker run` lines to build what CI builds. It needs Docker; the phases
+mirror the workflow steps, and the network-disconnect between `source` and
+`build` is what makes the offline proof real:
 
 ```bash
 docker run -d --name deb -v "$PWD:/src" -w /src debian:sid sleep infinity
@@ -146,7 +161,7 @@ Points a prospective maintainer will care about, and where they stand:
   The dependency surface is small (gilrs, socket2, alsa, plus clockwork's
   in-tree midir fork) and the licence allow-list is machine-enforced by
   `clockwork/rust/deny.toml`.
-- **Compiled synthdefs in the source tarball** — the 131 `.scsyndef` files
+- **Compiled synthdefs in the source tarball** — the `.scsyndef` files
   under `packages/supersonic-scsynth-synthdefs/` are compiled artifacts whose
   sclang sources live in the Sonic Pi repository (noted in
   `debian/copyright`). They exist only to feed the test suite and are not

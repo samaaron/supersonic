@@ -10,10 +10,11 @@ We'll create a simple page with two buttons: one to boot the audio engine, and o
 ```
 
 ```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest";
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@latest/dist/supersonic.js";
 
 const supersonic = new SuperSonic({
   baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+  coreBaseURL: "https://unpkg.com/supersonic-scsynth-core@latest/",
   synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
 });
 
@@ -45,11 +46,18 @@ This is why we use a boot button - calling `init()` from a button handler satisf
 ```javascript
 const supersonic = new SuperSonic({
   baseURL: "https://unpkg.com/supersonic-scsynth@latest/dist/",
+  coreBaseURL: "https://unpkg.com/supersonic-scsynth-core@latest/",
   synthdefBaseURL: "https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/",
 });
 ```
 
-This creates a new SuperSonic instance configured to load assets from CDN. The `baseURL` tells SuperSonic where to find the WASM engine and workers. The `synthdefBaseURL` tells it where to find synthdef files when you call `loadSynthDef()`. The instance doesn't start the audio engine yet - it just sets up the configuration. You can pass additional options to configure transport mode, debug output, and scsynth engine settings (see [API Reference](API.md)).
+This creates a new SuperSonic instance configured to load its files from a CDN. SuperSonic is split into packages, so it needs to know where each one is:
+
+- `baseURL` - the client package, `supersonic-scsynth`, which holds the workers
+- `coreBaseURL` - the core package, `supersonic-scsynth-core`, which holds the WebAssembly engine and its AudioWorklet. The client package ships neither, so without this `init()` fails.
+- `synthdefBaseURL` - where to find synthdef files when you call `loadSynthDef()`
+
+The instance doesn't start the audio engine yet - it just sets up the configuration. You can pass additional options to configure the transport mode, debug output, and scsynth engine settings (see [API Reference](API.md)). For anything you deploy, pin a version rather than using `@latest` (see [Installation](INSTALLATION_WEB.md)).
 
 
 ## Booting the Engine
@@ -75,7 +83,7 @@ await supersonic.loadSynthDef("sonic-pi-prophet");
 
 Before you can play a synth, you need to send its design to scsynth. This design is called a **synth definition** (or "synthdef") and is a recipe that describes a synth's audio graph - what oscillators, filters, and effects it uses and how they're connected.
 
-SuperSonic comes with 120 ready-to-use synthdefs from [Sonic Pi](https://sonic-pi.net). Here we're loading `sonic-pi-prophet`, a warm polyphonic synth inspired by the Prophet-5.
+The `supersonic-scsynth-synthdefs` package holds ready-to-use synthdefs from [Sonic Pi](https://sonic-pi.net). Here we're loading `sonic-pi-prophet`, a warm polyphonic synth inspired by the Prophet-5.
 
 __Note: you can also use SuperCollider's Desktop app to design your own synthdefs and directly import them live at runtime into your SuperSonic session.__
 
@@ -126,7 +134,7 @@ SuperSonic includes a web component that renders a full metrics dashboard from t
 <link rel="stylesheet" href="https://unpkg.com/supersonic-scsynth@latest/dist/metrics-dark.css" />
 <script type="module" src="https://unpkg.com/supersonic-scsynth@latest/dist/metrics_component.js"></script>
 
-<supersonic-metrics id="metrics"></supersonic-metrics>
+<clockwork-metrics id="metrics"></clockwork-metrics>
 ```
 
 Connect it after boot to start live updates:

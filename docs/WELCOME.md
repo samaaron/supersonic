@@ -20,6 +20,8 @@ __Scsynth has been widely used for decades for audio research, algorithmic compo
 
 SuperSonic brings scsynth into the browser as an AudioWorklet. This enables scsynth to maintain its incredible performance and sub-sample timing accuracy even within the constraints of a web browser.
 
+The browser is not the only place it runs. The same engine also runs natively, as a server with its own audio device - see the [Native Guide](NATIVE.md) - and inside the Erlang VM as a NIF - see the [NIF Guide](NIF.md). The rest of this page is about the browser.
+
 - **Real-time synthesis** - Create sounds from scratch using oscillators, filters, envelopes, and effects
 - **Sample playback** - Load and manipulate audio samples with precise timing control
 - **Modular routing** - Connect audio and control signals in any configuration
@@ -34,17 +36,25 @@ Happy Coding!
 
 ## Hello World
 
+```html
+<button>play</button>
+```
+
 ```javascript
-import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest';
+import { SuperSonic } from 'https://unpkg.com/supersonic-scsynth@latest/dist/supersonic.js';
 
 const supersonic = new SuperSonic({
   baseURL: 'https://unpkg.com/supersonic-scsynth@latest/dist/',
+  coreBaseURL: 'https://unpkg.com/supersonic-scsynth-core@latest/',
   synthdefBaseURL: 'https://unpkg.com/supersonic-scsynth-synthdefs@latest/synthdefs/',
 });
-await supersonic.init();
 
-await supersonic.loadSynthDef('sonic-pi-prophet');
-supersonic.send('/s_new', 'sonic-pi-prophet', -1, 0, 0, 'note', 60);
+// Browsers start audio only after a click, tap or keypress
+document.querySelector('button').onclick = async () => {
+  await supersonic.init();
+  await supersonic.loadSynthDef('sonic-pi-prophet');
+  supersonic.send('/s_new', 'sonic-pi-prophet', -1, 0, 0, 'note', 60);
+};
 ```
 
 For other installation options including npm and self-hosting, see the [Installation Guide](INSTALLATION_WEB.md).
@@ -56,6 +66,7 @@ For other installation options including npm and self-hosting, see the [Installa
 - **[Guide](GUIDE.md)** - Practical patterns and worked examples
 - **[API Reference](API.md)** - The SuperSonic JavaScript API for initialising, controlling, and communicating with the scsynth Audioworklet
 - **[Communication Modes](MODES.md)** - SAB vs postMessage, server configuration
+- **[Workers](WORKERS.md)** - Send OSC directly from Web Workers
 
 ## Synthesis
 
@@ -65,6 +76,11 @@ For other installation options including npm and self-hosting, see the [Installa
 
 - **[Metrics](METRICS.md)** - Performance metrics and monitoring
 - **[Metrics Component](METRICS_COMPONENT.md)** - Ready-made metrics dashboard web component
+
+## Beyond the Browser
+
+- **[Native Guide](NATIVE.md)** - SuperSonic as a native server
+- **[NIF Guide](NIF.md)** - SuperSonic inside the Erlang VM
 
 ## For Contributors
 

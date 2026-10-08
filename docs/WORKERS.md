@@ -16,7 +16,7 @@ You could have the worker send messages back to the main thread via `postMessage
 
 The solution is to create a direct channel from the worker to scsynth running in the AudioWorklet. SuperSonic gives you an `OscChannel` for exactly this.
 
-You create an `OscChannel` with `createOscChannel` and then you need to **transfer** it to the worker.
+You create an `OscChannel` with `createOscChannel` (after `init()`) and then you need to **transfer** it to the worker.
 
 Note: Transferring is critical because the core internal comms mechanisms cannot be copied to the worker with a standard `postMessage`, they must be explicitly transferred. This enables the worker to have full and unique ownership of the newly created `OscChannel`.
 
@@ -33,7 +33,7 @@ worker.postMessage(
 
 The second argument to `postMessage` is optional - when provided, it lists which objects to transfer rather than copy.
 
-In your worker, handle this as an init message and reconstruct the channel:
+In your worker, handle this as an init message and reconstruct the channel. `OscChannel.fromTransferable()` returns a promise, so await it:
 
 ```javascript
 // Worker thread
@@ -41,14 +41,14 @@ import { OscChannel } from "supersonic-scsynth";
 
 let channel = null;
 
-self.onmessage = (event) => {
+self.onmessage = async (event) => {
   if (event.data.type === "init") {
-    channel = OscChannel.fromTransferable(event.data.channel);
+    channel = await OscChannel.fromTransferable(event.data.channel);
+
+    // Now you can send OSC directly to the AudioWorklet
+    channel.send(oscBytes);
   }
 };
-
-// Now you can send OSC directly to the AudioWorklet
-channel.send(oscBytes);
 ```
 
 Using a `type` field lets you handle different message types cleanly - for example `init`, `start`, `stop` (see the [sequencer example](#example-sequencer-worker) below).
@@ -56,7 +56,7 @@ Using a `type` field lets you handle different message types cleanly - for examp
 
 ## Multiple Workers
 
-Each call to `createOscChannel()` returns a new channel with a unique source ID. An optional `blocking` parameter (SAB mode only) controls whether `Atomics.wait()` is used for guaranteed ring buffer delivery (default: `true` for workers where `sourceId !== 0`, `false` for main thread). Set to `false` for AudioWorklet use. This means you can have multiple workers all sending OSC independently - they don't need to coordinate with each other, and their messages can be traced back to their source in metrics and logs.
+Each call to `createOscChannel()` returns a new channel with a unique source ID. This means you can have multiple workers all sending OSC independently - they don't need to coordinate with each other, and their messages can be traced back to their source in metrics and logs.
 
 ```javascript
 const sequencerChannel = supersonic.createOscChannel(); // sourceId: 1
@@ -68,6 +68,8 @@ lfoWorker.postMessage({ channel: lfoChannel.transferable }, lfoChannel.transferL
 midiWorker.postMessage({ channel: midiChannel.transferable }, midiChannel.transferList);
 ```
 
+In SAB mode there is a limit. Each channel a worker reconstructs takes one of the engine's eight client slots, and the main thread, the reply worker and the traffic-logging worker hold three of them, which leaves five. `fromTransferable()` rejects when none is free.
+
 ## SAB vs PM Mode
 
 `OscChannel` works identically in both modes - it detects the active mode and uses the appropriate communication method automatically. Your worker code doesn't need to know or care which mode is active.
@@ -76,17 +78,9 @@ See [Communication Modes](MODES.md) for details on choosing between SAB and post
 
 ## Message Routing
 
-`OscChannel.send()` automatically classifies messages and routes them appropriately:
+`OscChannel.send()` does no routing of its own. It hands the bytes to the engine - into the ring buffer in SAB mode, down a `MessagePort` in postMessage mode - and the engine's audio thread does the rest. Messages run as they arrive; a bundle with a future timetag waits in the engine's scheduler until its time.
 
-| Message Type                       | Where It Goes          | Why                                 |
-| ---------------------------------- | ---------------------- | ----------------------------------- |
-| Regular messages (not bundles)     | Direct to AudioWorklet | No timing requirements              |
-| Immediate bundles (timetag 0 or 1) | Direct to AudioWorklet | Execute now                         |
-| Near-future bundles (within 500ms) | Direct to AudioWorklet | Close enough to buffer              |
-| Late bundles (in the past)         | Direct to AudioWorklet | Execute immediately                 |
-| Far-future bundles (>500ms ahead)  | Prescheduler           | Hold until closer to execution time |
-
-The 500ms threshold is configurable via `bypassLookaheadMs` in the SuperSonic constructor.
+`send()` returns `false` when the message could not be sent. In SAB mode that means the ring buffer was full: the message is dropped and counted in the `ringBufferDirectWriteFails` metric.
 
 ## OscChannel API
 
@@ -94,9 +88,11 @@ The 500ms threshold is configurable via `bypassLookaheadMs` in the SuperSonic co
 
 | Method                 | Description                                |
 | ---------------------- | ------------------------------------------ |
-| `send(oscBytes)`       | Send with automatic routing                |
-| `sendDirect(oscBytes)` | Force direct send (bypass prescheduler)    |
-| `classify(oscBytes)`   | Get routing classification without sending |
+| `send(oscBytes)`       | Send OSC bytes to the engine; `false` if they could not be sent |
+| `sendDirect(oscBytes)` | The same as `send()`, kept for older code  |
+| `nextNodeId()`         | A unique node ID, from the same allocator as `supersonic.nextNodeId()` |
+| `now()`                | The engine's clock in NTP seconds (`0` until it has rendered a block) |
+| `getMetrics()`         | `{ messagesSent, bytesSent }`: in SAB mode the totals for every sender, in postMessage mode this channel's |
 | `close()`              | Release resources                          |
 
 ### Properties
@@ -106,13 +102,12 @@ The 500ms threshold is configurable via `bypassLookaheadMs` in the SuperSonic co
 | `mode`          | `'sab'` or `'postMessage'`                                    |
 | `transferable`  | Data for `postMessage` transfer                               |
 | `transferList`  | Transferable objects array                                    |
-| `getCurrentNTP` | (setter) Set NTP time source function for timestamp classification |
 
 ### Static Methods
 
 | Method                              | Description                   |
 | ----------------------------------- | ----------------------------- |
-| `OscChannel.fromTransferable(data)` | Reconstruct channel in worker |
+| `OscChannel.fromTransferable(data)` | Reconstruct channel in worker (returns a promise) |
 
 ## Example: Sequencer Worker
 
@@ -129,11 +124,12 @@ let bpm = 120;
 
 const pattern = [60, 62, 64, 65, 67, 65, 64, 62]; // Notes to play
 
-self.onmessage = (event) => {
+self.onmessage = async (event) => {
   const { type, data } = event.data;
 
   if (type === "init") {
-    channel = OscChannel.fromTransferable(data.channel);
+    channel = await OscChannel.fromTransferable(data.channel);
+    self.postMessage({ type: "ready" });
   } else if (type === "start") {
     running = true;
     step = 0;
@@ -162,11 +158,25 @@ function tick() {
 }
 ```
 
+The main thread loads the synthdef, hands the worker its channel, and starts it once the worker says the channel is ready. Starting it straight away would race the `await` in the worker:
+
+```javascript
+await supersonic.loadSynthDef("sonic-pi-beep");
+
+const worker = new Worker("sequencer-worker.js", { type: "module" });
+worker.onmessage = (event) => {
+  if (event.data.type === "ready") worker.postMessage({ type: "start" });
+};
+
+const channel = supersonic.createOscChannel();
+worker.postMessage({ type: "init", data: { channel: channel.transferable } }, channel.transferList);
+```
+
 ## Using OscChannel in an AudioWorklet
 
 OscChannel can also be used inside an `AudioWorkletProcessor`, not just Web Workers. This lets custom AudioWorklet code send OSC directly to scsynth without routing through the main thread.
 
-There are three key differences from worker usage:
+There are two things to know compared with worker usage:
 
 **1. Import from the AudioWorklet-safe entry point**
 
@@ -176,26 +186,11 @@ The standard `supersonic-scsynth` entry point pulls in `TextDecoder`, `Worker`, 
 import { OscChannel } from 'supersonic-scsynth/osc-channel';
 ```
 
-This only exports `OscChannel` and its dependencies (ring buffer, classifier, offsets) — nothing that touches the DOM or spawns workers.
+This only exports `OscChannel` and what it needs (its ring buffer client, offsets and clock reader) — nothing that touches the DOM or spawns workers.
 
-**2. Set `blocking: false` (SAB mode)**
+**2. Sending never calls `Atomics.wait()` (SAB mode)**
 
-In SAB mode, AudioWorklet code runs on the audio rendering thread, which cannot call `Atomics.wait()`. Pass `blocking: false` when creating the channel to ensure non-blocking ring buffer writes (in postMessage mode this has no effect):
-
-```javascript
-const channel = supersonic.createOscChannel({ blocking: false });
-```
-
-**3. Provide an NTP time source**
-
-`performance.timeOrigin` is unavailable in `AudioWorkletGlobalScope`, so the default NTP clock won't work. Use the `getCurrentNTP` setter to provide the AudioWorklet's own NTP time source:
-
-```javascript
-channel.getCurrentNTP = () => {
-  // your AudioWorklet NTP calculation here
-  return currentTime + ntpStartTime + driftOffset;
-};
-```
+The audio rendering thread cannot call `Atomics.wait()`, and `send()` never does. If another producer holds the ring buffer's spinlock, `send()` spins until it is free - it is held only for a message header and a copy - and a full ring buffer makes `send()` return `false` rather than wait for room. No option is needed.
 
 ## Cleanup
 
@@ -205,4 +200,3 @@ When you're done with a worker, you may close its OSC channel:
 // In the worker
 channel.close();
 ```
-

@@ -1,6 +1,6 @@
 # Guide
 
-Practical patterns and worked examples for SuperSonic. For the full method and property reference, see [API.md](API.md).
+Practical patterns and worked examples for SuperSonic. This guide covers the web client, the `SuperSonic` JavaScript class; the native server and the NIF take the same OSC commands but none of this API. For the full method and property reference, see [API.md](API.md).
 
 ## Table of Contents
 
@@ -55,7 +55,7 @@ document.addEventListener("visibilitychange", async () => {
 
 ### Resume vs Reload
 
-`resume()` is fast but only works if the worklet is still alive — it calls `purge()` to flush stale scheduled messages, resumes the AudioContext, and resyncs timing. `reload()` is a full restart. When you don't know which is needed, use `recover()` — or handle it manually:
+`resume()` is fast but only works if the worklet is still alive — when the AudioContext is not running, it calls `purge()` to flush stale scheduled messages, resumes the AudioContext, and resyncs timing. If the context is already running it changes nothing and only reports whether the worklet is alive. `reload()` is a full restart. When you don't know which is needed, use `recover()` — or handle it manually:
 
 ```javascript
 if (await supersonic.resume()) {
@@ -228,11 +228,11 @@ supersonic.on("out:html", ({ html, sequence, timestamp }) => {
 });
 ```
 
-- `html` — Complete log line with `supersonic-scsynth-*` CSS classes for styling
+- `html` — Complete log line with `clockwork-osc-*` CSS classes for styling
 - `sequence` — Incrementing message counter
 - `timestamp` — NTP seconds when the message was observed
 
-CSS classes: `supersonic-scsynth-seq`, `supersonic-scsynth-time`, `supersonic-scsynth-source`, `supersonic-scsynth-address`, `supersonic-scsynth-float`, `supersonic-scsynth-int`, `supersonic-scsynth-string`, `supersonic-scsynth-param`, `supersonic-scsynth-binary`, `supersonic-scsynth-error`, `supersonic-scsynth-bundle`, `supersonic-scsynth-comment`
+CSS classes: `clockwork-osc-seq`, `clockwork-osc-time`, `clockwork-osc-source`, `clockwork-osc-address`, `clockwork-osc-float`, `clockwork-osc-int`, `clockwork-osc-string`, `clockwork-osc-binary`, `clockwork-osc-bundle`. `clockwork-osc-source` (the channel that sent it) and `clockwork-osc-bundle` appear only in `out:html`.
 
 ### Latency Analysis with `in:osc`
 
@@ -281,7 +281,7 @@ const supersonic = new SuperSonic({
   baseURL: "/supersonic/",
   activityEvent: {
     maxLineLength: 200,            // Default for all (default: 200)
-    scsynthMaxLineLength: 500,     // Override for scsynth messages
+    engineMaxLineLength: 500,      // Override for engine debug messages
     oscInMaxLineLength: 100,       // Override for incoming OSC
     oscOutMaxLineLength: 100,      // Override for outgoing OSC
   },
@@ -291,7 +291,7 @@ const supersonic = new SuperSonic({
 | Option                 | Description                                                        |
 | ---------------------- | ------------------------------------------------------------------ |
 | `maxLineLength`        | Default max chars for event emission (default: 200)                |
-| `scsynthMaxLineLength` | Override for scsynth debug events (falls back to `maxLineLength`)  |
+| `engineMaxLineLength`  | Override for engine debug events (falls back to `maxLineLength`)   |
 | `oscInMaxLineLength`   | Override for incoming OSC args (falls back to `maxLineLength`)     |
 | `oscOutMaxLineLength`  | Override for outgoing OSC args (falls back to `maxLineLength`)     |
 
