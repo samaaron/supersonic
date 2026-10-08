@@ -195,7 +195,7 @@ message(STATUS "SuperSonic ${PROJECT_VERSION}: clockwork + ${CLOCKWORK_DSP}")
 include(GNUInstallDirs)
 install(PROGRAMS $<TARGET_FILE:SuperSonic>
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    RENAME supersonic)
+    RENAME supersonic${CMAKE_EXECUTABLE_SUFFIX})
 if(TARGET clockwork_plugin_bridge)
     install(TARGETS clockwork_plugin_bridge
         RUNTIME DESTINATION ${SUPERSONIC_BRIDGE_INSTALL_DIR}
