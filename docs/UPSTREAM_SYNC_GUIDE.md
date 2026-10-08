@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-10-01
-**Last Sync Commit**: 7e6f20928
-**Upstream Branch**: supercollider/develop (tracked to 2026-10-01)
-**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD 7e6f20928)
+**Last Updated**: 2026-10-08
+**Last Sync Commit**: 16be628
+**Upstream Branch**: supercollider/develop (tracked to 2026-10-08)
+**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD 16be628)
 
 ---
 
@@ -89,6 +89,18 @@ git remote add supercollider https://github.com/supercollider/supercollider.git
 git fetch supercollider
 ```
 
+Or, keeping upstream's history out of this repository, a shallow clone
+elsewhere reaching back past the last sync commit, with each patch's paths
+remapped onto `dsp/scsynth/synth/` and applied to the working tree:
+
+```bash
+git clone --filter=blob:none --shallow-since=<a week before the last sync> \
+    --branch develop https://github.com/supercollider/supercollider.git /tmp/sc-upstream
+git -C /tmp/sc-upstream show --format= <hash> -- server/plugins/NoiseUGens.cpp \
+    | sed -E 's#(a|b)/server/plugins/#\1/dsp/scsynth/synth/plugins/#g' > /tmp/<hash>.patch
+git apply --check /tmp/<hash>.patch && git apply /tmp/<hash>.patch
+```
+
 ### 2. Verify Current State
 
 ```bash
@@ -110,7 +122,7 @@ date: upstream merges branches whose commits carry older dates, and a
 `--since` date filter can miss them.
 
 ```bash
-LAST_SYNC_COMMIT="7e6f20928"   # top of this file
+LAST_SYNC_COMMIT="16be628"   # top of this file
 
 # View all upstream commits since then
 git log --oneline "$LAST_SYNC_COMMIT"..supercollider/develop
@@ -517,7 +529,7 @@ git checkout main
 git status  # ensure clean working directory
 
 # 2. Find commits since last sync (Last Sync Commit, top of this file)
-LAST_SYNC_COMMIT="7e6f20928"
+LAST_SYNC_COMMIT="16be628"
 git log --reverse --oneline "$LAST_SYNC_COMMIT"..supercollider/develop -- \
     server/scsynth server/plugins \
     include/server include/plugin_interface include/common common/ \
@@ -640,6 +652,30 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Full sync — develop 16be628 (2026-10-08)
+
+Reviewed `7e6f20928..16be628` (12 upstream commits, 3 touching scsynth paths).
+Two backported, both applied as upstream patches with paths remapped onto
+`dsp/scsynth/synth/`, taken from a shallow clone rather than a remote (see
+[Setup](#setup)).
+
+**Applied:**
+- `91cc120` RandID on every control block ([PR #6159](https://github.com/supercollider/supercollider/pull/6159)) — 🟡 RandID switched the synth's random generator only when its input changed, so with several RandIDs in one SynthDef the synth stayed on the last one's generator after the first block. `NoiseUGens.cpp`. The class library half of the commit is whitespace only.
+- `16be628` `/g_new` always fails on a node ID in use ([PR #7764](https://github.com/supercollider/supercollider/pull/7764)) — 🟢 it used to succeed silently when the group already had the parent asked for, so a client never learned its ID was taken; `addReplace` also drops a redundant `Node_RemoveID`. `SC_MiscCmds.cpp`. Sonic Pi is unaffected: native allocates a fresh ID for every group, and the web runtime creates its studio groups once.
+
+No adaptation was needed.
+
+**Not applicable:**
+- `4c9c4ef` terminal client rework ([PR #7747](https://github.com/supercollider/supercollider/pull/7747)) — its one file on the scsynth paths, `common/sc_defer.hpp`, is not carried here.
+- `68ba070`, `d81d67f`, `e9c45f1`, `c7bbf31`, `7db41f5`, `73e2c0f`, `28e006b` — sclang and class library.
+- `a716d89` — IDE. `0b0dcfc` — issue and PR templates.
+- The class library, HelpSource and testsuite parts of `91cc120`.
+
+**Testing:**
+- New fixture `randid_two_ids_probe` (`test/synthdefs/compile_randid_synthdefs.scd`), compiled with sclang 3.14.0-rc1: the commit's class library change is whitespace only, so any sclang compiles it the same, and the script reproduces it byte-identical.
+- `test/native/test_randid.cpp` (two RandIDs, seeded the same, draw identically on every block) and a duplicate-group case in `test/native/test_error_handling.cpp`. Against the pre-sync engine both fail — the draws differ by up to 1.94, and the second `/g_new` gets no `/fail` — and with the backports both pass.
+- `scripts/build-all.sh` (native, NIF, web): built. Native (`scripts/test-native.sh`): 560/560, the 3 device cases not run. NIF: 18 passed. Guest boundary: clean, 174 files.
 
 ### Full sync — first since clockwork's extraction (2026-10-01)
 
@@ -1114,6 +1150,6 @@ If uncertain about a commit:
 
 ---
 
-**Last Updated**: 2026-10-01
+**Last Updated**: 2026-10-08
 **Maintainer**: See git log for recent contributors
 **Upstream**: https://github.com/supercollider/supercollider

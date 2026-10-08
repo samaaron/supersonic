@@ -63,6 +63,24 @@ TEST_CASE("Duplicate node ID fails gracefully", "[error]") {
     fx.send(osc_test::message("/n_free", 1000));
 }
 
+TEST_CASE("Duplicate group ID fails, even where that group already is", "[error][upstream]") {
+    // Upstream #7764 (commit 16be628): /g_new with an ID that is in use always
+    // fails. It used to succeed silently when the group already had the parent
+    // asked for, so a client never learned that its ID was taken.
+    EngineFixture fx;
+    fx.send(osc_test::message("/g_new", 5000, 0, 1));
+    OscReply synced;
+    fx.send(osc_test::message("/sync", 1));
+    REQUIRE(fx.waitForReply("/synced", synced));
+
+    fx.send(osc_test::message("/g_new", 5000, 0, 1));   // the same ID, the same place
+    OscReply fail;
+    REQUIRE(fx.waitForReply("/fail", fail));
+    CHECK(fail.parsed().argString(0) == "/g_new");
+
+    fx.send(osc_test::message("/n_free", 5000));
+}
+
 TEST_CASE("Freeing root group is prevented", "[error]") {
     EngineFixture fx;
 

@@ -78,6 +78,7 @@ add_executable(SuperSonicNativeTests
     test_device_management.cpp
     test_definition_lifecycle.cpp
     test_send_reply.cpp
+    test_randid.cpp
     test_control_endpoints.cpp
     test_multichannel.cpp
     test_sound_out_fx.cpp
