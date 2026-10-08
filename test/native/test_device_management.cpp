@@ -130,7 +130,7 @@ TEST_CASE("DeviceManagement: device report carries a well-formed per-driver tabl
 TEST_CASE("DeviceManagement: pause and resume", "[DeviceManagement]") {
     EngineFixture fix;
 
-    auto& cb = fix.engine().audioCallback();
+    auto& cb = fix.engine().processor();
     REQUIRE_FALSE(cb.isPaused());
 
     cb.pause();

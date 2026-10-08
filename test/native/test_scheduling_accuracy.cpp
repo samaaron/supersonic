@@ -111,8 +111,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
-    double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                  + clockwork::kNtpEpochOffset;
+    double ntpNow = wallClockNTP();
 
     // Schedule NUM_BUNDLES synths at regular intervals
     for (int i = 0; i < NUM_BUNDLES; i++) {
@@ -249,8 +248,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
-    double ntpNow = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                  + clockwork::kNtpEpochOffset;
+    double ntpNow = wallClockNTP();
 
     for (int i = 0; i < NUM_BUNDLES; i++) {
         double t = ntpNow + FIRST_DELAY_SEC + i * SPACING_SEC;

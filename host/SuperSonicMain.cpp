@@ -14,7 +14,6 @@
  * The CLI is scsynth's, so Sonic Pi's daemon starts this binary as it
  * started scsynth.
  */
-#include <juce_core/juce_core.h>
 #include "clockwork_product.h"
 #include "EngineHost.h"
 #include "SuperSonicFront.h"
@@ -51,7 +50,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    juce::ScopedJuceInitialiser_GUI libraryInitialiser;
     auto log = [](const std::string& s) { fprintf(stderr, CLOCKWORK_LOG_PREFIX "%s\n", s.c_str()); fflush(stderr); };
 
     // ── --list-devices: enumerate and exit ────────────────────────────────────

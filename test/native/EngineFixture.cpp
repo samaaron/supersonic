@@ -8,7 +8,8 @@
  */
 #include "EngineFixture.h"
 #include "DebugTail.h"
-#include "JuceAudioCallback.h"
+#include "ClockworkProcessor.h"
+#include "HeadlessDriver.h"
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
 #include <chrono>
@@ -222,11 +223,11 @@ bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
 
 bool EngineFixture::waitForBlocks(uint32_t n, int timeoutMs) {
     const uint32_t start =
-        mEngine.audioCallback().processCount.load(std::memory_order_acquire);
+        mEngine.processor().processCount.load(std::memory_order_acquire);
     // Unsigned wrap is fine: (now - start) is the number of blocks rendered
     // since the snapshot regardless of counter wraparound.
     return pollUntil([&] {
-        return mEngine.audioCallback().processCount.load(
+        return mEngine.processor().processCount.load(
                    std::memory_order_acquire) - start >= n;
     }, timeoutMs);
 }
@@ -280,8 +281,8 @@ std::string EngineFixture::repliesDump() const {
 // ── HeadlessDriver control ───────────────────────────────────────────────────
 
 void EngineFixture::stopHeadlessDriver() {
-    mEngine.mHeadlessDriver.signalThreadShouldExit();
-    mEngine.mHeadlessDriver.stopThread(2000);
+    mEngine.mHeadlessDriver->signalThreadShouldExit();
+    mEngine.mHeadlessDriver->stopThread(2000);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
 

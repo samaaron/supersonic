@@ -9,6 +9,7 @@
 
 #include <thread>
 #include <chrono>
+#include "clock/clock_math.h"   // wallClockNTP
 #include <filesystem>
 #include <cstring>
 #include <algorithm>
@@ -133,9 +134,7 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     for (int i = 0; i < outCh * 128; ++i) outputBus[i] = kSentinel;
 
     // Pump one block (this thread is the sole caller of process_audio).
-    static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
-    double baseNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                     + NTP_EPOCH_OFFSET;
+    double baseNTP = wallClockNTP();
     process_audio(baseNTP, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
 
     // Every channel's full span must read exact silence.
@@ -191,9 +190,7 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     for (int i = 0; i < outCh * 128; ++i) outputBus[i] = kSentinel;
 
     // Pump one block (this thread is the sole caller of process_audio).
-    static constexpr double NTP_EPOCH_OFFSET = 2208988800.0;
-    double baseNTP = static_cast<double>(juce::Time::currentTimeMillis()) * 0.001
-                     + NTP_EPOCH_OFFSET;
+    double baseNTP = wallClockNTP();
     process_audio(baseNTP, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
 
     // Output is exact silence across every channel.

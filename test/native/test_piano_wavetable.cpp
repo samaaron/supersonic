@@ -11,7 +11,7 @@
 #include "SampleLane.h"
 #include "clockwork_audio_file.h"
 #include "piano_wavetable.h"
-#include "JuceAudioCallback.h"  // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"  // get_audio_output_bus / get_audio_buffer_samples
 #include <catch2/catch_approx.hpp>
 
 #include <cmath>

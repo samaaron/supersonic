@@ -223,7 +223,7 @@ TEST_CASE("InputChannels: no-op does not fire swap events", "[InputChannels]") {
 TEST_CASE("InputChannels: callback World widths track cold-swap rebuilds",
           "[InputChannels]") {
     EngineFixture fix;
-    auto& cb = fix.engine().audioCallback();
+    auto& cb = fix.engine().processor();
 
     // Boot: fixture world is 2-in / 2-out
     CHECK(cb.dspInputChannels() == 2);

@@ -14,7 +14,7 @@
 
 #include "EngineFixture.h"
 #include "FakeLinkPeerProcess.h"
-#include "JuceAudioCallback.h"
+#include "ClockworkProcessor.h"
 #include "OscTestUtils.h"
 
 #include <catch2/catch_test_macros.hpp>

@@ -19,7 +19,7 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
-#include "JuceAudioCallback.h"   // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"   // get_audio_output_bus / get_audio_buffer_samples
 
 #include <chrono>
 #include <cstdint>

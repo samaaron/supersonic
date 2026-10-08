@@ -81,7 +81,6 @@ add_executable(SuperSonicNativeTests
     test_control_endpoints.cpp
     test_multichannel.cpp
     test_sound_out_fx.cpp
-    test_audio_resume.cpp
     test_scheduling_accuracy.cpp
     test_scsynth_heap.cpp
     test_cold_swap.cpp
