@@ -20,6 +20,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cerrno>
 #include <cstring>
 #include <thread>
 #ifdef _WIN32
@@ -138,6 +139,15 @@ static const char* nextArg(int i, int argc, char* const argv[]) {
     return (i + 1 < argc) ? argv[i + 1] : nullptr;
 }
 
+// A whole number and nothing after it.
+static bool wholeNumber(const char* s, long& out) {
+    if (!s || !*s) return false;
+    char* end = nullptr;
+    errno = 0;
+    out = std::strtol(s, &end, 10);
+    return errno == 0 && end && *end == '\0';
+}
+
 bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     ClockworkEngine::Config& cfg = o.cfg;
     cfg.sampleRate       = 48000;
@@ -151,40 +161,62 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
         clockwork::guest_config_text::set(cfg.guestConfig, d.name, std::to_string(d.value));
     long inboxMb = 512;   // the host's default: generous, because it is only address space
 
+    // A mistake stops the boot, naming the flag: a value that went missing or
+    // is not a number is configuration the caller believes they gave.
+    const auto refuse = [err](const std::string& why) {
+        if (err) *err = why;
+        return false;
+    };
+
     for (int i = 1; i < argc; ++i) {
         const char* arg = argv[i];
         const char* val = nextArg(i, argc, argv);
+        const auto missing = [&] { return refuse(std::string(arg) + " needs a value"); };
+        const auto notANumber = [&] { return refuse(std::string(arg) + " takes a whole number, not \"" + val + "\""); };
+        long n = 0;
 
-        if (std::strcmp(arg, "--default-bpm") == 0) { if (val) { cfg.defaultBpm = std::atof(val); ++i; } continue; }
+        if (std::strcmp(arg, "--default-bpm") == 0) {
+            if (!val) return missing();
+            char* end = nullptr;
+            cfg.defaultBpm = std::strtod(val, &end);
+            if (end == val || *end != '\0')
+                return refuse(std::string(arg) + " takes a number, not \"" + val + "\"");
+            ++i;
+            continue;
+        }
         // Name published to OS audio/MIDI registries (PipeWire nodes, ALSA seq
         // MIDI clients, macOS aggregate devices, Link peers).
-        if (std::strcmp(arg, "--app-name") == 0) { if (val && *val) { cfg.appName = val; ++i; } continue; }
+        if (std::strcmp(arg, "--app-name") == 0)     { if (!val || !*val) return missing(); cfg.appName = val; ++i; continue; }
         // Driver (JUCE device type) to boot on; resolution rules live in resolveBootDriver.
-        if (std::strcmp(arg, "--audio-driver") == 0) { if (val && *val) { cfg.audioDriver = val; ++i; } continue; }
-        if (std::strcmp(arg, "--tcp") == 0)          { if (val) { o.tcpPort = std::atoi(val); ++i; } continue; }
-        if (std::strcmp(arg, "--uds") == 0)          { if (val) { o.udsStreamPath = val; ++i; } continue; }
-        if (std::strcmp(arg, "--uds-dgram") == 0)    { if (val) { o.udsDgramPath = val; ++i; } continue; }
-        if (std::strcmp(arg, "--pipe") == 0)         { if (val) { o.pipeName = val; ++i; } continue; }
+        if (std::strcmp(arg, "--audio-driver") == 0) { if (!val || !*val) return missing(); cfg.audioDriver = val; ++i; continue; }
+        if (std::strcmp(arg, "--tcp") == 0) {
+            if (!val) return missing();
+            if (!wholeNumber(val, n)) return notANumber();
+            o.tcpPort = static_cast<int>(n);
+            ++i;
+            continue;
+        }
+        if (std::strcmp(arg, "--uds") == 0)          { if (!val) return missing(); o.udsStreamPath = val; ++i; continue; }
+        if (std::strcmp(arg, "--uds-dgram") == 0)    { if (!val) return missing(); o.udsDgramPath = val; ++i; continue; }
+        if (std::strcmp(arg, "--pipe") == 0)         { if (!val) return missing(); o.pipeName = val; ++i; continue; }
         if (std::strcmp(arg, "--shm-commands") == 0) { o.shmCommands = true; continue; }
-        if (std::strcmp(arg, "--shm-endpoint") == 0) { if (val) { o.shmEndpoint = val; ++i; } continue; }
+        if (std::strcmp(arg, "--shm-endpoint") == 0) { if (!val) return missing(); o.shmEndpoint = val; ++i; continue; }
         if (std::strcmp(arg, "--inbox-mb") == 0) {
-            if (val) {
-                // Header offsets are 32-bit: the lane and everything before
-                // it must stay under 4 GB.
-                const long n = std::atol(val);
-                inboxMb = n < 1 ? 1 : (n > 3072 ? 3072 : n);
-                ++i;
-            }
+            if (!val) return missing();
+            if (!wholeNumber(val, n)) return notANumber();
+            // Header offsets are 32-bit: the lane and everything before it
+            // must stay under 4 GB.
+            inboxMb = n < 1 ? 1 : (n > 3072 ? 3072 : n);
+            ++i;
             continue;
         }
         if (std::strcmp(arg, "--max-connections") == 0) {
-            if (val) {
-                // Clamp: the named-pipe backend pre-spawns one thread per
-                // connection slot, so an unclamped value is a thread bomb.
-                const long n = std::atol(val);
-                o.maxConnections = static_cast<uint32_t>(n < 1 ? 1 : (n > 1024 ? 1024 : n));
-                ++i;
-            }
+            if (!val) return missing();
+            if (!wholeNumber(val, n)) return notANumber();
+            // Clamp: the named-pipe backend pre-spawns one thread per
+            // connection slot, so an unclamped value is a thread bomb.
+            o.maxConnections = static_cast<uint32_t>(n < 1 ? 1 : (n > 1024 ? 1024 : n));
+            ++i;
             continue;
         }
         // No audio device: the HeadlessDriver renders on a timer thread, so
@@ -193,21 +225,38 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
 
         // Every known long flag continues above, so a "--" arg reaching here
         // is unknown. Reported rather than skipped: a dropped option reads as
-        // configuration applied when it wasn't.
+        // configuration applied when it wasn't. Likewise a word that is not a
+        // flag, and a single-dash flag of more than one letter.
         if (arg[0] == '-' && arg[1] == '-') {
             o.warnings.push_back(std::string("unknown flag: ") + arg);
             continue;
         }
+        if (arg[0] != '-' || arg[1] == '\0') {
+            o.warnings.push_back(std::string("unexpected argument: ") + arg);
+            continue;
+        }
+        if (arg[2] != '\0') {
+            o.warnings.push_back(std::string("unknown flag: ") + arg);
+            continue;
+        }
 
-        if (arg[0] == '-' && arg[1] != '\0' && arg[2] == '\0' && val) {
+        // Every single-letter flag takes a value.
+        if (!val) return missing();
+        const auto number = [&](int& field) {
+            if (!wholeNumber(val, n)) return false;
+            field = static_cast<int>(n);
+            ++i;
+            return true;
+        };
+        {
             switch (arg[1]) {
-            case 'u': cfg.udpPort               = std::atoi(val); ++i; break;
-            case 'i': cfg.numInputChannels      = std::atoi(val); ++i; break;
-            case 'o': cfg.numOutputChannels     = std::atoi(val); ++i; break;
-            case 'B': cfg.bindAddress           = val;            ++i; break;
-            case 'S': cfg.sampleRate            = std::atoi(val); ++i; break;
-            case 'Z': cfg.bufferSize            = std::atoi(val); ++i; break;
-            case 'z': cfg.blockSize             = std::atoi(val); ++i; break;
+            case 'u': if (!number(cfg.udpPort))           return notANumber(); break;
+            case 'i': if (!number(cfg.numInputChannels))  return notANumber(); break;
+            case 'o': if (!number(cfg.numOutputChannels)) return notANumber(); break;
+            case 'B': cfg.bindAddress = val; ++i; break;
+            case 'S': if (!number(cfg.sampleRate))        return notANumber(); break;
+            case 'Z': if (!number(cfg.bufferSize))        return notANumber(); break;
+            case 'z': if (!number(cfg.blockSize))         return notANumber(); break;
             case 'H': {
                 // scsynth's -H: "<in> <out>", or one name for both. The
                 // sentinels keep to their direction: __none__ is an input
@@ -252,6 +301,10 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
                            + (o.shmCommands ? 1 : 0);
     if (alternatives > 1) {
         if (err) *err = "pick at most one of --tcp / --uds / --uds-dgram / --pipe / --shm-commands";
+        return false;
+    }
+    if (cfg.udpPort <= 0 && alternatives == 0) {
+        if (err) *err = "-u 0 leaves no command port: add --tcp, --uds, --uds-dgram or --pipe";
         return false;
     }
     if (o.shmCommands && cfg.udpPort <= 0) {

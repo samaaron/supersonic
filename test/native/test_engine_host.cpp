@@ -99,7 +99,7 @@ TEST_CASE("host args: defaults, and what the host derives", "[host][args]") {
     CHECK_FALSE(o.shmEndpoint.empty());
 
     // -u 0: no segment, no endpoint.
-    const Options none = parse({ "-u", "0" });
+    const Options none = parse({ "-u", "0", "--tcp", "4010" });
     CHECK(none.cfg.udpPort == 0);
     CHECK(none.shmEndpoint.empty());
 
@@ -110,10 +110,14 @@ TEST_CASE("host args: defaults, and what the host derives", "[host][args]") {
 }
 
 TEST_CASE("host args: an unknown flag is reported, not silently applied", "[host][args]") {
+    // An unknown long flag may or may not take a value, so the word after it
+    // is reported too; an unknown single-letter flag takes one, as all of
+    // scsynth's do.
     const Options o = parse({ "--no-such-flag", "7", "-q", "3", "-u", "4001" });
-    REQUIRE(o.warnings.size() == 2);
+    REQUIRE(o.warnings.size() == 3);
     CHECK(o.warnings[0].find("--no-such-flag") != std::string::npos);
-    CHECK(o.warnings[1].find("-q") != std::string::npos);
+    CHECK(o.warnings[1].find("7") != std::string::npos);
+    CHECK(o.warnings[2].find("-q") != std::string::npos);
     CHECK(o.cfg.udpPort == 4001);   // parsing carried on past them
 }
 
@@ -143,6 +147,41 @@ TEST_CASE("host args: -H names the devices, scsynth's way", "[host][args]") {
     CHECK(both.cfg.inputDevice == "__none__");
     CHECK(both.cfg.hardwareDevice == "MacBook Pro Speakers");
 }
+
+// A mistake on the command line stops the boot, naming the flag: a value that
+// went missing or is not a number is configuration the caller thinks it gave.
+TEST_CASE("host args: a flag missing its value, or a number that is not one, stops the boot", "[host][args]") {
+    for (const auto& args : std::vector<std::vector<std::string>>{
+             { "-u" }, { "-u", "abc" }, { "-S", "48k" }, { "-i", "two" }, { "-Z" },
+             { "--tcp" }, { "--tcp", "x" }, { "--max-connections", "many" }, { "--inbox-mb" },
+             { "--default-bpm", "fast" }, { "-m" }, { "-H" } }) {
+        std::string err;
+        bool ok = true;
+        parse(args, &err, &ok);
+        INFO(args[0] << (args.size() > 1 ? " " + args[1] : ""));
+        CHECK_FALSE(ok);
+        CHECK(err.find(args[0]) != std::string::npos);
+    }
+}
+
+TEST_CASE("host args: a word that is not a flag, or a long single-dash flag, is reported", "[host][args]") {
+    const Options o = parse({ "stray", "-foo", "-u", "4006" });
+    REQUIRE(o.warnings.size() == 2);
+    CHECK(o.warnings[0].find("stray") != std::string::npos);
+    CHECK(o.warnings[1].find("-foo") != std::string::npos);
+    CHECK(o.cfg.udpPort == 4006);
+}
+
+TEST_CASE("host args: -u 0 with no other command transport is refused", "[host][args]") {
+    std::string err;
+    bool ok = true;
+    parse({ "-u", "0" }, &err, &ok);
+    CHECK_FALSE(ok);
+    CHECK(err.find("-u 0") != std::string::npos);
+    parse({ "-u", "0", "--tcp", "4007" }, &err, &ok);
+    CHECK(ok);
+}
+
 
 TEST_CASE("host args: at most one command transport, and the segment ones need a segment", "[host][args]") {
     bool ok = true;

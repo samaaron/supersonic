@@ -128,12 +128,15 @@ value, and ignored.
 
 ### Unknown flags and errors
 
-An unknown flag is logged (`unknown flag: --foo`) and skipped, and the server
-starts anyway. Check the log when a flag seems to have done nothing.
+An unknown flag (`unknown flag: --foo`), or a word that is not a flag
+(`unexpected argument: foo`), is logged and skipped, and the server starts
+anyway. Check the log when a flag seems to have done nothing.
 
 The server exits with status 1 when:
 
-- two command transports are given;
+- a flag is missing its value, or a number is not one (`-u needs a value`,
+  `-S takes a whole number, not "48k"`);
+- two command transports are given, or `-u 0` with none of the others;
 - `--shm-commands` or `--shm-endpoint` is given with `-u 0`;
 - the engine cannot start (the log says why);
 - a TCP, Unix socket, named pipe or shared-memory transport cannot start —
