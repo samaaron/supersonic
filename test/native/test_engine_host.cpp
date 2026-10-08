@@ -179,6 +179,19 @@ TEST_CASE("host args: at most one command transport, and the segment ones need a
     CHECK(fine.shmEndpoint == "/tmp/z.sock");
 }
 
+// The host chooses some of scsynth's options for itself (-D 1: a native process
+// has a filesystem). What the help says is what the parser does, for each.
+TEST_CASE("host usage: a default the host chooses is the one the help shows", "[host][args]") {
+    const std::string u = supersonic_host::usage("Probe");
+    const size_t d = u.find("  -D <num>");
+    REQUIRE(d != std::string::npos);
+    const std::string line = u.substr(d, u.find('\n', d) - d);
+    INFO(line);
+    CHECK(line.find("(default: 1)") != std::string::npos);
+    CHECK(parse({}).loadDefinitionsAtBoot);
+    CHECK_FALSE(parse({ "-D", "0" }).loadDefinitionsAtBoot);
+}
+
 TEST_CASE("host usage: every flag the parser knows is in the help text", "[host][args]") {
     const std::string u = supersonic_host::usage("Probe");
     CHECK(u.find("Probe") != std::string::npos);

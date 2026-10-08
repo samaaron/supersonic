@@ -47,6 +47,22 @@ static const ScsynthOptionInfo* scsynthOptionForFlag(char flag) {
 // The usage lines for those flags, in the list's order, with the defaults
 // the list says — so --help cannot say one number while the engine uses
 // another.
+// The host's own choices for scsynth's options, on top of scsynth's defaults
+// (scsynth_options.h): the parser sets them and the help shows them, from here.
+// A native process has a filesystem, so the synthdef directory is loaded at
+// boot, as scsynth does (the host reads the files: Options::loadDefinitionsAtBoot);
+// -D 0 turns it off.
+struct HostOptionDefault { const char* name; uint32_t value; };
+constexpr HostOptionDefault kHostOptionDefaults[] = {
+    { "loadGraphDefs", 1 },
+};
+
+static uint32_t hostDefault(const ScsynthOptionInfo& opt) {
+    for (const auto& d : kHostOptionDefaults)
+        if (std::strcmp(d.name, opt.name) == 0) return d.value;
+    return opt.def;
+}
+
 static std::string scsynthOptionUsage() {
     std::string out;
     for (uint32_t i = 0; i < scsynth_option_count(); ++i) {
@@ -54,7 +70,7 @@ static std::string scsynthOptionUsage() {
         if (!opt->flag) continue;
         char line[200];
         std::snprintf(line, sizeof(line), "  -%c <num>     %s (default: %u)\n",
-                      opt->flag, opt->doc, opt->def);
+                      opt->flag, opt->doc, hostDefault(*opt));
         out += line;
     }
     return out;
@@ -65,44 +81,58 @@ std::string usage(const char* productName) {
     return
         p + " — audio runtime\n\n"
         "Usage: " + p + " [options]\n\n"
-        "  -u <port>    UDP port (default: 57110)\n"
-        "  -S <rate>    Sample rate (default: 48000)\n"
-        "  -Z <size>    Hardware buffer size (default: auto)\n"
-        "  -z <size>    DSP control block size, 32-1024 (default: 128)\n"
+        "  -u <port>    UDP port (default: 57110; 0 = no UDP port and no SHM segment)\n"
+        "  -S <rate>    Sample rate (default: 48000, or the device's own if it\n"
+        "               does not offer that)\n"
+        "  -Z <size>    Hardware buffer size (default: auto, the device's smallest\n"
+        "               of 128 or more)\n"
+        "  -z <size>    DSP control block size, 32-1024 (default: auto, the device\n"
+        "               buffer when it is 32-128, else 128)\n"
         "  -i <num>     Input channels (default: device max; 0 = disable)\n"
         "  -o <num>     Output channels (default: device max)\n"
         + scsynthOptionUsage() +
-        "  -B <addr>    Bind address (default: all interfaces)\n"
-        "  -H <words>   Audio device (fuzzy match on 'Driver : Device')\n"
+        "  -B <addr>    Bind address (default: 127.0.0.1; 0.0.0.0 = every IPv4\n"
+        "               interface)\n"
+        "  -H <name>    Audio device, for output and input; -H <in> <out> names\n"
+        "               each. The output is a fuzzy match on 'Driver : Device';\n"
+        "               __system__ follows the system default output\n"
         "  -v           Print version and exit\n"
+        "  -h, --help   Print this help and exit\n"
         "  --default-bpm <n>  Opening session tempo (default 120)\n"
         "  --app-name <name>  Name published to OS audio/MIDI registries\n"
         "                     (PipeWire, ALSA seq, Link; default: " + p + ")\n"
-        "  --audio-driver <name>  Driver to boot on (e.g. CoreAudio, ASIO, PipeWire)\n"
+        "  --audio-driver <name>  Driver to boot on (e.g. CoreAudio, Windows Audio,\n"
+        "                     ASIO, PipeWire, ALSA)\n"
         "  --list-devices     List audio devices and exit\n"
+        "  -U -R -l -I -O <value>  scsynth's; accepted and ignored\n"
         "\n"
         "Command transports (pick at most one; it replaces the UDP command\n"
         "port — the cue server and outbound OSC are unaffected; -u > 0 is\n"
         "what creates the SHM segment, and -u 0 disables it):\n"
-        "  --tcp <port>        TCP, length-prefixed OSC (respects -B)\n"
+        "  --tcp <port>        TCP, OSC framed by a 4-byte big-endian length\n"
+        "                      (respects -B)\n"
         "  --uds <path>        Unix socket, stream (macOS/Linux; file 0600)\n"
         "  --uds-dgram <path>  Unix socket, datagram (macOS/Linux; file 0600)\n"
         "  --pipe <name>       Named pipe (Windows; owner-only DACL)\n"
         "  --shm-commands      SHM segment's peer command plane (one trusted\n"
         "                      co-located peer; requires -u > 0)\n"
-        "  --max-connections <n>  Stream/pipe connection cap (default 4)\n"
+        "  --max-connections <n>  Stream/pipe connection cap, 1-1024 (default 4)\n"
         "  --inbox-mb <n>      The inbox lane a client loads samples and other\n"
-        "                      assets into, in MB (default 512). Address space,\n"
-        "                      not memory: pages are committed as they are written.\n"
+        "                      assets into, in MB, 1-3072 (default 512). Address\n"
+        "                      space, not memory: pages are committed as they are\n"
+        "                      written.\n"
         "\n"
         "Shared memory (needs -u > 0). The segment is anonymous; readers get\n"
         "it from the attach endpoint, a Unix socket (macOS/Linux) or named\n"
         "pipe (Windows) serving this user only:\n"
-        "  --shm-endpoint <path|pipe>  Where to serve it (default: derived\n"
-        "                      from -u under XDG_RUNTIME_DIR or TMPDIR, or\n"
-        "                      \\\\.\\pipe\\clockwork-shm-<port>)\n"
+        "  --shm-endpoint <path|pipe>  Where to serve it (default:\n"
+        "                      clockwork-shm-<port>.sock in XDG_RUNTIME_DIR,\n"
+        "                      else TMPDIR, else /tmp with the uid in the name;\n"
+        "                      \\\\.\\pipe\\clockwork-shm-<port> on Windows)\n"
         "\n"
-        "  --headless   No audio device; timer-driven render (CI/tests)\n\n";
+        "  --headless   No audio device; timer-driven render (CI/tests)\n"
+        "\n"
+        "An unknown flag is reported in the log and skipped.\n\n";
 }
 
 static const char* nextArg(int i, int argc, char* const argv[]) {
@@ -117,12 +147,9 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     // Recover automatically if the device's callback thread wedges (e.g. a
     // DirectSound cursor-poll spin), so a standalone process keeps running.
     cfg.callbackWatchdog = true;
-    // The guest's options start from its defaults (scsynth_options.h), with
-    // one host choice on top: a native process has a filesystem, so
-    // definitions in the synthdef directory are loaded at boot, as scsynth
-    // loads them (the host reads the files: Options::loadDefinitionsAtBoot).
-    // -D 0 turns it off, as it does for scsynth.
-    clockwork::guest_config_text::set(cfg.guestConfig, "loadGraphDefs", "1");
+    // The guest's options start from its defaults, with the host's choices on top.
+    for (const auto& d : kHostOptionDefaults)
+        clockwork::guest_config_text::set(cfg.guestConfig, d.name, std::to_string(d.value));
     long inboxMb = 512;   // the host's default: generous, because it is only address space
 
     for (int i = 1; i < argc; ++i) {
