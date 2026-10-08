@@ -570,7 +570,7 @@ message it receives is pushed to OSC subscribers as
 
 outside the `/clockwork/` namespace; a bundle arrives as its messages.
 
-On N a tokened subscribe is acked, but no cue is ever delivered.
+On N the cues arrive as `{osc_reply, Binary}` at every registered process.
 
 ### `/clockwork/osc/send`
 

@@ -369,6 +369,75 @@ defmodule TauTest do
     assert {:ok, _} = wait_for_reply_matching("/status.reply")
   end
 
+  # ── What start/1 and send_osc/1 say when they cannot do what was asked ──
+
+  # A boot scsynth refuses — an option it does not know, a value it will not
+  # take — is an error naming it, and leaves no engine running.
+  test "a boot scsynth refuses reports why, and leaves the engine stopped" do
+    for {config, named} <- [{%{no_such_option: 1}, "no_such_option"}, {%{max_nodes: 1.5}, "max_nodes"}] do
+      assert {:error, reason} = start_sync(start_config(config))
+      assert to_string(reason) =~ named
+      assert {:error, :not_running} = :clockwork.send_osc(osc_message("/status"))
+    end
+  end
+
+  # A key or value the NIF cannot read is refused, naming it, rather than
+  # left out of the boot.
+  test "start options the NIF cannot read are refused, naming the key" do
+    for {config, named} <- [
+          {Map.merge(start_config(), %{"max_nodes" => 512}), "max_nodes"},
+          {Map.merge(start_config(), %{max_nodes: ~c"abc"}), "max_nodes"},
+          {Map.merge(start_config(), %{sample_rate: 44100.0}), "sample_rate"},
+          {%{headless: "true"}, "headless"}
+        ] do
+      assert {:error, reason} = start_sync(config)
+      assert to_string(reason) =~ named
+      assert {:error, :not_running} = :clockwork.send_osc(osc_message("/status"))
+    end
+  end
+
+  test "start/1 takes a map" do
+    assert_raise ArgumentError, fn -> :clockwork.start(:not_a_map) end
+  end
+
+  test "a packet too big for the engine's ring at any moment is refused" do
+    assert :ok = start_sync(start_config())
+    blob = :binary.copy(<<0>>, 4 * 1024 * 1024)
+    packet = osc_string("/big") <> osc_string(",b") <> <<byte_size(blob)::big-32>> <> blob
+    assert {:error, :too_big} = :clockwork.send_osc(packet)
+    assert :ok = :clockwork.send_osc(osc_message("/status"))
+  end
+
+  defp osc_message_iii(address, a, b, c) do
+    osc_string(address) <> osc_string(",iii") <> <<a::signed-big-32, b::signed-big-32, c::signed-big-32>>
+  end
+
+  # The cue server hears OSC from the network, and a subscribed process gets
+  # each message as /external-osc-cue, as a socket client does.
+  test "an OSC cue reaches a subscribed process" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    {:ok, probe} = :gen_udp.open(0, [:binary])
+    {:ok, port} = :inet.port(probe)
+    :ok = :gen_udp.close(probe)
+    assert :ok = :clockwork.send_osc(osc_message_iii("/clockwork/osc/cue-server/config", port, 1, 1))
+    assert :ok = :clockwork.send_osc(osc_message("/clockwork/osc/notify/subscribe"))
+
+    {:ok, sock} = :gen_udp.open(0, [:binary])
+    cue = osc_message("/hello", 42)
+    heard =
+      Enum.find_value(1..40, fn _ ->
+        :ok = :gen_udp.send(sock, {127, 0, 0, 1}, port, cue)
+        case wait_for_reply_matching("/external-osc-cue", 100) do
+          {:ok, reply} -> reply
+          :timeout -> nil
+        end
+      end)
+    :gen_udp.close(sock)
+    assert heard, "no /external-osc-cue arrived"
+    assert String.contains?(heard, "/hello")
+  end
+
   test "start with custom config" do
     config = start_config(%{
       sample_rate: 44100,

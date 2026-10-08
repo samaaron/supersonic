@@ -1,5 +1,9 @@
 # NIF (Erlang/Elixir)
 
+> **Experimental.** Nothing has been built on the NIF yet beyond its tests, and
+> it has not driven a real audio device in anger. Expect rough edges, and an
+> API that changes as something real is built on it.
+
 SuperSonic also builds as a NIF: a shared library the BEAM loads, with
 scsynth running inside the VM. OSC goes in as binaries and comes back as
 Erlang messages. There is no command port and no separate process.
@@ -62,9 +66,9 @@ library."}` and the old code stays; restart the VM to take a new build.
 | Function | Returns |
 |---|---|
 | `is_nif_loaded()` | `true` |
-| `start(Config)` | `ok`, then a `{clockwork_started, _}` message |
+| `start(Config)` | `ok`, then a `{clockwork_started, _}` message; `badarg` for anything but a map |
 | `stop()` | `ok`, then a `{clockwork_stopped, ok}` message |
-| `send_osc(Binary)` | `ok`, or `{error, not_running}`; `badarg` for anything but a binary |
+| `send_osc(Binary)` | `ok`, `{error, full}`, `{error, too_big}` or `{error, not_running}`; `badarg` for anything but a non-empty binary |
 | `set_notification_pid()` | `ok`; the calling process now receives the engine's messages |
 | `clear_notification_pid()` | `ok`; the calling process no longer does, the others still do |
 
@@ -73,10 +77,16 @@ stops the engine, and sends the outcome to the process that called:
 
 - `{clockwork_started, ok}`
 - `{clockwork_started, {error, already_running}}`: an engine is already running
-- `{clockwork_started, {error, Reason}}`: `Reason` is a charlist saying why the boot failed
+- `{clockwork_started, {error, Reason}}`: `Reason` is a charlist saying why
+  nothing is running: an option the NIF cannot read, one scsynth refuses (it
+  names the line), or a heap the system cannot provide
 - `{clockwork_stopped, ok}`: also sent when nothing was running
 
-`send_osc/1` takes one OSC message or bundle per call.
+`send_osc/1` takes one OSC message or bundle per call. `{error, full}` means
+the engine's input ring had no room at that moment: the engine drains it every
+block, so try again. `{error, too_big}` means the packet is larger than the ring
+can ever hold: bulk data such as samples belongs in a file the engine is told
+about (`/b_allocRead`), not in a packet.
 
 ## Start options
 
@@ -90,11 +100,15 @@ stops the engine, and sends the outcome to the process that called:
 | `num_output_channels` | all the device has | 2 when headless |
 | `num_input_channels` | all the device has | 0 when headless |
 
-`headless` takes `true` or `false`; the others take integers.
+`headless` takes `true` or `false`; the others take integers. A key that is
+not an atom, or a value of the wrong kind, is refused with `{error, Reason}`
+naming the key; nothing is booted.
 
 Every other atom key goes to scsynth as a `name=value` line. A value is an
-integer, a float, `true` or `false` (sent as 1 and 0), or a binary; scsynth's
-options are all non-negative integers. scsynth matches a name ignoring case,
+integer, a float, `true` or `false` (sent as 1 and 0), or a binary; anything else
+is refused. scsynth's options are all non-negative integers, and it refuses a
+name it does not know, or a value it will not take, with a reason naming the
+line. scsynth matches a name ignoring case,
 `_` and `-`, so `max_nodes` is its `maxNodes`. Its options, from
 `dsp/scsynth/scsynth_options.h`:
 

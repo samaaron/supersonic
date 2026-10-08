@@ -53,7 +53,7 @@ SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwo
 - **Plugin hosting** - *tracks of CLAP and VST3 plugins, run in a separate bridge process.*
 - **Session recording** - *the main output to WAV or FLAC.*
 
-### NIF
+### NIF (experimental)
 
 - **BEAM embedded** - *clean OSC binary interface. Same protocol boundary as web and native.*
 - **Never blocks a scheduler** - *`send_osc` is a ring write; `start` and `stop` hand the slow boot and shutdown to the NIF's own thread and report back by message.*
@@ -81,7 +81,7 @@ Clone with the submodule and build with CMake - see [Building from Source](docs/
 
 ### NIF
 
-Build the BEAM NIF - no Erlang installation is needed to build it:
+The NIF is experimental: nothing has been built on it yet beyond its tests. Build it - no Erlang installation is needed to build it:
 
     cmake -B build/nif -DCLOCKWORK_NIF=ON -DCMAKE_BUILD_TYPE=Release
     cmake --build build/nif --target clockwork_nif --config Release --parallel
