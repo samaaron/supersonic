@@ -106,9 +106,10 @@ phase_smoke() {
     apt-get update
     apt-get install -y "${deb[0]}"
     supersonic -v
-    # Boot headless (no audio device in the container), give it a moment,
-    # then require it to still be alive.
-    supersonic --headless -u 0 > /tmp/supersonic-smoke.log 2>&1 &
+    # Boot as installed, headless (no audio device in the container), give it
+    # a moment, then require it to still be alive. Replies over each transport
+    # are autopkgtest's (transport-smoke).
+    supersonic --headless > /tmp/supersonic-smoke.log 2>&1 &
     pid=$!
     sleep 5
     if ! kill -0 "$pid" 2>/dev/null; then
