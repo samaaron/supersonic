@@ -241,7 +241,7 @@ The `in:osc` event includes timing information for measuring delivery latency:
 ```javascript
 supersonic.on("in:osc", ({ oscData, sequence, timestamp, scheduledTime }) => {
   const parsed = SuperSonic.osc.decode(oscData);
-  const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
+  const relativeTime = (timestamp - supersonic.clock.getNTPStartTime()).toFixed(2);
   console.log(`[${sequence}] +${relativeTime}s`, parsed[0], parsed.slice(1));
   if (scheduledTime && timestamp > scheduledTime) {
     console.warn("Late by", (timestamp - scheduledTime).toFixed(4), "s");
@@ -259,7 +259,7 @@ When using multiple OscChannels (see [Workers Guide](WORKERS.md)), `sourceId` id
 ```javascript
 supersonic.on("out:osc", ({ oscData, sourceId, sequence, timestamp, scheduledTime }) => {
   const decoded = SuperSonic.osc.decode(oscData);
-  const relativeTime = (timestamp - supersonic.initTime).toFixed(2);
+  const relativeTime = (timestamp - supersonic.clock.getNTPStartTime()).toFixed(2);
   console.log(`[${sequence}] +${relativeTime}s [src:${sourceId}]`, decoded[0]);
 });
 ```

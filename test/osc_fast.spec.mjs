@@ -1154,6 +1154,14 @@ test.describe('OSC Fast Encoder/Decoder', () => {
       expect(result.uuidSize - result.baseSize).toBe(16);
     });
 
+    test('a bundle packet that is neither [address, ...args] nor a nested bundle is refused', async ({ page }) => {
+      const message = await page.evaluate(() => {
+        try { window.oscFast.encodeBundle(1, [{ address: '/test', args: [1] }]); return null; }
+        catch (e) { return `${e.name}: ${e.message}`; }
+      });
+      expect(message).toMatch(/^TypeError: a bundle packet is/);
+    });
+
     test('UUID in bundle', async ({ page }) => {
       const result = await page.evaluate(() => {
         const uuid = new Uint8Array([
@@ -1161,7 +1169,7 @@ test.describe('OSC Fast Encoder/Decoder', () => {
           0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
         ]);
         const encoded = window.oscFast.encodeBundle(1, [
-          { address: '/test', args: [{ type: 'uuid', value: uuid }] },
+          ['/test', { type: 'uuid', value: uuid }],
         ]);
         const decoded = window.oscFast.decodeBundle(encoded);
         const msg = decoded.packets[0];

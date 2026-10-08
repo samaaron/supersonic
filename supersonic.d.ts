@@ -97,20 +97,16 @@ export type NTPTimeTag = number | [number, number] | 1 | null | undefined;
 /**
  * A packet that can be included in an OSC bundle.
  *
- * Accepts three formats:
+ * A message as an array, or a nested bundle:
  * @example
- * // Array format (preferred):
+ * // Message:
  * ["/s_new", "beep", 1001, 0, 0]
- *
- * // Object format (legacy):
- * { address: "/s_new", args: ["beep", 1001, 0, 0] }
  *
  * // Nested bundle:
  * { timeTag: ntpTime, packets: [ ["/n_set", 1001, "freq", 880] ] }
  */
 export type OscBundlePacket =
   | OscMessage
-  | { address: string; args?: OscArg[] }
   | { timeTag: NTPTimeTag; packets: OscBundlePacket[] };
 
 // ============================================================================
@@ -261,8 +257,6 @@ export interface SuperSonicOptions {
 
   /** The engine's options (see {@link ScsynthOptions}). Validated by the constructor, which throws on a bad one. */
   scsynthOptions?: ScsynthOptions;
-  /** The old name for `scsynthOptions`, still accepted. A field given in both takes its value from `scsynthOptions`. */
-  worldOptions?: ScsynthOptions;
 
   /** How often to snapshot metrics and the node tree in postMessage mode (ms). Default: 150. */
   snapshotIntervalMs?: number;
@@ -1106,13 +1100,6 @@ export class OscChannel {
    */
   send(oscData: Uint8Array): boolean;
 
-  /**
-   * Alias of {@link send} — kept for callers that used the explicit direct path.
-   * @param oscData - Encoded OSC bytes
-   * @returns true if sent successfully
-   */
-  sendDirect(oscData: Uint8Array): boolean;
-
   /** Get current metrics. In SAB mode these are the shared totals for every sender; in postMessage mode, this channel's own. */
   getMetrics(): OscChannelMetrics;
 
@@ -1415,13 +1402,6 @@ export class SuperSonic {
 
   /** The SharedArrayBuffer (SAB mode) or null (postMessage mode). Internal. */
   get sharedBuffer(): SharedArrayBuffer | null;
-
-  /**
-   * NTP time (seconds since 1900) when the AudioContext started; 0 before {@link init}.
-   * @deprecated Use `sonic.clock.getNTPStartTime()` for the same value, or `sonic.clock.now()` for the current
-   *   audio-thread NTP time.
-   */
-  get initTime(): number;
 
   /**
    * Session-timeline service: tempo, beat origin, transport, NTP "now."

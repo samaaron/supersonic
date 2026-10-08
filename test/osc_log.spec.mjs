@@ -455,9 +455,6 @@ test.describe("Centralized OSC Out Logging", () => {
   });
 
   test("sourceId is preserved for far-future bundles through prescheduler", async ({ page, sonicConfig }) => {
-    // Use shorter lookahead for faster test (bundles 300ms out go through prescheduler)
-    const config = { ...sonicConfig, bypassLookaheadMs: 200 };
-
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -471,7 +468,7 @@ test.describe("Centralized OSC Out Logging", () => {
         messagesBySource.set(sourceId, count + 1);
       });
 
-      // Create a worker and send far-future bundles (beyond lookahead = goes through prescheduler)
+      // Create a worker and send far-future bundles
       const worker = new Worker("/test/assets/osc_channel_test_worker.js", { type: "module" });
 
       await new Promise((resolve, reject) => {
@@ -525,7 +522,7 @@ test.describe("Centralized OSC Out Logging", () => {
         workerCount: messagesBySource.get(1) || 0,
         messagesBySource: Object.fromEntries(messagesBySource),
       };
-    }, config);
+    }, sonicConfig);
 
     // Worker messages through prescheduler should preserve sourceId 1
     expect(result.sourceIds).toContain(1);
@@ -1103,7 +1100,7 @@ test.describe("HTML Log Events (in:html / out:html)", () => {
     expect(result.html).toContain('clockwork-osc-address');
   });
 
-  test("out:html includes time span when initTime is available", async ({ page, sonicConfig }) => {
+  test("out:html includes time span once the clock has a start time", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();

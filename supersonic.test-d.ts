@@ -86,8 +86,7 @@ expectNotAssignable<NTPTimeTag>('immediate');
 
 // OscBundlePacket — all three forms
 expectAssignable<OscBundlePacket>(['/s_new', 'beep', 1001] as OscMessage);
-expectAssignable<OscBundlePacket>({ address: '/s_new', args: ['beep', 1001] });
-expectAssignable<OscBundlePacket>({ address: '/s_new' });
+expectNotAssignable<OscBundlePacket>({ address: '/s_new', args: ['beep', 1001] });
 expectAssignable<OscBundlePacket>({ timeTag: 1, packets: [['/n_set', 1001, 'freq', 880] as OscMessage] });
 
 // ============================================================================
@@ -410,7 +409,7 @@ expectType<MessagePort | undefined>(pmTransfer.nodeIdPort);
 // OscChannel instance methods
 declare const channel: OscChannel;
 expectType<boolean>(channel.send(new Uint8Array()));
-expectType<boolean>(channel.sendDirect(new Uint8Array()));
+expectError(channel.sendDirect(new Uint8Array()));
 expectType<number>(channel.nextNodeId());
 expectType<number>(channel.now());
 expectType<OscChannelMetrics>(channel.getMetrics());
@@ -432,6 +431,7 @@ expectType<Promise<OscChannel>>(OscChannel.fromTransferable(pmTransfer));
 const sonic1 = new SuperSonic();
 const sonic2 = new SuperSonic({ baseURL: '/dist/' });
 const sonic3 = new SuperSonic({ mode: 'sab', scsynthOptions: { numBuffers: 2048 } });
+expectError(new SuperSonic({ worldOptions: { numBuffers: 2048 } }));
 
 // Static
 expectType<typeof osc>(SuperSonic.osc);
@@ -447,7 +447,7 @@ expectType<TransportMode>(sonic.mode);
 expectType<Record<string, number> | null>(sonic.bufferConstants);
 expectType<number>(sonic.ringBufferBase);
 expectType<SharedArrayBuffer | null>(sonic.sharedBuffer);
-expectType<number>(sonic.initTime);
+expectError(sonic.initTime);
 
 // node getter
 const node = sonic.node;

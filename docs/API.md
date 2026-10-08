@@ -103,7 +103,6 @@ scsynth with low latency inside a web page.
 | [`clock`](#clock)                         | Session-timeline service: tempo, beat origin, transport, NTP "now." See ClockworkClock for the full API surface. |
 | [`gamepad`](#gamepad)                     | The gamepad manager, when the gamepad option is on and it came up; otherwise null (gamepadError says why).       |
 | [`gamepadError`](#gamepaderror)           | Why gamepad is null although it was asked for: the error its start-up threw.                                     |
-| [`initTime`](#inittime)                   | NTP time (seconds since 1900) when the AudioContext started; 0 before init.                                      |
 | [`midi`](#midi)                           | The Web MIDI manager, when MIDI is enabled (the midi option, or enableMidi) and came up.                         |
 | [`midiError`](#midierror)                 | Why midi is null although MIDI was asked for: the error its start-up threw.                                      |
 | [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').                                                                  |
@@ -233,7 +232,6 @@ const sonic = new SuperSonic({
 | <a id="wasmurl"></a> `wasmUrl?`                         | `string`                                    | Full URL to the WASM binary. Overrides `wasmBaseURL`.                                                                                                                                                                                                                                                                                                                                                                            |          |
 | <a id="workerbaseurl"></a> `workerBaseURL?`             | `string`                                    | Base URL for the worker scripts. Defaults to `baseURL + 'workers/'`.                                                                                                                                                                                                                                                                                                                                                             |          |
 | <a id="workleturl"></a> `workletUrl?`                   | `string`                                    | Full URL to the AudioWorklet script. Overrides `coreBaseURL`.                                                                                                                                                                                                                                                                                                                                                                    |          |
-| <a id="worldoptions"></a> `worldOptions?`               | [`ScsynthOptions`](#server-options)         | The old name for `scsynthOptions`, still accepted. A field given in both takes its value from `scsynthOptions`.                                                                                                                                                                                                                                                                                                                  |          |
 
 *Required unless `workerBaseURL` and one of `coreBaseURL` / `wasmBaseURL` are provided.*
 
@@ -367,23 +365,6 @@ Whether [init](#init) is currently in progress.
 ###### Returns
 
 `boolean`
-
-##### initTime
-
-###### Get Signature
-
-> **get** **initTime**(): `number`
-
-NTP time (seconds since 1900) when the AudioContext started; 0 before [init](#init).
-
-###### Deprecated
-
-Use `sonic.clock.getNTPStartTime()` for the same value, or `sonic.clock.now()` for the current
-audio-thread NTP time.
-
-###### Returns
-
-`number`
 
 ##### loadedSynthDefs
 
@@ -2663,7 +2644,6 @@ then transfer it to a Web Worker for direct communication with the AudioWorklet.
 | [`nextNodeId()`](#nextnodeid)                 | Get the next unique node ID.                                                                                                                                |
 | [`now()`](#now)                               | The engine's clock, in NTP seconds: the time its audio thread has reached, readable on any thread the channel is on — a worker cannot see the AudioContext. |
 | [`send()`](#send)                             | Send an OSC message: frames it onto the IN ring (SAB) or postMessages it to the worklet (PM).                                                               |
-| [`sendDirect()`](#senddirect)                 | Alias of send — kept for callers that used the explicit direct path.                                                                                        |
 | [`fromTransferable()`](#fromtransferable)     | Reconstruct an OscChannel from data received via postMessage in a worker.                                                                                   |
 
 #### Example
@@ -2848,24 +2828,6 @@ the worklet (PM). Classification and scheduling happen on the audio thread
 
 true if sent; false if the IN ring had no room (SAB, counted as
 `ringBufferDirectWriteFails`) or the channel is closed (PM)
-
-##### sendDirect()
-
-> **sendDirect**(`oscData`): `boolean`
-
-Alias of [send](#send) — kept for callers that used the explicit direct path.
-
-###### Parameters
-
-| Parameter | Type         | Description       |
-| --------- | ------------ | ----------------- |
-| `oscData` | `Uint8Array` | Encoded OSC bytes |
-
-###### Returns
-
-`boolean`
-
-true if sent successfully
 
 ##### fromTransferable()
 
@@ -3901,20 +3863,17 @@ NTP timetag for bundle encoding.
 
 ### OscBundlePacket
 
-> **OscBundlePacket** = [`OscMessage`](#oscmessage) | { `address`: `string`; `args?`: [`OscArg`](#osc-argument-types)\[]; } | { `packets`: [`OscBundlePacket`](#oscbundlepacket)\[]; `timeTag`: [`NTPTimeTag`](#ntptimetag); }
+> **OscBundlePacket** = [`OscMessage`](#oscmessage) | { `packets`: [`OscBundlePacket`](#oscbundlepacket)\[]; `timeTag`: [`NTPTimeTag`](#ntptimetag); }
 
 A packet that can be included in an OSC bundle.
 
-Accepts three formats:
+A message as an array, or a nested bundle:
 
 #### Example
 
 ```ts
-// Array format (preferred):
+// Message:
 ["/s_new", "beep", 1001, 0, 0]
-
-// Object format (legacy):
-{ address: "/s_new", args: ["beep", 1001, 0, 0] }
 
 // Nested bundle:
 { timeTag: ntpTime, packets: [ ["/n_set", 1001, "freq", 880] ] }

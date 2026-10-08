@@ -134,21 +134,12 @@ export class SuperSonic extends Clockwork {
      * rest. Clockwork knows this object only as opaque bytes it copies into
      * a region. Its defaults, its validation and its binary layout are all
      * scsynth knowledge, so all three live here.
-     *
-     * `worldOptions` is still accepted as a spelling of the same thing. It was
-     * clockwork's word for it until 2026-08-31, when "world" went back to
-     * being scsynth's concept rather than everyone's.
      */
-    const scOpts = { ...defaultScsynthOptions,
-                     ...options.worldOptions, ...options.scsynthOptions };
+    const scOpts = { ...defaultScsynthOptions, ...options.scsynthOptions };
     validateScsynthOptions(scOpts);
-    // The guest's vocabulary, unless the caller overrides it. Without this
-    // clockwork falls back to NO_DSP: nothing is cached across a device switch
-    // and sync() refuses, because no verb asks.
     // The artifact this product ships. clockwork's default name is
     // deliberately guest-agnostic — it cannot know what its guest compiled to —
-    // so naming the file is SuperSonic's job, the same way declaring the
-    // vocabulary is.
+    // so naming the file is SuperSonic's job.
     // Same precedence as clockwork's own: the core package's directory
     // (coreBaseURL) holds the wasm; baseURL only stands in for it when no
     // core directory was named. Ignoring coreBaseURL here sent a CDN boot to

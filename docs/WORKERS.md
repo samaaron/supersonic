@@ -89,7 +89,6 @@ See [Communication Modes](MODES.md) for details on choosing between SAB and post
 | Method                 | Description                                |
 | ---------------------- | ------------------------------------------ |
 | `send(oscBytes)`       | Send OSC bytes to the engine; `false` if they could not be sent |
-| `sendDirect(oscBytes)` | The same as `send()`, kept for older code  |
 | `nextNodeId()`         | A unique node ID, from the same allocator as `supersonic.nextNodeId()` |
 | `now()`                | The engine's clock in NTP seconds (`0` until it has rendered a block) |
 | `getMetrics()`         | `{ messagesSent, bytesSent }`: in SAB mode the totals for every sender, in postMessage mode this channel's |

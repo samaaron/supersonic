@@ -1,5 +1,5 @@
 // Test worker that uses OscChannel for direct worklet communication
-// Tests that the bypassLookaheadS threshold is correctly passed through
+// Sends timed bundles from a worker, through an OscChannel the page hands it
 
 import { OscChannel } from "../../dist/supersonic.js";
 

@@ -68,14 +68,13 @@ test.describe("Flush Scheduler", () => {
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
       await sonic.sync(1);
 
-      // Use createOscChannel + sendDirect to bypass the prescheduler entirely,
-      // sending bundles straight to the worklet ring buffer.
+      // Send the bundles through an OscChannel, straight to the worklet ring buffer.
       // The WASM scheduler queues them because their timetags are in the future.
       const channel = sonic.createOscChannel();
       const baseNTP = getCurrentNTP() + 5.0;
       for (let i = 0; i < 20; i++) {
         const bundle = createTimedBundle(baseNTP + (i * 0.1), 30000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
 
       // Wait for ring buffer messages to be consumed by process() into the WASM scheduler
@@ -118,10 +117,10 @@ test.describe("Flush Scheduler", () => {
       const now = getCurrentNTP();
       const channel = sonic.createOscChannel();
 
-      // 10 bundles for the WASM scheduler — use sendDirect to bypass prescheduler
+      // 10 bundles for the WASM scheduler
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(now + 5.0 + (i * 0.1), 40000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
 
       // 10 bundles for the prescheduler (30s in future, beyond lookahead)
@@ -187,7 +186,7 @@ test.describe("Flush Scheduler", () => {
       const now = getCurrentNTP();
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(now + 5.0 + (i * 0.1), 50000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
 
       // Fill prescheduler with "old run" bundles
@@ -205,10 +204,10 @@ test.describe("Flush Scheduler", () => {
       // Now send "new run" bundles — these must NOT be lost
       const newNTP = getCurrentNTP();
 
-      // 5 bundles to WASM scheduler (via sendDirect)
+      // 5 bundles to WASM scheduler
       for (let i = 0; i < 5; i++) {
         const bundle = createTimedBundle(newNTP + 5.0 + (i * 0.1), 52000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
 
       // 5 bundles to prescheduler
@@ -251,7 +250,7 @@ test.describe("Flush Scheduler", () => {
 
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(run1NTP + 5.0 + (i * 0.1), 60000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
       for (let i = 0; i < 10; i++) {
         const bundle = createTimedBundle(run1NTP + 30.0 + (i * 0.1), 61000 + i);
@@ -271,7 +270,7 @@ test.describe("Flush Scheduler", () => {
 
       for (let i = 0; i < 8; i++) {
         const bundle = createTimedBundle(run2NTP + 5.0 + (i * 0.1), 62000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
       for (let i = 0; i < 8; i++) {
         const bundle = createTimedBundle(run2NTP + 30.0 + (i * 0.1), 63000 + i);
@@ -317,7 +316,7 @@ test.describe("Flush Scheduler", () => {
 
       for (let i = 0; i < 50; i++) {
         const bundle = createTimedBundle(now + 5.0 + (i * 0.1), 80000 + i);
-        channel.sendDirect(bundle);
+        channel.send(bundle);
       }
       for (let i = 0; i < 50; i++) {
         const bundle = createTimedBundle(now + 30.0 + (i * 0.1), 81000 + i);
@@ -360,7 +359,7 @@ test.describe("Flush Scheduler", () => {
         const now = getCurrentNTP();
         for (let i = 0; i < 10; i++) {
           const bundle = createTimedBundle(now + 5.0 + (i * 0.1), 82000 + (round * 100) + i);
-          channel.sendDirect(bundle);
+          channel.send(bundle);
         }
         for (let i = 0; i < 10; i++) {
           const bundle = createTimedBundle(now + 30.0 + (i * 0.1), 83000 + (round * 100) + i);
@@ -426,7 +425,7 @@ test.describe("Flush Scheduler", () => {
       const pastNTP = getCurrentNTP() - 5.0;
       let writeCount = 0;
       for (let i = 0; i < 20; i++) {
-        const ok = channel.sendDirect(createTimedBundle(pastNTP + (i * 0.01), 95000 + i));
+        const ok = channel.send(createTimedBundle(pastNTP + (i * 0.01), 95000 + i));
         if (ok) writeCount++;
       }
 

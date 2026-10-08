@@ -5,7 +5,7 @@ import { test, expect } from "./fixtures.mjs";
  * many /g_new and /s_new commands with integer node IDs.
  *
  * Constructs 8 FX chains (16 groups + 8 FX synths) in a single bundle,
- * delivered via OscChannel.sendDirect(). Before the variable-size data pool,
+ * delivered via OscChannel.send(). Before the variable-size data pool,
  * bundles >1024 bytes were silently dropped by the fixed-slot scheduler.
  */
 test.describe("Big bundle FX setup", () => {

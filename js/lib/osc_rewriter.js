@@ -255,7 +255,7 @@ export class OSCRewriter {
   // ARGUMENT HELPERS
   // ============================================================================
 
-  /** Get the raw value of an arg (supports plain values and legacy {type, value} format) */
+  /** Get the raw value of an arg: a plain value, or the value of a tagged {type, value} one */
   #val(args, index) {
     const arg = Array.isArray(args) ? args[index] : undefined;
     if (arg === undefined || arg === null) return undefined;

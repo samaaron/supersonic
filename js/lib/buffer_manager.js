@@ -34,8 +34,6 @@ export class BufferManager {
     #pendingBufferOps;
     #bufferLocks;
 
-    // postMessage mode: worklet port for sending sample data
-
     constructor(options) {
         const {
             mode = 'sab',
@@ -253,18 +251,6 @@ export class BufferManager {
         }
         return this.#audioContext.decodeAudioData(arrayBuffer);
     }
-
-    /**
-     * Set the worklet port for postMessage mode buffer operations
-     * Must be called after AudioWorklet is initialized
-     * @param {MessagePort} port - The worklet node's port
-     */
-    /*
-     * setWorkletPort is gone. It existed so this class could post buffer
-     * copies to the worklet itself; `clockwork.writeInbox` does that now and
-     * owns the port. Callers that used to wire it up should delete the
-     * call rather than replace it.
-     */
 
     #resolveAudioPath(scPath) {
         // Validate path to prevent directory traversal attacks

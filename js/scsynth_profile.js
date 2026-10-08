@@ -1,16 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (c) 2025-2026 Sam Aaron
 /*
- * scsynth_profile.js — scsynth's vocabulary, declared to clockwork.
+ * scsynth_profile.js — scsynth's vocabulary, for SuperSonic's client.
  *
  * Clockwork carries no DSP and no definition format, so it cannot know that
- * a definition is called a synthdef, that it arrives on /d_recv, that its name
- * is a length-prefixed string eleven bytes in, or that a barrier is /sync
- * answered by /synced. Those are scsynth's, and this is where SuperSonic says
- * so — the JavaScript counterpart of dsp_describe() on the C side.
- *
- * Without it the client falls back to NO_DSP: definitions are never cached, so
- * a device switch restores nothing, and sync() refuses because no verb asks.
+ * a definition is called a synthdef, that it arrives on /d_recv, or that its
+ * name is a length-prefixed string eleven bytes in. Those are scsynth's, and
+ * this is where SuperSonic says so: its client reads the verbs to keep the
+ * definitions it puts back after a reload, and hands clockwork the metrics
+ * below as `guestMetrics` / `guestMetricsPanels`.
  */
 
 import { extractSynthDefName } from "./lib/synthdef_parser.js";

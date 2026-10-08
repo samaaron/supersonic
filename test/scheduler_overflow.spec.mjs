@@ -495,9 +495,6 @@ test.describe("Scheduler Queue Overflow", () => {
       timeout: 10000,
     });
 
-    // Use shorter lookahead for faster test
-    const config = { ...sonicConfig, bypassLookaheadMs: 200 };
-
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
 
@@ -519,7 +516,7 @@ test.describe("Scheduler Queue Overflow", () => {
         inBufSize,
         effectiveLimit: Math.min(poolSize, inBufSize),
       };
-    }, config);
+    }, sonicConfig);
 
     console.log(`\nPool size: ${result.poolSize}, ring buffer: ${result.inBufSize}, effective limit: ${result.effectiveLimit}`);
 
@@ -541,9 +538,6 @@ test.describe("Scheduler Queue Overflow", () => {
     await page.waitForFunction(() => window.supersonicReady === true, {
       timeout: 10000,
     });
-
-    // Use shorter lookahead for faster test
-    const config = { ...sonicConfig, bypassLookaheadMs: 200 };
 
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
@@ -569,7 +563,7 @@ test.describe("Scheduler Queue Overflow", () => {
       const view = new DataView(bundle.buffer);
 
       bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
-      // 300ms in future (beyond 200ms lookahead, goes to prescheduler)
+      // 300ms in future
       const futureNTP = getCurrentNTP() + 0.3;
       const ntpSeconds = Math.floor(futureNTP);
       const ntpFraction = Math.floor((futureNTP % 1) * 0x100000000);
@@ -591,7 +585,7 @@ test.describe("Scheduler Queue Overflow", () => {
         errorThrown,
         withinLimit: bundle.length <= poolSize,
       };
-    }, config);
+    }, sonicConfig);
 
     console.log(`\nNormal bundle test: pool=${result.poolSize}, bundle=${result.bundleSize}, within limit=${result.withinLimit}`);
 
