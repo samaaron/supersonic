@@ -12,8 +12,6 @@
 #include "EngineHost.h"
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "memory_profile.h"   // CLOCKWORK_HEAP_SIZE
-#include "scsynth_options.h"  // scsynth_heap_bytes
 
 #include <chrono>
 #include <cstring>
@@ -109,22 +107,6 @@ TEST_CASE("host args: defaults, and what the host derives", "[host][args]") {
     const Options big = parse({ "--max-connections", "99999", "--inbox-mb", "99999" });
     CHECK(big.maxConnections == 1024);
     CHECK(big.cfg.inboxBytes == 3072u * 1024u * 1024u);
-}
-
-// scsynth takes its real-time pool from the engine's heap, and the heap is
-// taken once per build, so the host sizes it from -m: the pool plus the
-// headroom the rest of scsynth's allocations need — the sum the web client
-// does too (scsynth_heap_bytes, scsynth_options.h). Regression: Sonic Pi's
-// -m 131072 (128 MB) did not fit the 64 MB default, and scsynth never started.
-TEST_CASE("host args: -m sizes the engine's heap to hold the pool", "[host][args][heap]") {
-    const Options big = parse({ "-m", "131072" });
-    CHECK(big.cfg.heapBytes == scsynth_heap_bytes(131072));
-    CHECK(big.cfg.heapBytes >= 131072u * 1024u + SCSYNTH_HEAP_HEADROOM_BYTES);
-
-    // A pool the profile's heap already holds leaves it at the profile's.
-    const Options none = parse({});
-    CHECK(none.cfg.heapBytes == 0);
-    CHECK(scsynth_heap_bytes(8192) <= size_t(CLOCKWORK_HEAP_SIZE));
 }
 
 TEST_CASE("host args: an unknown flag is reported, not silently applied", "[host][args]") {

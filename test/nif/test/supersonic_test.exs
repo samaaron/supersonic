@@ -360,6 +360,15 @@ defmodule TauTest do
     assert {:ok, _} = wait_for_reply_matching("/version.reply")
   end
 
+  # scsynth says what heap its pool needs and the engine takes one that holds
+  # it, here as on the server: a pool past the default heap boots.
+  test "a real-time pool larger than the default heap boots and answers" do
+    assert :ok = start_sync(start_config(%{real_time_memory_size: 65536}))
+    :ok = :clockwork.set_notification_pid()
+    assert :ok = :clockwork.send_osc(osc_message("/status"))
+    assert {:ok, _} = wait_for_reply_matching("/status.reply")
+  end
+
   test "start with custom config" do
     config = start_config(%{
       sample_rate: 44100,

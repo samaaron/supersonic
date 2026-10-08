@@ -261,6 +261,18 @@ extern "C" {
 
 const DspInfo* dsp_describe(void) { return &kInfo; }
 
+// The heap scsynth will take from: its real-time pool and the rest of its
+// allocations, by the sum the web client uses too (scsynth_heap_bytes). A
+// config it will refuse makes no claim: dsp_new refuses it, with its line.
+uint64_t dsp_heap_bytes(const void* guest_config, uint32_t guest_config_bytes) {
+    ScsynthOptions so;
+    char refused[256];
+    if (scsynth_options_parse(static_cast<const char*>(guest_config), guest_config_bytes, &so,
+                              refused, sizeof(refused)) != 0)
+        return 0;
+    return scsynth_heap_bytes(so.realTimeMemorySize);
+}
+
 /*
  * Guest-internal: SC code deep in the server only ever holds a World*, and the
  * host table lives on the ScsynthDsp instance. The server's allocator, its
