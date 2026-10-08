@@ -242,16 +242,41 @@ TEST_CASE("Valid synthdef loads after malformed attempts", "[error]") {
 // SECTION: Invalid OSC commands
 // =============================================================================
 
-TEST_CASE("Unknown OSC command handled gracefully", "[error]") {
+TEST_CASE("An unknown command is answered with /fail, as scsynth does", "[error][upstream]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/nonexistent_command"));
+    OscReply fail;
+    REQUIRE(fx.waitForReply("/fail", fail));
+    CHECK(fail.parsed().argString(0) == "/nonexistent_command");
+    CHECK(fail.parsed().argString(1) == "Command not found");
 
-    // Engine must still respond to /status
+    // And the engine carries on.
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
-    SUCCEED();
+}
+
+// The engine cannot end the process it runs in: the native server answers
+// /quit itself (supersonic::Commands), and an embedder stops the engine its own
+// way. Sent to the engine, /quit is refused, once, and the engine carries on.
+TEST_CASE("/quit sent to the engine is refused once, and the engine carries on", "[error]") {
+    EngineFixture fx;
+
+    fx.send(osc_test::message("/quit"));
+    fx.send(osc_test::message("/sync", 77));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/synced", r));
+    int fails = 0, dones = 0;
+    for (const auto& reply : fx.allReplies()) {
+        if (reply.address == "/fail" && reply.parsed().argString(0) == "/quit") ++fails;
+        if (reply.address == "/done" && reply.parsed().argString(0) == "/quit") ++dones;
+    }
+    CHECK(fails == 1);
+    CHECK(dones == 0);
+
+    fx.send(osc_test::message("/status"));
+    REQUIRE(fx.waitForReply("/status.reply", r));
 }
 
 TEST_CASE("/s_new with non-existent synthdef", "[error]") {

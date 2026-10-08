@@ -14,6 +14,7 @@
 #include "SC_HiddenWorld.h"
 #include "SC_Lib_Cintf.h"
 #include "SC_OSC_Commands.h"
+#include "SC_Prototypes.h"   // SendFailure
 #include "sc_msg_iter.h"
 #include <stdint.h>
 #include <cstddef>
@@ -182,6 +183,7 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
 
     if (!cmdObj) {
         dumpOSCtoDebug(1, inSize, inData, "Command not found: ");
+        SendFailure(inReply, inData, "Command not found");   // as scsynth: the sender hears it
         return kSCErr_NoSuchCommand;
     }
 

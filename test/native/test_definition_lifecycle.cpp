@@ -101,6 +101,32 @@ TEST_CASE("Definitions: /d_recv makes a definition known to the engine",
     CHECK(synthDefCount(fix) == before + 1);
 }
 
+// The engine reads no files, on any platform: a definition reaches it as
+// bytes, in /d_recv. Sent to the engine itself, /d_load and /d_loadDir are
+// refused with what to do instead, and nothing is read. (supersonic::Commands,
+// which the native server and the NIF send through, reads the files for it.)
+TEST_CASE("Definitions: /d_load and /d_loadDir sent to the engine are refused, and nothing is read",
+          "[definitions]") {
+    EngineFixture fix;
+    const int before = synthDefCount(fix);
+    REQUIRE(before >= 0);
+    const std::string dir = CLOCKWORK_SYNTHDEFS_DIR;
+    const std::string file = dir + "/sonic-pi-beep.scsyndef";
+    REQUIRE(std::filesystem::exists(file));
+
+    for (const auto& [verb, path] : { std::pair<std::string, std::string>{ "/d_load", file },
+                                      std::pair<std::string, std::string>{ "/d_loadDir", dir } }) {
+        INFO(verb);
+        fix.clearReplies();
+        fix.send(osc_test::message(verb.c_str(), path.c_str()));
+        OscReply fail;
+        REQUIRE(fix.waitForReply("/fail", fail));
+        CHECK(fail.parsed().argString(0) == verb);
+        CHECK(fail.parsed().argString(1).find("/d_recv") != std::string::npos);
+    }
+    CHECK(synthDefCount(fix) == before);
+}
+
 TEST_CASE("Definitions: loading the same name twice replaces rather than adds",
           "[definitions]") {
     EngineFixture fix;

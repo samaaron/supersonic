@@ -899,14 +899,46 @@ SCErr meth_b_query(World* inWorld, int inSize, char* inData, ReplyAddress* inRep
 }
 
 
-#ifndef SC_LEAN_TARGET
+#ifdef CLOCKWORK_GUEST
+// The engine reads no files, on any platform: a definition reaches it as
+// bytes, in /d_recv. supersonic::Commands, which the native server and the NIF
+// send through, answers /d_load and /d_loadDir itself before they get here. The
+// refusal is the /fail: an error returned here would send a second.
+#    ifdef SC_LEAN_TARGET
+static const char* const kNoDefinitionFiles =
+    "the engine does not read files: send the definition's bytes with /d_recv";
+#    else
+static const char* const kNoDefinitionFiles =
+    "the engine does not read files: send each definition's bytes with /d_recv, "
+    "or send this through supersonic::Commands, which reads the files";
+#    endif
+
+SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
+SCErr meth_d_load(World* /*inWorld*/, int /*inSize*/, char* /*inData*/, ReplyAddress* inReply) {
+    SendFailure(inReply, "/d_load", kNoDefinitionFiles);
+    return kSCErr_None;
+}
+
+SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
+SCErr meth_d_loadDir(World* /*inWorld*/, int /*inSize*/, char* /*inData*/, ReplyAddress* inReply) {
+    SendFailure(inReply, "/d_loadDir", kNoDefinitionFiles);
+    return kSCErr_None;
+}
+#elif !defined(SC_LEAN_TARGET)
 SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_load(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     CallSequencedCommand(LoadSynthDefCmd, inWorld, inSize, inData, inReply);
 
     return kSCErr_None;
 }
-#endif // !SC_LEAN_TARGET
+
+SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
+SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+    CallSequencedCommand(LoadSynthDefDirCmd, inWorld, inSize, inData, inReply);
+
+    return kSCErr_None;
+}
+#endif
 
 SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
@@ -914,15 +946,6 @@ SCErr meth_d_recv(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
 
     return kSCErr_None;
 }
-
-#ifndef SC_LEAN_TARGET
-SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
-SCErr meth_d_loadDir(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
-    CallSequencedCommand(LoadSynthDefDirCmd, inWorld, inSize, inData, inReply);
-
-    return kSCErr_None;
-}
-#endif // !SC_LEAN_TARGET
 
 SCErr meth_d_freeAll(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 SCErr meth_d_freeAll(World* inWorld, int /*inSize*/, char* /*inData*/, ReplyAddress* /*inReply*/) {
@@ -1414,16 +1437,27 @@ SCErr meth_rtMemoryStatus(World* inWorld, int inSize, char* inData, ReplyAddress
 }
 
 SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
-SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
-#ifdef SC_LEAN_TARGET
-    // /quit is not supported in SuperSonic - use destroy() instead
+#ifdef CLOCKWORK_GUEST
+// The engine cannot end the process it runs in. The native server answers
+// /quit itself (supersonic::Commands) and shuts down; an embedder stops the
+// engine its own way. The refusal is the /fail: an error returned here would
+// send a second.
+SCErr meth_quit(World* /*inWorld*/, int /*inSize*/, char* /*inData*/, ReplyAddress* inReply) {
+#    ifdef SC_LEAN_TARGET
     SendFailure(inReply, "/quit", "not supported in SuperSonic - use destroy() instead");
-    return kSCErr_Failed;
+#    else
+    SendFailure(inReply, "/quit",
+                "the engine cannot end its host: the native server answers /quit itself, "
+                "and the NIF stops with clockwork:stop/0");
+#    endif
+    return kSCErr_None;
+}
 #else
+SCErr meth_quit(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     CallSequencedCommand(AudioQuitCmd, inWorld, inSize, inData, inReply);
     return kSCErr_None;
-#endif
 }
+#endif
 
 SCErr meth_clearSched(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
 // SuperSonic: the world is not scsynth's real-time one (mRealTime is false:
@@ -1998,11 +2032,8 @@ void initMiscCommands() {
     NEW_COMMAND(version);
     NEW_COMMAND(rtMemoryStatus);
 
-#ifdef CLOCKWORK_GUEST
-#endif
-
     NEW_COMMAND(d_recv);
-#ifndef SC_LEAN_TARGET
+#if defined(CLOCKWORK_GUEST) || !defined(SC_LEAN_TARGET)
     NEW_COMMAND(d_load);
     NEW_COMMAND(d_loadDir);
 #endif
