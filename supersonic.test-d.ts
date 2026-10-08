@@ -33,6 +33,7 @@ import type {
   AddAction,
   UUID,
   NodeID,
+  RingBufferUsage,
 } from './supersonic';
 import { SuperSonic, OscChannel, osc } from './supersonic';
 
@@ -112,7 +113,7 @@ const ssOpts: SuperSonicOptions = {};
 expectAssignable<SuperSonicOptions>({ mode: 'sab' });
 expectAssignable<SuperSonicOptions>({ mode: 'postMessage' });
 expectAssignable<SuperSonicOptions>({ scsynthOptions: { numBuffers: 2048 } });
-expectAssignable<SuperSonicOptions>({ debug: true, debugScsynth: true, debugOscIn: false, debugOscOut: false });
+expectAssignable<SuperSonicOptions>({ debug: true, debugEngine: true, debugOscIn: false, debugOscOut: false });
 expectAssignable<SuperSonicOptions>({ baseURL: '/dist/', coreBaseURL: '/core/', workerBaseURL: '/workers/' });
 expectAssignable<SuperSonicOptions>({ wasmBaseURL: '/wasm/', wasmUrl: '/wasm/scsynth.wasm', workletUrl: '/worklet.js' });
 expectAssignable<SuperSonicOptions>({ sampleBaseURL: '/samples/', synthdefBaseURL: '/synthdefs/' });
@@ -122,7 +123,7 @@ expectAssignable<SuperSonicOptions>({ autoConnect: false });
 
 // ActivityLineConfig
 expectAssignable<ActivityLineConfig>({ maxLineLength: 200 });
-expectAssignable<ActivityLineConfig>({ scsynthMaxLineLength: null, oscInMaxLineLength: 100 });
+expectAssignable<ActivityLineConfig>({ engineMaxLineLength: null, oscInMaxLineLength: 100 });
 expectAssignable<SuperSonicOptions>({ activityEvent: { maxLineLength: 200 } });
 
 // ============================================================================
@@ -130,28 +131,29 @@ expectAssignable<SuperSonicOptions>({ activityEvent: { maxLineLength: 200 } });
 // ============================================================================
 
 declare const metrics: SuperSonicMetrics;
-expectType<number>(metrics.scsynthProcessCount);
+expectType<number>(metrics.engineProcessCount);
 expectType<number>(metrics.oscOutMessagesSent);
 expectType<number>(metrics.oscOutBytesSent);
 expectType<number>(metrics.oscInMessagesReceived);
-expectType<number>(metrics.inBufferUsedBytes);
+expectType<RingBufferUsage | undefined>(metrics.inBufferUsed);
 expectType<number>(metrics.driftOffsetMs);
 expectType<number>(metrics.clockOffsetMs);
-expectType<number>(metrics.audioContextState);
-expectType<number>(metrics.mode);
+expectType<'running' | 'suspended' | 'closed' | 'interrupted' | 'unknown'>(metrics.audioContextState);
+expectType<TransportMode>(metrics.mode);
 expectType<number>(metrics.ringBufferDirectWriteFails);
 expectType<number>(metrics.bufferPoolUsedBytes);
-expectType<number>(metrics.scsynthSchedulerMaxLateMs);
+expectType<number>(metrics.engineSchedulerMaxLateMs);
+expectType<boolean>(metrics.hasPlaybackStats);
 
 // MetricDefinition
 declare const metricDef: MetricDefinition;
 expectType<number>(metricDef.offset);
-expectType<'counter' | 'gauge' | 'constant' | 'enum'>(metricDef.type);
+expectType<'counter' | 'gauge' | 'constant' | 'enum' | 'u32'>(metricDef.type);
 expectType<string>(metricDef.description);
 
 // MetricsSchema
 declare const schema: MetricsSchema;
-expectType<Record<keyof SuperSonicMetrics, MetricDefinition>>(schema.metrics);
+expectType<Record<string, MetricDefinition>>(schema.metrics);
 expectType<string>(schema.layout.panels[0].title);
 
 // ============================================================================
@@ -159,7 +161,7 @@ expectType<string>(schema.layout.panels[0].title);
 // ============================================================================
 
 declare const treeNode: TreeNode;
-expectType<NodeID>(treeNode.id);
+expectType<UUID | NodeID>(treeNode.id);
 expectType<'group' | 'synth'>(treeNode.type);
 expectType<string>(treeNode.defName);
 expectType<TreeNode[]>(treeNode.children);
@@ -168,16 +170,20 @@ declare const tree: Tree;
 expectType<number>(tree.nodeCount);
 expectType<number>(tree.version);
 expectType<number>(tree.droppedCount);
-expectType<TreeNode>(tree.root);
+expectType<TreeNode | null>(tree.root);
 
 declare const rawNode: RawTreeNode;
-expectType<NodeID>(rawNode.id);
+expectType<NodeID | null>(rawNode.id);
 expectType<NodeID>(rawNode.parentId);
 expectType<boolean>(rawNode.isGroup);
 expectType<NodeID>(rawNode.prevId);
 expectType<NodeID>(rawNode.nextId);
 expectType<NodeID>(rawNode.headId);
 expectType<string>(rawNode.defName);
+expectType<UUID | null>(rawNode.parentUuid);
+expectType<number>(rawNode.outPeak);
+expectType<number>(rawNode.synthCount);
+expectType<boolean>(rawNode.listens);
 
 declare const rawTree: RawTree;
 expectType<number>(rawTree.nodeCount);
@@ -191,10 +197,9 @@ expectType<RawTreeNode[]>(rawTree.nodes);
 
 declare const info: SuperSonicInfo;
 expectType<number>(info.sampleRate);
-expectType<number>(info.numBuffers);
 expectType<number>(info.totalMemory);
 expectType<number>(info.wasmHeapSize);
-expectType<number>(info.bufferPoolSize);
+expectType<number>(info.guestMemorySize);
 expectType<number | null>(info.bootTimeMs);
 expectType<string | null>(info.version);
 expectType<boolean>(info.capabilities.audioWorklet);
@@ -205,8 +210,7 @@ expectType<boolean>(info.capabilities.webWorker);
 
 declare const snapshot: Snapshot;
 expectType<string>(snapshot.timestamp);
-expectType<Record<string, { value: number; description?: string }>>(snapshot.metrics);
-expectType<RawTree>(snapshot.nodeTree);
+expectType<string | undefined>(snapshot.metrics.mode.description);
 
 declare const sampleInfo: SampleInfo;
 expectType<string>(sampleInfo.hash);
@@ -261,6 +265,7 @@ expectAssignable<SuperSonicEvent>('audiocontext:resumed');
 expectAssignable<SuperSonicEvent>('audiocontext:interrupted');
 expectAssignable<SuperSonicEvent>('loading:start');
 expectAssignable<SuperSonicEvent>('loading:complete');
+expectAssignable<SuperSonicEvent>('warning');
 
 // Invalid event names
 expectNotAssignable<SuperSonicEvent>('invalid');
@@ -393,14 +398,14 @@ expectType<number>(sabTransfer.ringBufferBase);
 expectType<Record<string, number>>(sabTransfer.bufferConstants);
 expectType<Record<string, number>>(sabTransfer.controlIndices);
 expectType<number>(sabTransfer.sourceId);
-expectType<boolean>(sabTransfer.blocking);
+expectType<WebAssembly.Memory>(sabTransfer.wasmMemory);
 
 // PM transferable
 declare const pmTransfer: OscChannelPMTransferable;
 expectType<'postMessage'>(pmTransfer.mode);
 expectType<MessagePort>(pmTransfer.port);
 expectType<number>(pmTransfer.sourceId);
-expectType<boolean>(pmTransfer.blocking);
+expectType<MessagePort | undefined>(pmTransfer.nodeIdPort);
 
 // OscChannel instance methods
 declare const channel: OscChannel;
@@ -416,8 +421,8 @@ expectType<OscChannelTransferable>(channel.transferable);
 expectType<Transferable[]>(channel.transferList);
 
 // Static fromTransferable
-expectType<OscChannel>(OscChannel.fromTransferable(sabTransfer));
-expectType<OscChannel>(OscChannel.fromTransferable(pmTransfer));
+expectType<Promise<OscChannel>>(OscChannel.fromTransferable(sabTransfer));
+expectType<Promise<OscChannel>>(OscChannel.fromTransferable(pmTransfer));
 
 // ============================================================================
 // Section 8: SuperSonic Class
@@ -484,7 +489,6 @@ expectType<Promise<void>>(sonic.purge());
 // createOscChannel
 expectType<OscChannel>(sonic.createOscChannel());
 expectType<OscChannel>(sonic.createOscChannel({ sourceId: 1 }));
-expectType<OscChannel>(sonic.createOscChannel({ sourceId: 1, blocking: true }));
 
 // nextNodeId
 expectType<number>(sonic.nextNodeId());
@@ -496,9 +500,7 @@ expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef(new ArrayBuffer(100))
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef(new Uint8Array()));
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef(new Blob()));
 
-expectType<Promise<Record<string, { success: boolean; error?: string }>>>(
-  sonic.loadSynthDefs(['beep', 'pad'])
-);
+expectType<Promise<LoadSynthDefResult[]>>(sonic.loadSynthDefs(['beep', 'pad']));
 
 expectType<Promise<LoadSampleResult>>(sonic.loadSample(0, '/samples/kick.wav'));
 expectType<Promise<LoadSampleResult>>(sonic.loadSample(0, new ArrayBuffer(100)));
@@ -512,6 +514,9 @@ expectType<Promise<SampleInfo>>(sonic.sampleInfo('/kick.wav', 0, 44100));
 
 expectType<Promise<void>>(sonic.sync());
 expectType<Promise<void>>(sonic.sync(42));
+expectType<Promise<void>>(sonic.sync(42, 1500));
+expectType<Promise<OscMessage>>(sonic.request('/status', [], { reply: '/status.reply' }));
+expectType<Promise<{ bufnum: number; numFrames: number; numChannels: number; sampleRate: number }>>(sonic.allocSample(0, 1024));
 
 // Metrics
 expectType<SuperSonicMetrics>(sonic.getMetrics());
@@ -532,6 +537,8 @@ expectType<number>(capture.sampleRate);
 expectType<number>(capture.channels);
 expectType<number>(capture.frames);
 expectType<Float32Array>(capture.left);
+expectType<number>(capture.lost);
+expectType<Float32Array[]>(capture.channelData);
 expectType<boolean>(sonic.isCaptureEnabled());
 expectType<number>(sonic.getCaptureFrames());
 expectType<number>(sonic.getMaxCaptureDuration());
@@ -582,9 +589,8 @@ expectAssignable<OscBundlePacket>(msg);
 // SuperSonic.osc is same type as standalone osc export
 expectType<typeof osc>(SuperSonic.osc);
 
-// MetricsSchema.metrics keys match SuperSonicMetrics
-declare const msKey: keyof typeof schema.metrics;
-expectAssignable<keyof SuperSonicMetrics>(msKey);
+// MetricsSchema.metrics is keyed by the flat metric names (getMetricsArray offsets)
+expectType<number>(schema.metrics.oscOutMessagesSent.offset);
 
 // ============================================================================
 // ============================================================================

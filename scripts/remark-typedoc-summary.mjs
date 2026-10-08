@@ -404,6 +404,7 @@ function findInsertionPoint(children, classIdx, insertAfter) {
  */
 function inlineSections(children) {
   const removals = []; // { h3Idx } — source sections to remove after all insertions
+  const retargets = new Map(); // '#source' -> '#heading'
 
   for (const cfg of INLINES) {
     // 1. Find source h3 under the specified h2 section
@@ -443,6 +444,8 @@ function inlineSections(children) {
 
     // 6. Mark source for removal (re-find since indices shifted)
     removals.push(cfg.source);
+    // Links to the source section now point at the heading it was inlined under
+    retargets.set(`#${slugify(cfg.source)}`, `#${slugify(cfg.heading)}`);
   }
 
   // Remove source sections in reverse index order
@@ -466,6 +469,13 @@ function inlineSections(children) {
   for (const { start, end } of toRemove) {
     children.splice(start, end - start);
   }
+
+  // A removed section's anchor no longer exists: send its links to where its content went
+  const retarget = (node) => {
+    if (node.type === 'link' && retargets.has(node.url)) node.url = retargets.get(node.url);
+    for (const child of node.children ?? []) retarget(child);
+  };
+  for (const node of children) retarget(node);
 }
 
 /**
@@ -501,11 +511,11 @@ function enhanceTables(children) {
         {
           type: 'emphasis',
           children: [
-            { type: 'text', value: 'Required unless both ' },
-            { type: 'inlineCode', value: 'coreBaseURL' },
-            { type: 'text', value: '/' },
+            { type: 'text', value: 'Required unless ' },
             { type: 'inlineCode', value: 'workerBaseURL' },
-            { type: 'text', value: ' and ' },
+            { type: 'text', value: ' and one of ' },
+            { type: 'inlineCode', value: 'coreBaseURL' },
+            { type: 'text', value: ' / ' },
             { type: 'inlineCode', value: 'wasmBaseURL' },
             { type: 'text', value: ' are provided.' },
           ],
