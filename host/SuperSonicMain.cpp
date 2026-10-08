@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
 #endif
     // ── -v / --help: before JUCE init (no COM, no audio) ─────────────────────
     for (int i = 1; i < argc; ++i) {
-        if (std::strcmp(argv[i], "-v") == 0 || std::strcmp(argv[i], "-V") == 0) {
+        if (std::strcmp(argv[i], "-v") == 0) {   // -V is scsynth's verbosity, not this
             // The product's version (CMakeLists.txt: project(SuperSonic VERSION)).
             fprintf(stdout, CLOCKWORK_PRODUCT_NAME " %s\n", SUPERSONIC_VERSION_STRING);
             return 0;

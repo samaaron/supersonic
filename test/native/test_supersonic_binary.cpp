@@ -425,6 +425,20 @@ TEST_CASE("the SuperSonic binary: -D 1 loads the synthdef directory before the f
     }
 }
 
+// -V is scsynth's verbosity, not a second spelling of -v: the server boots.
+TEST_CASE("the SuperSonic binary: -V sets verbosity and the server boots", "[binary]") {
+    REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
+    const int tcpPort = freePort(SOCK_STREAM);
+    Process p;
+    p.start({ "--headless", "-u", "0", "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1", "-V", "1" });
+    Client c;
+    REQUIRE(c.connectWithin(tcpPort, 20000));
+    c.send(osc_test::message("/status"));
+    CHECK(c.expect("/status.reply").argCount() > 0);
+    CHECK(p.kill(SIGTERM) == 0);
+    std::filesystem::remove(p.log);
+}
+
 TEST_CASE("the SuperSonic binary: -v names the product and exits at once", "[binary]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     Process p;

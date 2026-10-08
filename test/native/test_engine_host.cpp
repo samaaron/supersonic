@@ -182,6 +182,13 @@ TEST_CASE("host args: -u 0 with no other command transport is refused", "[host][
     CHECK(ok);
 }
 
+// scsynth's -V is verbosity, and goes to the guest like its other flags; -v is
+// the version (SuperSonicMain handles it before parsing).
+TEST_CASE("host args: -V sets scsynth's verbosity", "[host][args]") {
+    const Options o = parse({ "-V", "2" });
+    CHECK(o.cfg.guestConfig.find("verbosity=2") != std::string::npos);
+}
+
 
 TEST_CASE("host args: at most one command transport, and the segment ones need a segment", "[host][args]") {
     bool ok = true;

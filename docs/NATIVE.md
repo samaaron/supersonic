@@ -101,6 +101,7 @@ These are scsynth's own flags, and go to the engine.
 | `-m <KB>` | 8192 | Real-time memory pool, in KB |
 | `-r <n>` | 64 | Random number generators |
 | `-D <0\|1>` | 1 | Load the synthdef directory at boot (see below) |
+| `-V <n>` | 0 | How much the engine prints, 0–4; 0 is quiet |
 
 With `-D 1` the server loads every definition in the synthdef directory before
 its command port opens, so a client's first `/s_new` finds them. The directory
