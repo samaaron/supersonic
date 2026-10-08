@@ -334,6 +334,21 @@ defmodule TauTest do
     assert String.contains?(reply, "/b_allocRead")
   end
 
+  test "/clockwork/record/start and /stop record the main output to a file, as the server does" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    path = Path.join(System.tmp_dir!(), "supersonic-nif-rec-#{System.unique_integer([:positive])}.wav")
+    on_exit(fn -> File.rm(path) end)
+    assert :ok = :clockwork.send_osc(osc_message_s("/clockwork/record/start", path))
+    assert {:ok, started} = wait_for_reply_matching("/clockwork/record/start.reply", 5000)
+    assert String.contains?(started, path)
+    assert :ok = :clockwork.send_osc(osc_message("/clockwork/record/stop"))
+    assert {:ok, stopped} = wait_for_reply_matching("/clockwork/record/stop.reply", 5000)
+    assert String.contains?(stopped, path)
+    assert File.exists?(path)
+    assert {:ok, <<"RIFF", _::binary>>} = File.read(path)
+  end
+
   test "/quit is refused: the NIF's engine is stopped with stop/0" do
     assert :ok = start_sync(start_config())
     :ok = :clockwork.set_notification_pid()
