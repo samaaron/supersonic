@@ -194,9 +194,18 @@ an attach endpoint:
 
 `--shm-endpoint` serves it elsewhere. A client attaches with clockwork's
 client library (`clockwork_client_open_shm` in
-`clockwork/src/clockwork_client.h`). With `--shm-commands` the segment's peer
-command plane is the command transport. If the segment cannot be served the
+`clockwork/src/clockwork_client.h`). If the segment cannot be served the
 server keeps running and says so in the log.
+
+With `--shm-commands` the segment's peer command plane is the command
+transport: one trusted peer on the same machine writes straight into the
+engine's command ring, the fastest path there is. It talks to the engine
+itself, not through the server, so nothing the server answers on the engine's
+behalf is answered there: the file commands (`/b_allocRead`, `/d_load`, ...)
+are refused with what to do instead, and `/clockwork/record/*`,
+`/clockwork/summary` and `/quit` are not available. A peer loads definitions
+with `/d_recv` and samples through the inbox (`/clockwork/asset/commit`), as the
+web client does.
 
 ### Files
 
