@@ -280,6 +280,71 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     std::filesystem::remove(p.log);
 }
 
+// Sonic Pi's metrics panel asks for this once it is tailing the debug channel,
+// and shows the answer in its Info pane under the logo it draws itself. The
+// pane has room for two lines: the version and what was compiled in (the
+// device is in the preferences). The banner names the kind of command
+// transport but not its port, which Sonic Pi picks at random on every boot.
+TEST_CASE("the SuperSonic binary: /clockwork/summary sends the version and features down the debug channel, and no port is logged",
+          "[binary]") {
+    REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
+    const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
+    Process p;
+    p.start({ "--headless", "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort),
+              "--max-connections", "4", "-B", "127.0.0.1" });
+    const auto count = [](const std::string& s, const std::string& what) {
+        size_t n = 0;
+        for (size_t at = s.find(what); at != std::string::npos; at = s.find(what, at + what.size())) ++n;
+        return n;
+    };
+    const auto logShows = [&](const std::string& what, size_t times) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline) {
+            if (count(p.logText(), what) >= times) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return false;
+    };
+
+    Client c;
+    REQUIRE(c.connectWithin(tcpPort, 20000));
+    REQUIRE(logShows("Compiled:", 1));   // the boot banner is out
+
+    // Answered, not refused: the next reply is /status's, with no
+    // /clockwork/error before it.
+    c.send(osc_test::message("/clockwork/summary"));
+    c.send(osc_test::message("/status"));
+    for (int i = 0; i < 50; ++i) {
+        const auto b = c.read();
+        REQUIRE_FALSE(b.empty());
+        const auto addr = osc_test::parseAddress(b.data(), static_cast<uint32_t>(b.size()));
+        CHECK(addr != "/clockwork/error");
+        if (addr == "/status.reply") break;
+    }
+
+    // The summary went down the debug channel, which the host copies to its
+    // log: the banner's version line, then its features without their label,
+    // and nothing more.
+    CHECK(logShows("SuperSonic v", 2));
+    CHECK(p.kill(SIGTERM) == 0);
+    const std::string log = p.logText();
+    const size_t version = log.find("SuperSonic v");
+    const size_t compiled = log.find("  Compiled: ");
+    REQUIRE(version != std::string::npos);
+    REQUIRE(compiled != std::string::npos);
+    const std::string versionLine = log.substr(version, log.find('\n', version) - version);
+    const std::string features = log.substr(compiled + 12, log.find('\n', compiled) - compiled - 12);
+    CHECK(log.find(versionLine + "\n  " + features + "\n") != std::string::npos);
+    CHECK(count(log, "Compiled:") == 1);
+    CHECK(count(log, "headless (no audio device)") == 1);
+    CHECK(count(log, "TCP (max 4 connections)") == 1);
+    CHECK(log.find('\x01') == std::string::npos);   // the GUI's marker stays out of the log
+    CHECK(log.find("TCP port") == std::string::npos);
+    CHECK(log.find("port " + std::to_string(tcpPort)) == std::string::npos);
+    CHECK(log.find(":" + std::to_string(tcpPort)) == std::string::npos);
+    std::filesystem::remove(p.log);
+}
+
 TEST_CASE("the SuperSonic binary: -v names the product and exits at once", "[binary]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     Process p;

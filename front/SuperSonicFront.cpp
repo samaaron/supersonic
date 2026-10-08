@@ -156,6 +156,13 @@ SuperSonicFront::~SuperSonicFront() {
 
 bool SuperSonicFront::ingress(const uint8_t* data, uint32_t size, uint32_t token) {
     if (recordVerb(data, size, token)) return true;
+    if (!mSummary.empty() && isMessage(data, size, "/clockwork/summary")) {
+        // Down the debug channel, where a GUI that tails it shows it in its
+        // info pane. The leading \x01 tells it to show the lines as they are,
+        // with no timestamp, under a logo of its own.
+        clockwork_log("%s", ("\x01\n" + mSummary).c_str());
+        return true;
+    }
     Job job;
     job.token = token;
     if (isMessage(data, size, "/b_allocRead"))             job.kind = Kind::AllocRead;

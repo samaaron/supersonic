@@ -25,6 +25,9 @@
  *   /clockwork/record/start, /stop      the master tap (audio slot 0) pulled
  *                                       into a file on a thread here
  *                                       (Recorder.h); the engine is not told
+ *   /clockwork/summary                  the host's version and features, down
+ *                                       the debug channel for a GUI's info
+ *                                       pane (setSummary)
  *
  * The engine's replies to what the front sent stay behind the front; the
  * asker hears scsynth's words — /done "/b_read" bufnum, /fail "/b_write"
@@ -59,6 +62,11 @@ public:
     // from the engine reach the same socket in order.
     SuperSonicFront(ClockworkEngine& engine, IOscTransport* replies);
     ~SuperSonicFront() override;
+
+    // What /clockwork/summary answers with: the host's to say (its product,
+    // its version, what it was built with). Set before the transport starts;
+    // unset, the verb is the engine's to refuse.
+    void setSummary(std::string summary) { mSummary = std::move(summary); }
 
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
     bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
@@ -141,6 +149,7 @@ private:
     ClockworkEngine& mEngine;
     IOscTransport*   mReplies;
     Recorder         mRecorder;
+    std::string      mSummary;
 
     std::mutex              mQueueMut;
     std::condition_variable mQueueCv;

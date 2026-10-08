@@ -276,6 +276,7 @@ IOscTransport* CommandTransports::select(const Options& o, std::atomic<ShmPeerPl
         mStart = [this, peerPlaneSlot] { mShm.bindPlaneSlot(peerPlaneSlot); return mShm.ready(); };
         snprintf(desc, sizeof desc, "SHM command plane (segment via %s)", o.shmEndpoint.c_str());
         mDesc = desc;
+        mKind = "SHM command plane";
         return &mShm;
     }
     if (!o.udsDgramPath.empty()) {
@@ -284,23 +285,29 @@ IOscTransport* CommandTransports::select(const Options& o, std::atomic<ShmPeerPl
         mStart = [this] { return mUdsDgram.start(); };
         snprintf(desc, sizeof desc, "UDS dgram socket %s", o.udsDgramPath.c_str());
         mDesc = desc;
+        mKind = "UDS dgram socket";
         return &mUdsDgram;
     }
     if (o.tcpPort > 0 || !o.udsStreamPath.empty() || !o.pipeName.empty()) {
         mStream.setIngest(mIngest);
         mStream.setMaxConnections(o.maxConnections);
+        const char* kind;
         if (o.tcpPort > 0) {
             mStream.initialiseTcp(o.tcpPort, cfg.bindAddress);
-            snprintf(desc, sizeof desc, "TCP port %d (max %u connections)", o.tcpPort, o.maxConnections);
+            snprintf(desc, sizeof desc, "TCP port %d", o.tcpPort);
+            kind = "TCP";
         } else if (!o.udsStreamPath.empty()) {
             mStream.initialiseUds(o.udsStreamPath);
-            snprintf(desc, sizeof desc, "UDS stream socket %s (max %u connections)", o.udsStreamPath.c_str(), o.maxConnections);
+            snprintf(desc, sizeof desc, "UDS stream socket %s", o.udsStreamPath.c_str());
+            kind = "UDS stream socket";
         } else {
             mStream.initialisePipe(o.pipeName);
-            snprintf(desc, sizeof desc, "named pipe %s (max %u connections)", o.pipeName.c_str(), o.maxConnections);
+            snprintf(desc, sizeof desc, "named pipe %s", o.pipeName.c_str());
+            kind = "named pipe";
         }
         mStart = [this] { return mStream.start(); };
         mDesc = desc;
+        mKind = std::string(kind) + " (max " + std::to_string(o.maxConnections) + " connections)";
         return &mStream;
     }
 
@@ -342,6 +349,7 @@ IOscTransport* CommandTransports::select(const Options& o, std::atomic<ShmPeerPl
     };
     snprintf(desc, sizeof desc, "UDP port %d", cfg.udpPort);
     mDesc = desc;
+    mKind = "UDP";
     return &mUdp;
 }
 
@@ -581,14 +589,21 @@ void runUntilShutdown(ClockworkEngine& engine, const std::function<void(const st
 
 // ── The banner and the device list ───────────────────────────────────────────
 
-void printBanner(const Identity& id, const CurrentDeviceInfo& dev, const std::string& transportDesc) {
-    fprintf(stderr, "\n%s\n\n  %s v%s\n\n", id.banner, id.name, id.version);
-    fprintf(stderr, "  Compiled:");
+namespace {
+
+std::string versionLine(const Identity& id) {
+    return "  " + std::string(id.name) + " v" + id.version;
+}
+
+// What was compiled in, as the banner names it.
+std::string compiledFeatures() {
+    std::string s;
+    const auto add = [&s](const char* feature) { s += s.empty() ? feature : std::string(" ") + feature; };
 #if CLOCKWORK_SYNTH
-    fprintf(stderr, " synth");
+    add("synth");
 #endif
 #if CLOCKWORK_LINK
-    fprintf(stderr, " Link");
+    add("Link");
 #endif
     // CLOCKWORK_LINK_AUDIO is LinkAudioBridge.h's, derived there from
     // CLOCKWORK_LINK + CLOCKWORK_WITH_LINK_AUDIO. Asking it rather than
@@ -596,36 +611,44 @@ void printBanner(const Identity& id, const CurrentDeviceInfo& dev, const std::st
     // own copy, spelled `CLOCKWORK_LINK && CLOCKWORK_SYNTH`, and kept claiming
     // Link-Audio for years after the bridge was corrected away from it.
 #if CLOCKWORK_LINK_AUDIO
-    fprintf(stderr, " Link-Audio");
+    add("Link-Audio");
 #endif
 #if CLOCKWORK_MIDI
-    fprintf(stderr, " MIDI");
+    add("MIDI");
 #endif
 #if CLOCKWORK_GAMEPAD
-    fprintf(stderr, " Gamepad");
+    add("Gamepad");
 #endif
-    fprintf(stderr, "\n");
+    (void)add;
+    return s;
+}
 
+} // namespace
+
+std::string bannerSummary(const Identity& id) {
+    return versionLine(id) + "\n  " + compiledFeatures();
+}
+
+void printBanner(const Identity& id, const CurrentDeviceInfo& dev, const std::string& transportKind) {
+    std::string s = "\n" + std::string(id.banner) + "\n\n" + versionLine(id) + "\n\n  Compiled: "
+                  + compiledFeatures() + "\n";
     if (!dev.name.empty()) {
         // "out A/M in B/N" — A channels currently routed / M available on the
         // device (likewise for inputs).
-        char outStr[32], inStr[32];
-        if (dev.maxOutputChannels > 0 && dev.maxOutputChannels != dev.activeOutputChannels)
-            snprintf(outStr, sizeof(outStr), "%d/%d", dev.activeOutputChannels, dev.maxOutputChannels);
-        else
-            snprintf(outStr, sizeof(outStr), "%d", dev.activeOutputChannels);
-        if (dev.maxInputChannels > 0 && dev.maxInputChannels != dev.activeInputChannels)
-            snprintf(inStr, sizeof(inStr), "%d/%d", dev.activeInputChannels, dev.maxInputChannels);
-        else
-            snprintf(inStr, sizeof(inStr), "%d", dev.activeInputChannels);
-        fprintf(stderr, "  %s (%s)\n  %d Hz | block %d | buffer %d | out %s | in %s\n",
-                dev.name.c_str(), dev.typeName.c_str(),
-                static_cast<int>(dev.activeSampleRate), dev.controlBlockSize, dev.activeBufferSize,
-                outStr, inStr);
+        const auto channels = [](int active, int max) {
+            return max > 0 && max != active ? std::to_string(active) + "/" + std::to_string(max)
+                                            : std::to_string(active);
+        };
+        s += "  " + dev.name + " (" + dev.typeName + ")\n  "
+           + std::to_string(static_cast<int>(dev.activeSampleRate)) + " Hz | block "
+           + std::to_string(dev.controlBlockSize) + " | buffer " + std::to_string(dev.activeBufferSize)
+           + " | out " + channels(dev.activeOutputChannels, dev.maxOutputChannels)
+           + " | in " + channels(dev.activeInputChannels, dev.maxInputChannels) + "\n";
     } else {
-        fprintf(stderr, "  headless (no audio device)\n");
+        s += "  headless (no audio device)\n";
     }
-    fprintf(stderr, "  %s\n\n", transportDesc.c_str());
+    s += "  " + transportKind + "\n\n";
+    fprintf(stderr, "%s", s.c_str());
     fflush(stderr);
 }
 

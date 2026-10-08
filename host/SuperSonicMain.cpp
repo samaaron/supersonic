@@ -108,12 +108,18 @@ int main(int argc, char* argv[]) {
     // and sees those replies first. The engine keeps the transport for its
     // subscriber registry (the notify audiences are the transport's); the
     // replies themselves are pulled by this process's pump, below.
+    const Identity identity { CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_BANNER, SUPERSONIC_VERSION_STRING };
     SuperSonicFront theFront(engine, transport);
+    theFront.setSummary(bannerSummary(identity));
     front = &theFront;
     fronted.attach(transport, front);
     engine.setTransport(&fronted);
     o.cfg.hostDrainsEgress = true;
-    EgressPump pump(engine, fronted, log);
+    // The debug channel, to the log. A summary's leading \x01 is for a GUI
+    // (show this as it is); the log has no use for it.
+    EgressPump pump(engine, fronted, [&log](const std::string& s) {
+        log(!s.empty() && s[0] == '\x01' ? s.substr(1) : s);
+    });
     log(std::string("front: ") + theFront.describe());
 
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
@@ -151,8 +157,7 @@ int main(int argc, char* argv[]) {
     if (o.desiredInputChannels != 0 && o.desiredInputChannels != o.cfg.numInputChannels)
         engine.setConfiguredInputChannels(o.desiredInputChannels);
 
-    printBanner(Identity { CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_BANNER, SUPERSONIC_VERSION_STRING },
-                engine.currentDevice(), transports.description());
+    printBanner(identity, engine.currentDevice(), transports.kind());
 
 #ifdef __APPLE__
     // Booted with inputs off because the microphone permission was pending:

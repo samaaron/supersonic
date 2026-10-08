@@ -74,7 +74,11 @@ public:
                           Ingest ingest, std::string* err);
     bool start();
     void stop();
+    // The transport and its address, for a message about it (a bind that
+    // failed). kind() leaves the address out, for the banner: Sonic Pi picks
+    // the port at random on every boot.
     const std::string& description() const { return mDesc; }
+    const std::string& kind() const { return mKind; }
 
 private:
     UdpOscTransport      mUdp;
@@ -84,6 +88,7 @@ private:
     Ingest               mIngest;
     std::function<bool()> mStart;
     std::string          mDesc;
+    std::string          mKind;
 
     // UDP's boot queue: what arrives before the engine can ingest.
     static constexpr size_t kMaxPending = 1024;
@@ -146,7 +151,11 @@ struct Identity {
     const char* banner;      // three lines, no trailing newline
     const char* version;
 };
-void printBanner(const Identity& id, const CurrentDeviceInfo& dev, const std::string& transportDesc);
+// Two of the banner's lines: the product and version, and what was compiled
+// in. The answer to /clockwork/summary, which a GUI shows under a logo of its
+// own (the device it shows elsewhere).
+std::string bannerSummary(const Identity& id);
+void printBanner(const Identity& id, const CurrentDeviceInfo& dev, const std::string& transportKind);
 void printDeviceList(ClockworkEngine& engine);
 
 #ifdef __APPLE__
