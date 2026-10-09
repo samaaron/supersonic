@@ -361,8 +361,10 @@ export interface SuperSonicMetrics {
   engineSchedulerLastLateMs: number;
   /** Process count when the last scheduler late occurred. */
   engineSchedulerLastLateTick: number;
-  /** Maximum scheduler queue size. */
-  engineSchedulerCapacity?: number;
+  /** Timed events the scheduler can hold (0 in a build with none). */
+  engineSchedulerCapacity: number;
+  /** Bytes of timed messages the scheduler can hold (0 in a build with none). */
+  engineSchedulerPoolBytes: number;
 
   // OSC out
   /** OSC messages sent from JS to the engine. */
@@ -679,7 +681,7 @@ export interface SuperSonicInfo {
     webWorker: boolean;
     playbackStats: boolean;
   };
-  /** The engine's version string as the worklet reports it, or null. */
+  /** The engine's version, as the module reports it at boot; null before then. */
   version: string | null;
 }
 

@@ -58,7 +58,6 @@ test.describe("Scheduler Queue Overflow", () => {
   // Audio capture requires SharedArrayBuffer - not available in postMessage mode
   test(`sending timed bundles past capacity drops the surplus cleanly without wedging`, async ({ page, sonicConfig }) => {
     test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
-    test.fixme(true, "clockwork 16bdd92 never reports engineSchedulerCapacity: metrics_reader.js reads bc.scheduler_slot_count, which the arena constants (arena.js) no longer carry. The fix belongs in clockwork; this test resumes when it lands.");
     const errors = [];
     const debugLogs = [];
 
@@ -96,8 +95,7 @@ test.describe("Scheduler Queue Overflow", () => {
       // The real slot count this build shipped with. A hardcoded number here
       // was one build's, and this build's is larger, so the burst never
       // overflowed and the test asserted a drop that should not have happened.
-      const capacity = sonic.bufferConstants?.scheduler_slot_count;
-      const poolBytes = sonic.bufferConstants?.scheduler_data_pool_size;
+      const { engineSchedulerCapacity: capacity, engineSchedulerPoolBytes: poolBytes } = sonic.getMetrics();
       if (!capacity || !poolBytes) throw new Error("no scheduler capacity reported");
 
       /*

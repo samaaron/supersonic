@@ -497,8 +497,9 @@ Pushed to MIDI subscribers as `← /clockwork/midi/in/<kind> s:port <args>`:
 | `tune_request`, `start`, `continue`, `stop`, `active_sensing`, `reset` | none |
 | `clock_bpm` | `f:bpm` (W only) |
 
-Clock pulses (0xF8) are not forwarded. On W each event but `clock_bpm`
-carries a trailing `t`: when it arrived.
+Clock pulses (0xF8) are not forwarded. Each event but `clock_bpm` carries a
+trailing `t`: when it arrived. Natively that is the OS's own stamp, moved
+onto the engine's clock.
 
 `← /clockwork/midi/ports` (the `ports.reply` payload) is pushed when a port
 appears, goes or is enabled.
@@ -537,9 +538,12 @@ Pushed to gamepad subscribers:
 
 | ← | |
 |---|---|
-| `/clockwork/gamepad/in/button s:pad s:button i:pressed f:value` | `value` 0 to 1; triggers sweep, other buttons jump. |
-| `/clockwork/gamepad/in/axis s:pad s:axis f:value` | `value` −1 to 1, up and right positive. |
+| `/clockwork/gamepad/in/button s:pad s:button i:pressed f:value t:when` | `value` 0 to 1; triggers sweep, other buttons jump. |
+| `/clockwork/gamepad/in/axis s:pad s:axis f:value t:when` | `value` −1 to 1, up and right positive. |
 | `/clockwork/gamepad/devices i:n (s:pad i:enabled)…` | A pad connected, went or was enabled. |
+
+`when` is when the event arrived: the OS's own time for it where the
+platform gives one, else the moment the pad was read.
 
 Buttons: `south east west north left_shoulder right_shoulder left_trigger
 right_trigger select start left_thumb right_thumb dpad_up dpad_down

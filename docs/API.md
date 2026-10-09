@@ -3640,21 +3640,21 @@ Engine info returned by [SuperSonic.getInfo](#getinfo).
 
 #### Properties
 
-| Property                                       | Type      | Description                                                     |
-| ---------------------------------------------- | --------- | --------------------------------------------------------------- |
-| <a id="boottimems"></a> `bootTimeMs`           | `number`  | Time taken to boot in ms, or null if not yet booted.            |
-| <a id="capabilities"></a> `capabilities`       | `object`  | Browser capability detection results.                           |
-| `capabilities.atomics`                         | `boolean` | -                                                               |
-| `capabilities.audioWorklet`                    | `boolean` | -                                                               |
-| `capabilities.crossOriginIsolated`             | `boolean` | -                                                               |
-| `capabilities.playbackStats`                   | `boolean` | -                                                               |
-| `capabilities.sharedArrayBuffer`               | `boolean` | -                                                               |
-| `capabilities.webWorker`                       | `boolean` | -                                                               |
-| <a id="guestmemorysize"></a> `guestMemorySize` | `number`  | Size of the engine's fixed memory region, in bytes.             |
-| <a id="samplerate-3"></a> `sampleRate`         | `number`  | AudioContext sample rate (e.g. 48000).                          |
-| <a id="totalmemory"></a> `totalMemory`         | `number`  | WebAssembly memory committed at boot, in bytes.                 |
-| <a id="version-1"></a> `version`               | `string`  | The engine's version string as the worklet reports it, or null. |
-| <a id="wasmheapsize"></a> `wasmHeapSize`       | `number`  | Size of the WASM heap in the memory layout, in bytes.           |
+| Property                                       | Type      | Description                                                               |
+| ---------------------------------------------- | --------- | ------------------------------------------------------------------------- |
+| <a id="boottimems"></a> `bootTimeMs`           | `number`  | Time taken to boot in ms, or null if not yet booted.                      |
+| <a id="capabilities"></a> `capabilities`       | `object`  | Browser capability detection results.                                     |
+| `capabilities.atomics`                         | `boolean` | -                                                                         |
+| `capabilities.audioWorklet`                    | `boolean` | -                                                                         |
+| `capabilities.crossOriginIsolated`             | `boolean` | -                                                                         |
+| `capabilities.playbackStats`                   | `boolean` | -                                                                         |
+| `capabilities.sharedArrayBuffer`               | `boolean` | -                                                                         |
+| `capabilities.webWorker`                       | `boolean` | -                                                                         |
+| <a id="guestmemorysize"></a> `guestMemorySize` | `number`  | Size of the engine's fixed memory region, in bytes.                       |
+| <a id="samplerate-3"></a> `sampleRate`         | `number`  | AudioContext sample rate (e.g. 48000).                                    |
+| <a id="totalmemory"></a> `totalMemory`         | `number`  | WebAssembly memory committed at boot, in bytes.                           |
+| <a id="version-1"></a> `version`               | `string`  | The engine's version, as the module reports it at boot; null before then. |
+| <a id="wasmheapsize"></a> `wasmHeapSize`       | `number`  | Size of the WASM heap in the memory layout, in bytes.                     |
 
 ***
 
@@ -3702,7 +3702,7 @@ in the array; `ntpStartTime` is only here.
 | <a id="enginemessagesdropped"></a> `engineMessagesDropped`             | `number`                                                                     | Messages dropped (ring buffer full).                                                                      |
 | <a id="enginemessagesprocessed"></a> `engineMessagesProcessed`         | `number`                                                                     | Messages drained from the IN ring and dispatched.                                                         |
 | <a id="engineprocesscount"></a> `engineProcessCount`                   | `number`                                                                     | Audio process() calls (cumulative).                                                                       |
-| <a id="engineschedulercapacity"></a> `engineSchedulerCapacity?`        | `number`                                                                     | Maximum scheduler queue size.                                                                             |
+| <a id="engineschedulercapacity"></a> `engineSchedulerCapacity`         | `number`                                                                     | Timed events the scheduler can hold (0 in a build with none).                                             |
 | <a id="engineschedulerdepth"></a> `engineSchedulerDepth`               | `number`                                                                     | Current scheduler queue depth.                                                                            |
 | <a id="engineschedulerdropped"></a> `engineSchedulerDropped`           | `number`                                                                     | Events dropped because the scheduler queue overflowed.                                                    |
 | <a id="engineschedulerlastlatems"></a> `engineSchedulerLastLateMs`     | `number`                                                                     | Most recent late magnitude in the scheduler (ms).                                                         |
@@ -3710,6 +3710,7 @@ in the array; `ntpStartTime` is only here.
 | <a id="engineschedulerlates"></a> `engineSchedulerLates`               | `number`                                                                     | Bundles executed after their scheduled time.                                                              |
 | <a id="engineschedulermaxlatems"></a> `engineSchedulerMaxLateMs`       | `number`                                                                     | Maximum lateness observed in the scheduler (ms).                                                          |
 | <a id="engineschedulerpeakdepth"></a> `engineSchedulerPeakDepth`       | `number`                                                                     | Peak scheduler queue depth (high water mark).                                                             |
+| <a id="engineschedulerpoolbytes"></a> `engineSchedulerPoolBytes`       | `number`                                                                     | Bytes of timed messages the scheduler can hold (0 in a build with none).                                  |
 | <a id="enginesequencegaps"></a> `engineSequenceGaps`                   | `number`                                                                     | Messages lost in transit from JS to the engine.                                                           |
 | <a id="enginewasmerrors"></a> `engineWasmErrors`                       | `number`                                                                     | WASM execution errors in the audio worklet.                                                               |
 | <a id="glitchcount"></a> `glitchCount`                                 | `number`                                                                     | Audio underrun/glitch events (Chrome playbackStats; 0 elsewhere).                                         |

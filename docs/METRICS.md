@@ -57,7 +57,8 @@ All hosts. clockwork's scheduler holds timed bundles and hands them to scsynth a
 |----------|-------------|
 | `engineSchedulerDepth` | Current scheduler queue depth |
 | `engineSchedulerPeakDepth` | Peak scheduler queue depth (high water mark) |
-| `engineSchedulerCapacity` | Maximum scheduler queue size (compile-time constant; 2048 in SuperSonic's web build). Web client only |
+| `engineSchedulerCapacity` | Timed events the scheduler can hold (2048 in SuperSonic's web build; 0 in a build with none) |
+| `engineSchedulerPoolBytes` | Bytes of timed messages the scheduler can hold (0 in a build with none). It is full when it runs out of either |
 | `engineSchedulerDropped` | Events dropped because the scheduler queue overflowed |
 | `engineSequenceGaps` | Sequence gaps seen on the rings: messages lost in transit to or from the engine |
 | `engineSchedulerLates` | Bundles executed after their scheduled time |

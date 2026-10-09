@@ -137,7 +137,6 @@ test.describe('Schema Validation', () => {
   });
 
   test('getMetrics() keys match schema.metrics keys for current mode', async ({ page, sonicConfig }) => {
-    test.fixme(true, "clockwork 16bdd92 never reports engineSchedulerCapacity: metrics_reader.js reads bc.scheduler_slot_count, which the arena constants (arena.js) no longer carry. The fix belongs in clockwork; this test resumes when it lands.");
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
@@ -428,7 +427,7 @@ test.describe('Schema Validation', () => {
       // Send a synth creation message (generates send)
       sonic.send('/s_new', 'sonic-pi-beep', -1, 0, 0, 'note', 60);
 
-      // Send an immediate status query (should bypass prescheduler, generates reply)
+      // Send an immediate status query (generates a reply)
       sonic.send('/status');
 
       // Wait a bit for metrics to update
@@ -468,7 +467,6 @@ test.describe('Schema Validation', () => {
           oscOutBytesSent: metricsAfter.oscOutBytesSent,
           oscInMessagesReceived: metricsAfter.oscInMessagesReceived,
           oscInBytesReceived: metricsAfter.oscInBytesReceived,
-          preschedulerBypassed: metricsAfter.preschedulerBypassed,
         }
       };
     }, sonicConfig);
@@ -484,7 +482,7 @@ test.describe('Schema Validation', () => {
     expect(result.failedRequired).toEqual([]);
   });
 
-  test('immediate messages reach scsynth and increment bypass counter', async ({ page, sonicConfig }) => {
+  test('immediate messages reach scsynth', async ({ page, sonicConfig }) => {
     // This test verifies that sendImmediate() actually delivers messages to scsynth.
     // Previously there was a bug where sendImmediate used type 'oscImmediate' but
     // the worklet only handled type 'osc', causing messages to be silently dropped.
@@ -493,10 +491,9 @@ test.describe('Schema Validation', () => {
       await sonic.init();
 
       const metricsBefore = sonic.getMetrics();
-      const bypassedBefore = metricsBefore.preschedulerBypassed || 0;
       const receivedBefore = metricsBefore.oscInMessagesReceived || 0;
 
-      // Send multiple immediate messages (non-bundled messages bypass prescheduler)
+      // Send multiple immediate messages.
       // /status returns /status.reply, so we can verify the message reached scsynth
       const statusPromises = [];
       for (let i = 0; i < 5; i++) {
@@ -525,7 +522,6 @@ test.describe('Schema Validation', () => {
       await new Promise(r => setTimeout(r, 100));
 
       const metricsAfter = sonic.getMetrics();
-      const bypassedAfter = metricsAfter.preschedulerBypassed || 0;
       const receivedAfter = metricsAfter.oscInMessagesReceived || 0;
 
       await sonic.destroy();
@@ -533,9 +529,6 @@ test.describe('Schema Validation', () => {
       return {
         mode: config.mode,
         timedOut: raceResult === 'timeout',
-        bypassedBefore,
-        bypassedAfter,
-        bypassedDelta: bypassedAfter - bypassedBefore,
         receivedBefore,
         receivedAfter,
         receivedDelta: receivedAfter - receivedBefore,
@@ -543,7 +536,6 @@ test.describe('Schema Validation', () => {
     }, sonicConfig);
 
     console.log(`Mode: ${result.mode}`);
-    console.log(`Bypassed: ${result.bypassedBefore} -> ${result.bypassedAfter} (delta: ${result.bypassedDelta})`);
     console.log(`Received: ${result.receivedBefore} -> ${result.receivedAfter} (delta: ${result.receivedDelta})`);
 
     // Messages should not have timed out waiting for replies
