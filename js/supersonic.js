@@ -412,8 +412,8 @@ export class SuperSonic extends Clockwork {
         if (name) this.#loadedSynthDefs.set(name, bytes);
       }
     } else if (address === scsynthProfile.forgetVerb) {
-      const name = args.find((a) => typeof a === "string");
-      if (name) this.#loadedSynthDefs.delete(name);
+      // scsynth frees every name it is given.
+      for (const name of args) if (typeof name === "string") this.#loadedSynthDefs.delete(name);
     } else if (address === scsynthProfile.forgetAllVerb) {
       this.#loadedSynthDefs.clear();
     }

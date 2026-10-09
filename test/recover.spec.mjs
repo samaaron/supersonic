@@ -74,6 +74,25 @@ test.describe('Recovery and Caching', () => {
     expect(result.afterFree).toBe(false);
   });
 
+  test('/d_free with several names removes every one from the cache', async ({ page, sonicConfig }) => {
+    // scsynth frees every name it is given. The cache once dropped only the
+    // first, and replayed the rest after a rebuild: definitions the user had
+    // freed came back.
+    const result = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic(config);
+
+      await sonic.init();
+      await sonic.loadSynthDefs(['sonic-pi-beep', 'sonic-pi-saw', 'sonic-pi-tri']);
+      await sonic.send('/d_free', 'sonic-pi-beep', 'sonic-pi-saw');
+      const cached = ['sonic-pi-beep', 'sonic-pi-saw', 'sonic-pi-tri'].filter((n) => sonic.loadedSynthDefs.has(n));
+
+      await sonic.destroy();
+      return cached;
+    }, sonicConfig);
+
+    expect(result).toEqual(['sonic-pi-tri']);
+  });
+
   test('/d_freeAll clears synthdef cache', async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
