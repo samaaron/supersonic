@@ -3,42 +3,23 @@ set -e
 
 # SuperSonic Version Bump Script
 #
-# This script updates version numbers in exactly 13 locations:
+# Sets the version everywhere a release names it:
 #
-# Package.json version fields (5):
-#   1. package.json
-#   2. packages/supersonic-scsynth-core/package.json
-#   3. packages/supersonic-scsynth-synthdefs/package.json
-#   4. packages/supersonic-scsynth-samples/package.json
-#   5. packages/supersonic-scsynth-bundle/package.json
+#   - the version field in package.json and in each package's package.json
+#     (core, synthdefs, samples and bundle)
+#   - the bundle's dependencies on the other four
+#   - the CDN URLs in the core, synthdefs and samples packages' index.js
+#   - the versions pinned in docs/INSTALLATION_WEB.md and example/*.html
+#   - CMakeLists.txt's project(SuperSonic VERSION x.y.z), which clockwork turns
+#     into the banner, the -v output and the Windows version resource
+#   - package-lock.json (through npm)
+#   - a new entry in packaging/debian/changelog
 #
-# Bundle dependencies (4):
-#   6. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth dependency
-#   7. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-synthdefs dependency
-#   8. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-samples dependency
-#   8b. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-core dependency
+# and then regenerates the manifests.
 #
-# CDN constants in index.js (4):
-#   8. packages/supersonic-scsynth-synthdefs/index.js - CDN_BASE constant
-#   9. packages/supersonic-scsynth-samples/index.js - UNPKG_BASE constant
-#  10. packages/supersonic-scsynth-samples/index.js - JSDELIVR_BASE constant
-#  10b. packages/supersonic-scsynth-core/index.js - CORE_CDN constant
-#
-# Documentation version examples (1):
-#  11. docs/INSTALLATION_WEB.md - pinned version example
-#
-# And what it used to miss:
-#  13. package-lock.json (through npm)
-#  14. example/*.html - the versions their CDN URLs pin
-#  15. packaging/debian/changelog - a new entry
-#
-# A version in prose about an older release (js/supersonic.js, the specs) is history and is left alone.
-#
-# C++ version constants (1):
-#  12. CMakeLists.txt - project(SuperSonic VERSION x.y.z), which clockwork
-#      turns into the banner, the -v output and the Windows version resource
-#
-# Note: READMEs and error messages use @latest and don't need version updates
+# READMEs and error messages say @latest, so they need nothing. A version in
+# prose about an older release (js/supersonic.js, the specs) is history and is
+# left alone.
 
 # Color output
 RED='\033[0;31m'
@@ -120,7 +101,7 @@ echo ""
 echo "Step 1: Updating package.json files..."
 echo "---------------------------------------"
 
-# Update 4 package.json version fields
+# The five package.json version fields
 sedi "s/\"version\": \"$CURRENT_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$PROJECT_ROOT/package.json"
 echo "✓ Updated package.json"
 
@@ -140,7 +121,7 @@ echo ""
 echo "Step 2: Updating bundle dependencies..."
 echo "----------------------------------------"
 
-# Update 3 bundle dependencies (use caret dependencies)
+# The bundle's four dependencies, all caret ranges
 sedi "s/\"supersonic-scsynth\": \"\\^$CURRENT_VERSION\"/\"supersonic-scsynth\": \"^$NEW_VERSION\"/" "$PROJECT_ROOT/packages/supersonic-scsynth-bundle/package.json"
 echo "✓ Updated supersonic-scsynth dependency"
 
@@ -257,7 +238,14 @@ echo ""
 echo "New version: $NEW_VERSION"
 echo ""
 echo "Next steps:"
-echo "  1. Review changes: git show"
-echo "  2. Push to remote: git push --tags"
-echo "  3. Publish to npm: ./publish.sh"
+if [ "$DO_COMMIT" = true ]; then
+    echo "  1. Review the commit: git show"
+else
+    echo "  1. Review what's staged, then commit and tag it:"
+    echo "       git diff --cached"
+    echo "       git commit -m \"Version - $NEW_VERSION\" && git tag v$NEW_VERSION"
+fi
+echo "  2. Push main, then the tag: git push && git push origin v$NEW_VERSION"
+echo "     The tag runs .github/workflows/publish.yml. Once every other check on the"
+echo "     commit is green, it publishes the npm packages and the GitHub release."
 echo ""

@@ -47,5 +47,5 @@ override_dh_auto_test:
 	# upstream CI runs it: through ctest, each case in a process of its own
 	# (the discovery leaves the benchmarks out) with the guest boundary
 	# check, then the binary with every case in one process, shuffled.
-	SUPERSONIC_QUIET=1 ctest --test-dir $(BUILDDIR) --output-on-failure -j 2 --timeout 300
-	SUPERSONIC_QUIET=1 $(BUILDDIR)/test/native/SuperSonicNativeTests "~[benchmark]" --order rand $(if $(GITHUB_RUN_NUMBER),--rng-seed $(GITHUB_RUN_NUMBER))
+	ctest --test-dir $(BUILDDIR) --output-on-failure -j 2 --timeout 300
+	$(BUILDDIR)/test/native/SuperSonicNativeTests "~[benchmark]" --order rand $(if $(GITHUB_RUN_NUMBER),--rng-seed $(GITHUB_RUN_NUMBER))

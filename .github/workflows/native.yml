@@ -124,17 +124,14 @@ jobs:
           key: cargo-${{ matrix.name }}-${{ hashFiles('clockwork/rust/Cargo.lock') }}
 
       # smoothie, clockwork's device layer (a fork of four JUCE 7 modules,
-      # in-tree, not a dependency), needs the X11/freetype set to
-      # configure on Linux even for a headless build; ALSA, JACK and PipeWire
-      # are the audio backends it compiles in.
+      # in-tree, not a dependency), compiles in ALSA, JACK and PipeWire as its
+      # audio backends; udev is for game controller hot-plug.
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config \
-            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
-            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxcomposite-dev
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 
       - name: Configure
         run: cmake -B build/native -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
@@ -156,8 +153,6 @@ jobs:
       # passes after another has run fails here, as does one whose name the
       # discovery cannot carry. Both happened, with this workflow green.
       - name: Run tests (each case on its own)
-        env:
-          SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
         run: ctest --test-dir build/native -C Release --output-on-failure -j 2 --timeout 300
 
       # The binary, every case in one process, in a shuffled order: a case
@@ -166,8 +161,6 @@ jobs:
       # job runs the same order again. Catch2 prints it first ("Randomness
       # seeded to"); locally, --order rand --rng-seed <that>.
       - name: Run tests (one process, shuffled)
-        env:
-          SUPERSONIC_QUIET: "1"
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
             ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
@@ -318,9 +311,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config \
-            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
-            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxcomposite-dev
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 
       - name: Configure as embedded subproject
         run: cmake -S test/embed -B build/embed-guard -DBUILD_TESTS=ON
@@ -358,9 +349,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config \
-            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
-            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxcomposite-dev
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 
       - name: Configure
         run: cmake -B build/nif -DCLOCKWORK_NIF=ON -DCMAKE_BUILD_TYPE=Release
@@ -400,9 +389,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake pkg-config \
-            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
-            libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-            libxinerama-dev libxcursor-dev libxcomposite-dev
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 
       - name: Configure
         run: |
@@ -426,12 +413,10 @@ jobs:
           # this UBSan logs and continues, leaving CI green.
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:symbolize=1"
           UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1:symbolize=1"
-          SUPERSONIC_QUIET: "1"   # silence per-boot lifecycle logging in CI
         # timeout: a sanitizer abort can wedge instead of exiting, which would
         # otherwise sit silently until the job timeout. -k covers a process
-        # stuck past SIGTERM. [load] is excluded: the high-volume load tests
-        # are for throughput under saturation, not races/UB.
-        run: timeout -k 30 900 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]~[load]"
+        # stuck past SIGTERM.
+        run: timeout -k 30 900 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]"
 
   # ── Attach artifacts to GitHub Release ──────────────────────────────────────
   release:

@@ -6,10 +6,10 @@
 # that container; see the native-linux-x86 job in .github/workflows/native.yml.
 #
 # Why a container rather than multiarch on the normal runner: Ubuntu dropped
-# i386 as a full architecture in 19.10, so most of the -dev packages JUCE needs
-# (X11, freetype, fontconfig, ALSA, JACK) have no i386 build there. Debian
-# still carries a complete i386 archive. Nothing is emulated — x86_64 CPUs run
-# 32-bit code natively, so this costs about what the x64 job does.
+# i386 as a full architecture in 19.10 and keeps only a partial set of i386
+# packages, where Debian still carries a complete i386 archive. Nothing is
+# emulated — x86_64 CPUs run 32-bit code natively, so this costs about what
+# the x64 job does.
 #
 # 32-bit is worth covering because it is the one desktop target where the
 # engine's lock-free assumptions can actually break: on i686, 8-byte atomics
@@ -63,9 +63,7 @@ phase_deps() {
     apt-get install -y \
         build-essential cmake pkg-config \
         ca-certificates curl git \
-        libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev \
-        libfreetype-dev libfontconfig1-dev libx11-dev libxrandr-dev \
-        libxinerama-dev libxcursor-dev libxcomposite-dev
+        libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 
     # The Rust subsystems (clockwork's MIDI/gamepad/OSC) are one cargo-built
     # staticlib the native build links. i686-unknown-linux-gnu is a tier-1 target, but getting
@@ -126,8 +124,8 @@ phase_test() {
     # Twice, as the x64 job and for its reasons (native.yml): every
     # registered test with each Catch2 case in a process of its own, then the
     # binary with every case in one process, in a shuffled order.
-    SUPERSONIC_QUIET=1 ctest --test-dir "$BUILD_DIR" --output-on-failure -j 2 --timeout 300
-    SUPERSONIC_QUIET=1 "$BUILD_DIR/test/native/SuperSonicNativeTests" "~[benchmark]" --order rand ${GITHUB_RUN_NUMBER:+--rng-seed "$GITHUB_RUN_NUMBER"}
+    ctest --test-dir "$BUILD_DIR" --output-on-failure -j 2 --timeout 300
+    "$BUILD_DIR/test/native/SuperSonicNativeTests" "~[benchmark]" --order rand ${GITHUB_RUN_NUMBER:+--rng-seed "$GITHUB_RUN_NUMBER"}
 }
 
 phase_transport() {
