@@ -12,6 +12,35 @@ import { test, expect } from './fixtures.mjs';
 
 test.describe('Buffer pool growth', () => {
 
+  test('the pool grows by bufferGrowIncrement', async ({ page, sonicConfig }) => {
+    // The option was documented and passed, and the pool grew by its 32 MB
+    // default all the same: the client never handed it on.
+    await page.goto('/test/harness.html');
+    await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
+
+    const growths = await page.evaluate(async (config) => {
+      const sonic = new window.SuperSonic({
+        ...config,
+        memory: { bufferPoolSize: 1 * 1024 * 1024 },
+        maxBufferMemory: 64 * 1024 * 1024,
+        bufferGrowIncrement: 3 * 1024 * 1024,
+      });
+      const grown = [];
+      sonic.on('buffer:pool:grown', (info) => grown.push(info.newBytes));
+      await sonic.init();
+      // Each well under 3 MB decoded, together more than the 1 MB pool.
+      const samples = ['loop_amen.flac', 'loop_breakbeat.flac', 'bass_hard_c.flac',
+                       'bass_trance_c.flac', 'tbd_pad_3.flac', 'loop_perc1.flac'];
+      for (let i = 0; i < samples.length && grown.length === 0; i++)
+        await sonic.loadSample(i, samples[i]);
+      await sonic.shutdown();
+      return grown;
+    }, sonicConfig);
+
+    expect(growths.length, 'the samples outgrew the 1 MB pool').toBeGreaterThan(0);
+    expect(growths[0]).toBe(3 * 1024 * 1024);
+  });
+
   test('pool grows when initial allocation is exhausted', async ({ page, sonicConfig }) => {
     await page.goto('/test/harness.html');
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });

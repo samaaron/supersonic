@@ -103,6 +103,7 @@ export class SuperSonic extends Clockwork {
   #bufferManager = null;
   #buffersInit;
   #buffersMax;
+  #buffersGrow;
   #numBuffers;
   #scsynthOptions;
   #rewriter = null;
@@ -153,6 +154,7 @@ export class SuperSonic extends Clockwork {
 
     const bufInit  = options.bufferPoolSize ?? BUFFERS_INIT;
     const bufMax   = options.maxBufferMemory ?? BUFFERS_MAX;
+    const bufGrow  = options.bufferGrowIncrement;
     const memory   = { ...options.memory };
     /*
      * The engine's real-time pool comes out of clockwork's placement arena,
@@ -207,6 +209,7 @@ export class SuperSonic extends Clockwork {
     this.#scsynthOptions = { ...scOpts };
     this.#buffersInit  = bufInit;
     this.#buffersMax   = bufMax;
+    this.#buffersGrow  = bufGrow;
     this.#numBuffers   = scOpts.numBuffers;
     /*
      * maxNodes against the mirror's capacity.
@@ -336,6 +339,7 @@ export class SuperSonic extends Clockwork {
         maxSize: this.#buffersMax,
       },
       maxBufferMemory: this.#buffersMax,
+      bufferGrowIncrement: this.#buffersGrow,
       assetLoader: this.assetLoader,
       sampleBaseURL: this.#sampleBaseURL,
       maxBuffers: this.#numBuffers,
