@@ -1,22 +1,12 @@
 // Sonic Pi SynthDefs for SuperSonic
 // All 130 binary synthdef files (Sonic Pi synths plus test/utility synthdefs)
-
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-export const SYNTHDEFS_DIR = join(__dirname, 'synthdefs');
-
-// Helper to get full path for a synthdef
-export function getSynthDefPath(name) {
-    return join(SYNTHDEFS_DIR, `${name}.scsyndef`);
-}
+//
+// Where they are on a CDN, and their names. Loads anywhere, a browser
+// included; under Node, node.js adds where the files are on disk.
 
 // CDN URL for browser usage (unpkg)
 export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.89.0';
-export const SYNTHDEFS_CDN = `${CDN_BASE}/synthdefs`;
+export const SYNTHDEFS_CDN = `${CDN_BASE}/synthdefs/`;
 
 export const SYNTHDEF_NAMES = [
   "fft_brickwall",
@@ -153,8 +143,6 @@ export const SYNTHDEF_NAMES = [
 ];
 
 export default {
-    SYNTHDEFS_DIR,
-    getSynthDefPath,
     CDN_BASE,
     SYNTHDEFS_CDN,
     SYNTHDEF_NAMES

@@ -38,7 +38,7 @@ document.querySelector('button').onclick = async () => {
 
 ## Available Samples
 
-This package includes Sonic Pi's samples, organised by category. Their names are also exported, as `SAMPLE_NAMES`, by the package's `index.js` (a Node module).
+This package includes Sonic Pi's samples, organised by category. Their names are also exported, as `SAMPLE_NAMES`, by the package, from a browser or anywhere else; under Node it exports `SAMPLES_DIR` and `getSamplePath(file)` as well.
 
 ### Ambient (11 samples)
 `ambi_choir`, `ambi_dark_woosh`, `ambi_drone`, `ambi_glass_hum`, `ambi_glass_rub`, `ambi_haunted_hum`, `ambi_lunar_land`, `ambi_piano`, `ambi_sauna`, `ambi_soft_buzz`, `ambi_swoosh`

@@ -7,7 +7,7 @@ The SuperSonic engine for the browser: SuperCollider's scsynth synthesis engine 
 - `wasm/scsynth-nrt.wasm` - the engine
 - `wasm/clockwork_midi_bg.wasm`, `wasm/clockwork_gamepad_bg.wasm` - the Web MIDI and gamepad modules, fetched only when the client turns them on (`midi: true`, `gamepad: true`)
 - `workers/clockwork_audio_worklet.js` - the AudioWorklet processor that runs the engine on the audio thread
-- `index.js` - CDN URLs for this package (`CORE_CDN`, `WASM_CDN`, `WORKLET_CDN`), at `@latest`
+- `index.js` - CDN URLs for this release of the package (`CORE_CDN`, `WASM_CDN`, `WORKLET_CDN`)
 
 ## Usage
 

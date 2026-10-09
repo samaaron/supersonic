@@ -4,9 +4,6 @@
 // CDN path helper for supersonic-scsynth-core
 // This is the base URL for loading WASM and worker files from CDN
 
-export const CORE_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/';
-export const WASM_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/wasm/';
-export const WORKLET_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/workers/clockwork_audio_worklet.js';
-
-/** @deprecated Use WORKLET_CDN instead */
-export const WORKERS_CDN = 'https://unpkg.com/supersonic-scsynth-core@latest/workers/';
+export const CORE_CDN = 'https://unpkg.com/supersonic-scsynth-core@0.89.0/';
+export const WASM_CDN = `${CORE_CDN}wasm/`;
+export const WORKLET_CDN = `${CORE_CDN}workers/clockwork_audio_worklet.js`;

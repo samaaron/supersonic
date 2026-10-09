@@ -18,10 +18,11 @@ set -e
 #   8. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-samples dependency
 #   8b. packages/supersonic-scsynth-bundle/package.json - supersonic-scsynth-core dependency
 #
-# CDN constants in index.js (3):
+# CDN constants in index.js (4):
 #   8. packages/supersonic-scsynth-synthdefs/index.js - CDN_BASE constant
 #   9. packages/supersonic-scsynth-samples/index.js - UNPKG_BASE constant
 #  10. packages/supersonic-scsynth-samples/index.js - JSDELIVR_BASE constant
+#  10b. packages/supersonic-scsynth-core/index.js - CORE_CDN constant
 #
 # Documentation version examples (1):
 #  11. docs/INSTALLATION_WEB.md - pinned version example
@@ -162,6 +163,9 @@ echo "✓ Updated packages/supersonic-scsynth-synthdefs/index.js"
 
 sedi "s|supersonic-scsynth-samples@$CURRENT_VERSION|supersonic-scsynth-samples@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-samples/index.js"
 echo "✓ Updated packages/supersonic-scsynth-samples/index.js"
+
+sedi "s|supersonic-scsynth-core@$CURRENT_VERSION|supersonic-scsynth-core@$NEW_VERSION|g" "$PROJECT_ROOT/packages/supersonic-scsynth-core/index.js"
+echo "✓ Updated packages/supersonic-scsynth-core/index.js"
 
 # every package the docs pin, not only the client: -core, -synthdefs and -samples too. A version in prose
 # ("up to 0.81.0") has no @ before it and stays as the history it is.

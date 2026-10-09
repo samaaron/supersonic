@@ -36,9 +36,15 @@ document.querySelector('button').onclick = async () => {
 
 `synthdefBaseURL` is where synthdefs loaded by name are fetched from: `loadSynthDef('sonic-pi-beep')` fetches `sonic-pi-beep.scsyndef` from there.
 
+The package itself exports every name and, as `SYNTHDEFS_CDN`, this release's synthdefs on unpkg, from a browser or anywhere else:
+
+```javascript
+import { SYNTHDEFS_CDN, SYNTHDEF_NAMES } from 'supersonic-scsynth-synthdefs';
+```
+
 ### From Node
 
-The package's `index.js` is a Node module. It exports the directory the files are in, the path of one, and every name:
+Under Node it also exports the directory the files are in, and the path of one:
 
 ```javascript
 import { SYNTHDEFS_DIR, getSynthDefPath, SYNTHDEF_NAMES } from 'supersonic-scsynth-synthdefs';

@@ -3,6 +3,12 @@
   "version": "0.89.0",
   "description": "All 207 Sonic Pi audio samples for SuperSonic scsynth",
   "main": "index.js",
+  "exports": {
+    ".": {
+      "node": "./node.js",
+      "default": "./index.js"
+    }
+  },
   "type": "module",
   "repository": {
     "type": "git",
@@ -27,6 +33,7 @@
   "files": [
     "samples/",
     "index.js",
+    "node.js",
     "README.md",
     "PROVENANCE.md",
     "LICENSE"
