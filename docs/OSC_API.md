@@ -338,7 +338,7 @@ Hosts: **S N** (capability `link`).
 | `visibility/get [tok]` | `visibility.reply i:mode [tok]` | |
 | `peer_name/set s:name` | — | The name other peers see. |
 | `peer_name/get [tok]` | `peer_name.reply s:name [tok]` | |
-| `peers/get` | `peers.reply i:n (s:nodeId s:gatewayIp i:isLoopback s:measurementIp i:measurementPort s:audioIp i:audioPort)…` | `audioIp` is `""` for a peer without Link Audio. |
+| `peers/get [tok]` | `peers.reply i:n (s:nodeId s:gatewayIp i:isLoopback s:measurementIp i:measurementPort s:audioIp i:audioPort)… [tok]` | `audioIp` is `""` for a peer without Link Audio. |
 | `reset` | — | Leave the session and rejoin it. |
 | `notify/subscribe [i:token]` | `notify/subscribe.reply i:token` if tokened, then `notify/tempo` and `notify/peers` to the caller | |
 | `notify/unsubscribe` | — | |
@@ -360,15 +360,15 @@ Hosts: **S N** (capability `link_audio`).
 |---|---|---|
 | `audio/publish/set i:on` | — | Publish this engine's audio to peers. |
 | `audio/publish/get [tok]` | `audio/publish.reply i:on [tok]` | |
-| `audio/channels/get` | `audio/channels.reply i:n (s:channelId s:channelName s:peerId s:peerName)…` | Channels the peers offer. |
-| `audio/input/add s:peer s:channel i:inputChannel` | `audio/input/add.reply i:ok` | The peer's channel onto input channels `inputChannel` and `+1` (mono is mirrored). Refused unless the channel exists and the pair is free. |
+| `audio/channels/get [tok]` | `audio/channels.reply i:n (s:channelId s:channelName s:peerId s:peerName)… [tok]` | Channels the peers offer. |
+| `audio/input/add s:peer s:channel [tok]` | `audio/input/add.reply i:ok i:inputChannel [tok]` | The peer's channel onto a pair of input channels the engine chooses, from lanes of its own above every device channel; `inputChannel` is the first of them (mono is mirrored), and `-1` when refused: no peer publishes the channel, or every pair is in use. The same peer and channel again keep their pair. A synth reads input channel N as bus `NumOutputBuses + N`. |
 | `audio/input/remove s:peer s:channel` | — | |
 | `audio/input/clear` | — | |
-| `audio/input/latency/set s:peer s:channel f:seconds` | `audio/input/latency/set.reply i:ok` | |
-| `audio/inputs/get` | `audio/inputs.reply i:n (s:peer s:channel i:inputChannel i:sampleRate i:sourceChannels f:bufferedMs i:state i:droppedSourceBuffers i:networkGapBuffers i:totalSourceBufferCalls i:duplicateCountCalls f:latencySeconds)…` | `state`: 0 not subscribed, 1 connecting, 2 connected, 3 dropout. `sourceChannels` is 0 until the first buffer. |
-| `audio/sink/add s:name i:channel i:numChannels` | `audio/sink/add.reply i:ok` | An extra published channel, from `numChannels` channels starting at `channel`. |
+| `audio/input/latency/set s:peer s:channel f:seconds [tok]` | `audio/input/latency/set.reply i:ok [tok]` | |
+| `audio/inputs/get [tok]` | `audio/inputs.reply i:n (s:peer s:channel i:inputChannel i:sampleRate i:sourceChannels f:bufferedMs i:state i:droppedSourceBuffers i:networkGapBuffers i:totalSourceBufferCalls i:duplicateCountCalls f:latencySeconds)… [tok]` | `state`: 0 not subscribed, 1 connecting, 2 connected, 3 dropout. `sourceChannels` is 0 until the first buffer. |
+| `audio/sink/add s:name i:channel i:numChannels [tok]` | `audio/sink/add.reply i:ok [tok]` | An extra published channel, from `numChannels` channels starting at `channel`. |
 | `audio/sink/remove s:name` | — | |
-| `audio/sinks/get` | `audio/sinks.reply i:n (s:name i:channel i:numChannels i:hasSubscriber)…` | |
+| `audio/sinks/get [tok]` | `audio/sinks.reply i:n (s:name i:channel i:numChannels i:hasSubscriber)… [tok]` | |
 
 ---
 

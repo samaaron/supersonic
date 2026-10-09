@@ -13,6 +13,7 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
+#include "ClockworkProcessor.h"   // get_audio_num_input_buses, get_audio_num_output_buses
 
 // ── Disable inputs (2 → 0) triggers cold swap ──────────────────────────────
 
@@ -217,29 +218,32 @@ TEST_CASE("InputChannels: no-op does not fire swap events", "[InputChannels]") {
 // the boot-time width are silently dropped at the hardware boundary (e.g.
 // boot on a 2-out device, swap to a 4-out device: Out.ar(2, sig) renders in
 // the World but never reaches channel 3) and re-enabled inputs feed buses
-// the World doesn't have. resume() re-syncs the widths from the live World;
-// the input path is the one a headless fixture can rebuild at a new width.
+// the World doesn't have. resume() re-syncs the widths from the live World.
+//
+// The World is wider than the device by the lanes reserved above it (Link
+// Audio's, at least), so a device narrower than the lane base leaves it as it
+// is. A device wider than the base moves the lanes up, and the World widens
+// with them: that is the rebuild a headless fixture can make visible.
 
 TEST_CASE("InputChannels: callback World widths track cold-swap rebuilds",
           "[InputChannels]") {
     EngineFixture fix;
     auto& cb = fix.engine().processor();
+    auto worldIn  = [] { return get_audio_num_input_buses(); };
+    auto worldOut = [] { return get_audio_num_output_buses(); };
 
-    // Boot: fixture world is 2-in / 2-out
-    CHECK(cb.dspInputChannels() == 2);
-    CHECK(cb.dspOutputChannels() == 2);
-
-    // Narrow: 2 -> 0 inputs
     auto r0 = fix.engine().enableInputChannels(0);
     REQUIRE(r0.success);
     REQUIRE(r0.type == SwapType::Cold);
-    CHECK(cb.dspInputChannels() == 0);
-    CHECK(cb.dspOutputChannels() == 2);
+    CHECK(cb.dspInputChannels() == worldIn());
+    CHECK(cb.dspOutputChannels() == worldOut());
+    const int narrow = worldIn();
 
-    // Widen past the boot width: 0 -> 4 inputs
-    auto r4 = fix.engine().enableInputChannels(4);
-    REQUIRE(r4.success);
-    REQUIRE(r4.type == SwapType::Cold);
-    CHECK(cb.dspInputChannels() == 4);
-    CHECK(cb.dspOutputChannels() == 2);
+    // Past the lane base: the lanes move up and the World widens.
+    auto r40 = fix.engine().enableInputChannels(40);
+    REQUIRE(r40.success);
+    REQUIRE(r40.type == SwapType::Cold);
+    CHECK(worldIn() > narrow);
+    CHECK(cb.dspInputChannels() == worldIn());
+    CHECK(cb.dspOutputChannels() == worldOut());
 }
