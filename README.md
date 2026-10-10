@@ -79,6 +79,8 @@ Clone with the submodule and build with CMake - see [Building from Source](docs/
 
 `CMakeLists.txt` here names the guest and links the host; everything else is clockwork's own build - see [clockwork/docs/BUILDING.md](clockwork/docs/BUILDING.md) for the options. The [native guide](docs/NATIVE.md) covers running it: options, devices, transports and logs. On Debian, [Debian Packaging](docs/DEBIAN-PACKAGING.md) builds a package from source.
 
+An application can link the engine into its own process instead of running the server: `supersonic_embed`, behind `supersonic::EmbeddedHost`. See [Embedding](docs/EMBEDDING.md).
+
 ### NIF
 
 The NIF is experimental: nothing has been built on it yet beyond its tests. Build it - no Erlang installation is needed to build it:
@@ -111,6 +113,7 @@ The library lands at `build/nif/clockwork.so` (`clockwork.dll` on Windows). See 
 ### Native
 
 - [Native Guide](docs/NATIVE.md) - running the server: options, devices, transports, logs
+- [Embedding](docs/EMBEDDING.md) - the engine inside an application's process: `supersonic::EmbeddedHost`, its threads, the segment, the plugin bridge
 - [Debian Packaging](docs/DEBIAN-PACKAGING.md) - the Debian source package: offline build, system dependencies, lintian/autopkgtest
 
 ### NIF

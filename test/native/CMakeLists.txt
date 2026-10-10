@@ -75,6 +75,8 @@ add_executable(SuperSonicNativeTests
     ${CMAKE_CURRENT_SOURCE_DIR}/../../front/supersonic_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../front/Recorder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../host/EngineHost.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../host/EmbeddedHost.cpp
+    test_embedded_host.cpp
     test_device_management.cpp
     test_definition_lifecycle.cpp
     test_send_reply.cpp

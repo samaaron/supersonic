@@ -151,6 +151,31 @@ target_link_libraries(SuperSonic PRIVATE
     clockwork_comms
     clockwork_bundle)
 
+# ─── SuperSonic, embedded ────────────────────────────────────────────────────
+# The engine in an application's own process (docs/EMBEDDING.md): the same
+# front, composed with an in-process transport in place of the sockets, behind
+# supersonic::EmbeddedHost. An application links this and nothing else of the
+# tree: `target_link_libraries(app PRIVATE supersonic_embed)`.
+add_library(supersonic_embed STATIC
+    host/EmbeddedHost.cpp
+    front/supersonic_commands.cpp
+    front/Recorder.cpp)
+add_dependencies(supersonic_embed scsynth)
+target_compile_definitions(supersonic_embed PUBLIC
+    SUPERSONIC_VERSION_STRING="${PROJECT_VERSION}")
+target_include_directories(supersonic_embed PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/host
+    ${CMAKE_CURRENT_SOURCE_DIR}/front
+    ${CMAKE_CURRENT_SOURCE_DIR}/clockwork/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/clockwork/src/native
+    ${CMAKE_CURRENT_SOURCE_DIR}/clockwork/src/comms
+    ${CMAKE_CURRENT_SOURCE_DIR}/dsp/scsynth)
+target_link_libraries(supersonic_embed PUBLIC clockwork_comms clockwork_bundle)
+if(TARGET clockwork_plugin_bridge)
+    # the bridge is built whenever an embedder builds the engine
+    add_dependencies(supersonic_embed clockwork_plugin_bridge)
+endif()
+
 # ─── Release debug symbols ───────────────────────────────────────────────────
 # Clockwork sets these for everything it builds, but with add_compile_options /
 # add_link_options — which apply to its own directory and below, not to a
