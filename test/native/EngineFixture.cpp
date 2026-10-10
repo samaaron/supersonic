@@ -149,7 +149,7 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
 
     // Manual-pump mode: the NRT gateway only delivers replies after the audio
     // thread ticks, and nothing ticks unless we pump here on the test thread.
-    if (mManualPump) {
+    if (testPumps()) {
         while (true) {
             pumpBlock();
             if (take()) return true;
@@ -206,7 +206,7 @@ bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
     const auto deadline = std::chrono::steady_clock::now()
                         + std::chrono::milliseconds(timeoutMs);
     while (true) {
-        if (mManualPump) pumpBlock();
+        if (testPumps()) pumpBlock();
         {
             std::lock_guard<std::mutex> lk(mReplyMutex);
             for (auto it = mReplies.begin(); it != mReplies.end(); ++it) {
@@ -217,7 +217,7 @@ bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
             }
         }
         if (std::chrono::steady_clock::now() >= deadline) return false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(mManualPump ? 3 : 2));
+        std::this_thread::sleep_for(std::chrono::milliseconds(testPumps() ? 3 : 2));
     }
 }
 
@@ -287,25 +287,47 @@ void EngineFixture::stopHeadlessDriver() {
 }
 
 void EngineFixture::pumpBlock(uint32_t n) {
-    if (mManualPump) {
+    if (testPumps()) {
         for (uint32_t i = 0; i < n; ++i) mEngine.pumpAudioBlock();
         return;
     }
-    // A driver thread is rendering: a block pumped here would be a second
-    // renderer, which the engine refuses. What a test means by "pump n" with
-    // a driver running is "let n blocks pass" — so wait for the driver's.
+    // A driver thread or a Device is rendering: a block pumped here would be a
+    // second renderer. What a test means by "pump n" with one running is "let
+    // n blocks pass" — so wait for its.
     if (!waitForBlocks(n))
         WARN("pumpBlock(" << n << "): the driver rendered no block within the wait");
 }
 
 void EngineFixture::pumpCallback(uint32_t frames, const std::function<void()>& afterEachBlock) {
-    REQUIRE(mManualPump);
+    REQUIRE(testPumps());
     mEngine.pumpAudioCallback(frames, afterEachBlock);
 }
 
 void EngineFixture::restartPump() {
-    REQUIRE(mManualPump);
+    REQUIRE(testPumps());
     mEngine.restartManualPump();
+}
+
+// Assertions stay on the test thread: Catch2's aren't safe from another.
+EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames) : mFx(fx) {
+    REQUIRE(mFx.mManualPump);
+    REQUIRE_FALSE(mFx.mDeviceRendering.load(std::memory_order_relaxed));
+    mFx.mEngine.restartManualPump();
+    mFx.mDeviceRendering.store(true, std::memory_order_relaxed);
+    mThread = std::thread([this, sampleRate, frames] {
+        const auto began = std::chrono::steady_clock::now();
+        for (uint64_t callback = 0; !mStop.load(std::memory_order_relaxed); ++callback) {
+            std::this_thread::sleep_until(began + std::chrono::nanoseconds(static_cast<int64_t>(
+                1e9 * double(callback * frames) / double(sampleRate))));
+            mFx.mEngine.pumpAudioCallback(frames);
+        }
+    });
+}
+
+EngineFixture::Device::~Device() {
+    mStop.store(true, std::memory_order_relaxed);
+    mThread.join();
+    mFx.mDeviceRendering.store(false, std::memory_order_relaxed);
 }
 
 // ── Synthdef helpers ─────────────────────────────────────────────────────────

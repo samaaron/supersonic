@@ -11,6 +11,7 @@
 #include "GuestConfigText.h"
 #include "OscTestUtils.h"
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
 #include <vector>
 #include <mutex>
 #include <condition_variable>
@@ -85,10 +86,10 @@ public:
         while (true) {
             // In manual-pump mode nothing advances the engine unless we do it
             // here, on this thread — keeps the test the sole audio-thread writer.
-            if (mManualPump) pumpBlock();
+            if (testPumps()) pumpBlock();
             if (pred()) return true;
             if (std::chrono::steady_clock::now() >= deadline) return false;
-            std::this_thread::sleep_for(std::chrono::milliseconds(mManualPump ? 3 : 2));
+            std::this_thread::sleep_for(std::chrono::milliseconds(testPumps() ? 3 : 2));
         }
     }
 
@@ -147,24 +148,48 @@ public:
     // thread) the test thread is the sole audio-thread writer, so a bus snapshot
     // taken between pumps can't race a real-time driver. waitForReply()/pollUntil()
     // pump automatically in this mode, so most tests never call this directly.
+    // With a driver or a Device rendering, waits for `n` of its blocks instead.
     void pumpBlock(uint32_t n = 1);
 
     // Render one device callback of `frames` as a device of that buffer size
     // does — one clock step, then its blocks back to back — running
-    // `afterEachBlock` after each. Manual pump only.
+    // `afterEachBlock` after each. Manual pump only, and no Device rendering.
     void pumpCallback(uint32_t frames, const std::function<void()>& afterEachBlock = {});
 
     // The next pump starts the engine's clock afresh, as a device starting
-    // does. Manual pump only.
+    // does. Manual pump only, and no Device rendering.
     void restartPump();
 
     // True when constructed with cfg.manualAudioPump — the wait primitives drive
     // the audio thread themselves (see pumpBlock).
     bool manualPump() const { return mManualPump; }
 
+    // A device for a manual-pump engine: a thread rendering a callback of
+    // `frames` at each one's due time on the wall clock, catching up after a
+    // late wake as a device's buffer would, while the test talks to the engine
+    // as a host does. A device is the engine's one renderer, and so is this:
+    // while it runs the waits wait for its blocks rather than pump their own,
+    // which would be a second thread rendering. The engine's clock starts
+    // afresh with it. Declared after its fixture, so that it stops first.
+    class Device {
+    public:
+        Device(EngineFixture& fx, int sampleRate, uint32_t frames);
+        ~Device();
+        Device(const Device&) = delete;
+        Device& operator=(const Device&) = delete;
+
+    private:
+        EngineFixture&    mFx;
+        std::atomic<bool> mStop{false};
+        std::thread       mThread;
+    };
+
 private:
     void init(const ClockworkEngine::Config& cfg);
+    // The test thread renders: manual pump, and no Device rendering instead.
+    bool testPumps() const { return mManualPump && !mDeviceRendering.load(std::memory_order_relaxed); }
     bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
+    std::atomic<bool> mDeviceRendering{false};  // a Device is the renderer
     uint64_t         mGeneration = 0;      // unique per fixture (see generation())
 
     mutable std::mutex       mReplyMutex;

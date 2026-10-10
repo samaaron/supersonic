@@ -37,6 +37,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <atomic>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -159,6 +160,11 @@ int32_t subscribe(EngineFixture& fx, const char* peer, const char* channel) {
     OscReply r;
     REQUIRE(fx.waitForReply("/clockwork/clock/audio/input/add.reply", r, 1000));
     const auto p = r.parsed();
+    // A refusal's reason is in the engine's log, not the reply: say it with
+    // whatever assertion the -1 fails next.
+    if (p.argInt(0) != 1)
+        UNSCOPED_INFO("input/add " << peer << "/" << channel << " refused; engine log:\n"
+                      << fx.debugMessagesDump());
     return p.argInt(0) == 1 ? p.argInt(1) : -1;
 }
 
@@ -180,6 +186,29 @@ ClockworkEngine::Config linkInputConfig() {
     return cfg;
 }
 
+// An engine the test pumps a few blocks at a time between its checks: far
+// slower than a device, so its blocks are stamped by the wall clock, and a
+// stream is heard where it is now rather than where its samples have reached.
+ClockworkEngine::Config handPumpedConfig() {
+    auto cfg = linkInputConfig();
+    cfg.manualAudioPump = true;
+    return cfg;
+}
+
+// An engine the test drives by hand, as a device would, on a freewheel clock:
+// its blocks are stamped by their samples alone. A device's callbacks come on
+// the hardware's time; a test's come whenever the OS wakes it — on a busy CI
+// machine, tens of milliseconds late and then all at once. Stamped by when the
+// callback ran, that lateness would move the timeline a peer's audio is placed
+// on, and the stream would be heard to jump; stamped by its samples, the
+// engine keeps a device's timeline however the test thread is scheduled.
+ClockworkEngine::Config handDrivenConfig() {
+    auto cfg = linkInputConfig();
+    cfg.manualAudioPump = true;
+    cfg.freewheelClock  = true;
+    return cfg;
+}
+
 }  // namespace
 
 TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
@@ -192,7 +221,8 @@ TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx{linkInputConfig()};
+    EngineFixture fx{handDrivenConfig()};
+    EngineFixture::Device device{fx, 48000, 512};
     // NetworkWide + publish=1 so LinkAudio is on and the engine can
     // see other peers' channels via link.channels().
     fx.send(osc_test::message("/clockwork/clock/visibility",         int32_t{2}));
@@ -490,9 +520,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
 
     // Manual pump: this test reads the output bus, so the test thread must be the
     // sole audio-thread writer (no real-time driver) or the read races the drain.
-    auto cfg = linkInputConfig();
-    cfg.manualAudioPump = true;
-    EngineFixture fx(cfg);
+    EngineFixture fx(handPumpedConfig());
     fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
@@ -558,9 +586,7 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     REQUIRE(peer.ready());
 
     // Manual pump: bus snapshots below must not race a real-time driver.
-    auto cfg = linkInputConfig();
-    cfg.manualAudioPump = true;
-    EngineFixture fx(cfg);
+    EngineFixture fx(handPumpedConfig());
     fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
@@ -611,9 +637,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     REQUIRE(peer.ready());
 
     // Manual pump: reads the output bus below; test thread is the sole writer.
-    auto cfg = linkInputConfig();
-    cfg.manualAudioPump = true;
-    EngineFixture fx(cfg);
+    EngineFixture fx(handPumpedConfig());
     fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));  // NetworkWide
     // NB: no /clock/audio/publish/set — engine is receive-only.
 
@@ -671,9 +695,7 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
 
     // Manual pump: this test snapshots the stream's pair (before and after removal), so the
     // test thread must own the audio thread — no real-time driver writing the bus.
-    auto cfg = linkInputConfig();
-    cfg.manualAudioPump = true;
-    EngineFixture fx(cfg);
+    EngineFixture fx(handPumpedConfig());
     fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
@@ -732,7 +754,8 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
         FakeLinkPeerProcess peer{peerOpts};
         REQUIRE(peer.ready());
 
-        EngineFixture fx{linkInputConfig()};
+        EngineFixture fx{handDrivenConfig()};
+        EngineFixture::Device device{fx, 48000, 512};
         fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
         fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
         fx.send(osc_test::message("/clockwork/clock/tempo/set", static_cast<float>(bpm)));
@@ -814,7 +837,8 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx{linkInputConfig()};
+    EngineFixture fx{handDrivenConfig()};
+    EngineFixture::Device device{fx, 48000, 512};
     fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -901,7 +925,8 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    EngineFixture fx{linkInputConfig()};
+    EngineFixture fx{handDrivenConfig()};
+    EngineFixture::Device device{fx, 48000, 512};
     fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
@@ -1022,10 +1047,9 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames) {
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    auto cfg = linkInputConfig();
-    cfg.sampleRate      = engineRate;
-    cfg.blockSize       = 64;
-    cfg.manualAudioPump = true;
+    auto cfg = handDrivenConfig();
+    cfg.sampleRate = engineRate;
+    cfg.blockSize  = 64;
     EngineFixture fx(cfg);
     fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));   // this machine only
     REQUIRE(waitForChannelVisible(fx, "FakeSonicPi", "Main", std::chrono::seconds(30)));
