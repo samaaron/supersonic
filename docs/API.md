@@ -97,30 +97,31 @@ scsynth with low latency inside a web page.
 
 **Advanced**
 
-| Member                                    | Description                                                                                                      |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [`bufferConstants`](#bufferconstants)     | Buffer layout constants from the WASM build.                                                                     |
-| [`clock`](#clock)                         | Session-timeline service: tempo, beat origin, transport, NTP "now." See ClockworkClock for the full API surface. |
-| [`gamepad`](#gamepad)                     | The gamepad manager, when the gamepad option is on and it came up; otherwise null (gamepadError says why).       |
-| [`gamepadError`](#gamepaderror)           | Why gamepad is null although it was asked for: the error its start-up threw.                                     |
-| [`midi`](#midi)                           | The Web MIDI manager, when MIDI is enabled (the midi option, or enableMidi) and came up.                         |
-| [`midiError`](#midierror)                 | Why midi is null although MIDI was asked for: the error its start-up threw.                                      |
-| [`mode`](#mode)                           | Active transport mode ('sab' or 'postMessage').                                                                  |
-| [`ringBufferBase`](#ringbufferbase)       | Ring buffer base offset in SharedArrayBuffer.                                                                    |
-| [`sharedBuffer`](#sharedbuffer)           | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                                                     |
-| [`allocSample()`](#allocsample)           | Allocate an empty buffer, as loadSample does for a file: resolves once the engine has it.                        |
-| [`enableMidi()`](#enablemidi)             | Bring Web MIDI up after init.                                                                                    |
-| [`getEngineState()`](#getenginestate)     | Returns the current engine lifecycle state.                                                                      |
-| [`getLoadedBuffers()`](#getloadedbuffers) | Get info about all loaded audio buffers.                                                                         |
-| [`getScope()`](#getscope)                 | Copy the newest frames frames of a ScopeOut2 scope stream.                                                       |
-| [`getScopes()`](#getscopes)               | List the scope slots in use.                                                                                     |
-| [`getSystemReport()`](#getsystemreport)   | Get a comprehensive system performance report.                                                                   |
-| [`isRunning()`](#isrunning)               | Returns true if the engine has finished booting and is ready to send and receive messages.                       |
-| [`nextNodeId()`](#nextnodeid)             | Get the next unique node ID.                                                                                     |
-| [`request()`](#request)                   | Send a message and wait for its reply.                                                                           |
-| [`getRawTreeSchema()`](#getrawtreeschema) | Get schema describing the raw flat node tree structure.                                                          |
-| [`getScopeSchema()`](#getscopeschema)     | Scope geometry: slot count, per-slot ring frames, channels.                                                      |
-| [`getTreeSchema()`](#gettreeschema)       | Get schema describing the hierarchical node tree structure.                                                      |
+| Member                                          | Description                                                                                                      |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [`bufferConstants`](#bufferconstants)           | Buffer layout constants from the WASM build.                                                                     |
+| [`clock`](#clock)                               | Session-timeline service: tempo, beat origin, transport, NTP "now." See ClockworkClock for the full API surface. |
+| [`gamepad`](#gamepad)                           | The gamepad manager, when the gamepad option is on and it came up; otherwise null (gamepadError says why).       |
+| [`gamepadError`](#gamepaderror)                 | Why gamepad is null although it was asked for: the error its start-up threw.                                     |
+| [`midi`](#midi)                                 | The Web MIDI manager, when MIDI is enabled (the midi option, or enableMidi) and came up.                         |
+| [`midiError`](#midierror)                       | Why midi is null although MIDI was asked for: the error its start-up threw.                                      |
+| [`mode`](#mode)                                 | Active transport mode ('sab' or 'postMessage').                                                                  |
+| [`ringBufferBase`](#ringbufferbase)             | Ring buffer base offset in SharedArrayBuffer.                                                                    |
+| [`sharedBuffer`](#sharedbuffer)                 | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                                                     |
+| [`allocSample()`](#allocsample)                 | Allocate an empty buffer, as loadSample does for a file: resolves once the engine has it.                        |
+| [`enableMidi()`](#enablemidi)                   | Bring Web MIDI up after init.                                                                                    |
+| [`getEngineState()`](#getenginestate)           | Returns the current engine lifecycle state.                                                                      |
+| [`getLoadedBuffers()`](#getloadedbuffers)       | Get info about all loaded audio buffers.                                                                         |
+| [`getScope()`](#getscope)                       | Copy the newest frames frames of a ScopeOut2 scope stream.                                                       |
+| [`getScopeActivations()`](#getscopeactivations) | How many times a scope slot has gone live.                                                                       |
+| [`getScopes()`](#getscopes)                     | List the scope slots in use.                                                                                     |
+| [`getSystemReport()`](#getsystemreport)         | Get a comprehensive system performance report.                                                                   |
+| [`isRunning()`](#isrunning)                     | Returns true if the engine has finished booting and is ready to send and receive messages.                       |
+| [`nextNodeId()`](#nextnodeid)                   | Get the next unique node ID.                                                                                     |
+| [`request()`](#request)                         | Send a message and wait for its reply.                                                                           |
+| [`getRawTreeSchema()`](#getrawtreeschema)       | Get schema describing the raw flat node tree structure.                                                          |
+| [`getScopeSchema()`](#getscopeschema)           | Scope geometry: slot count, per-slot ring frames, channels.                                                      |
+| [`getTreeSchema()`](#gettreeschema)             | Get schema describing the hierarchical node tree structure.                                                      |
 
 #### Examples
 
@@ -752,6 +753,26 @@ slot is inactive, or nothing has been written to it yet.
 | `frames`        | `number`       |
 | `interleaved`   | `Float32Array` |
 | `writePosition` | `bigint`       |
+
+##### getScopeActivations()
+
+> **getScopeActivations**(`scopeNum`): `number`
+
+How many times a scope slot has gone live. A reader polls, and a slot can
+be claimed and released between two polls (a loop started and stopped in
+a moment); a reader that noted this and sees another number knows the
+slot went live in between. Wraps: compare for change only.
+SAB mode only; returns null when uninitialised or out of range.
+
+###### Parameters
+
+| Parameter  | Type     | Description              |
+| ---------- | -------- | ------------------------ |
+| `scopeNum` | `number` | Scope slot index, from 0 |
+
+###### Returns
+
+`number`
 
 ##### getScopes()
 

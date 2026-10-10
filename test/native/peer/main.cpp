@@ -210,6 +210,12 @@ int main(int argc, char** argv) {
         static_cast<int64_t>(1'000'000'000.0 * double(blockSize) / sampleRate)};
     auto nextDeadline = std::chrono::steady_clock::now();
     uint64_t frameOffset = 0;
+    // Each buffer is stamped from the sample clock, as a device stamps it:
+    // where the first frame falls on a steady timeline, not when this loop
+    // happened to wake. A wake-time stamp carries the scheduler's jitter, and
+    // the receiver, which places every buffer by its stamp, would bend the
+    // audio to follow it.
+    const auto clockAtFrameZero = link.clock().micros();
 
     while (!gShouldQuit.load(std::memory_order_relaxed)) {
 #if !defined(_WIN32)
@@ -232,7 +238,8 @@ int main(int argc, char** argv) {
                 }
             }
             auto sessionState = link.captureAppSessionState();
-            const auto hostMicros = link.clock().micros();
+            const auto hostMicros = clockAtFrameZero + std::chrono::microseconds(
+                static_cast<int64_t>(1e6 * double(frameOffset) / sampleRate));
             const double beatsAtBegin =
                 sessionState.beatAtTime(hostMicros, /*quantum=*/4.0);
             buf.commit(sessionState, beatsAtBegin, /*quantum=*/4.0,

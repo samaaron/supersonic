@@ -494,6 +494,7 @@ expectType<OscChannel>(sonic.createOscChannel({ sourceId: 1 }));
 expectType<number>(sonic.nextNodeId());
 
 // Asset loading
+expectType<number | null>(sonic.getScopeActivations(0));
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef('beep'));
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef('/path/to/beep.scsyndef'));
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef(new ArrayBuffer(100)));

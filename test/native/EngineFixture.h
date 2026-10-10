@@ -149,6 +149,15 @@ public:
     // pump automatically in this mode, so most tests never call this directly.
     void pumpBlock(uint32_t n = 1);
 
+    // Render one device callback of `frames` as a device of that buffer size
+    // does — one clock step, then its blocks back to back — running
+    // `afterEachBlock` after each. Manual pump only.
+    void pumpCallback(uint32_t frames, const std::function<void()>& afterEachBlock = {});
+
+    // The next pump starts the engine's clock afresh, as a device starting
+    // does. Manual pump only.
+    void restartPump();
+
     // True when constructed with cfg.manualAudioPump — the wait primitives drive
     // the audio thread themselves (see pumpBlock).
     bool manualPump() const { return mManualPump; }

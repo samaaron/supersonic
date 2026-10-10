@@ -298,6 +298,16 @@ void EngineFixture::pumpBlock(uint32_t n) {
         WARN("pumpBlock(" << n << "): the driver rendered no block within the wait");
 }
 
+void EngineFixture::pumpCallback(uint32_t frames, const std::function<void()>& afterEachBlock) {
+    REQUIRE(mManualPump);
+    mEngine.pumpAudioCallback(frames, afterEachBlock);
+}
+
+void EngineFixture::restartPump() {
+    REQUIRE(mManualPump);
+    mEngine.restartManualPump();
+}
+
 // ── Synthdef helpers ─────────────────────────────────────────────────────────
 
 bool EngineFixture::loadSynthDef(const std::string& name) {

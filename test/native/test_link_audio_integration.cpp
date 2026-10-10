@@ -38,6 +38,8 @@
 #include <cstdlib>
 #include <memory>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -93,13 +95,23 @@ bool waitForChannelVisible(EngineFixture& fx,
     return false;
 }
 
-// Snapshot the status of one input subscription (peerName, channelName).
-// Returns -1 in `state` if not found. Updates `bufferedMs` and
-// `sourceNumChannels` from the reply.
+// /clockwork/clock/audio/inputs.reply is <count>, then these for each input.
+enum InputField {
+    kPeer, kChannel, kBus, kRate, kSourceChannels, kBufferedMs, kState,
+    kDropped, kNetworkGaps, kSourceCalls, kDuplicates, kLatency,
+    kUnderruns, kResyncs, kWarps, kDriftPpm,
+    kInputFields
+};
+
+// One input's line of the report; state -1 when the engine has no such input.
 struct InputSnapshot {
-    int   state = -1;
-    int   sourceNumChannels = 0;
-    float bufferedMs = 0.0f;
+    int      state = -1;
+    int      sourceNumChannels = 0;
+    float    bufferedMs = 0.0f;
+    uint64_t dropped = 0, networkGaps = 0, sourceCalls = 0, duplicates = 0;
+    float    latencySeconds = 0.0f;
+    uint64_t underruns = 0, resyncs = 0, warps = 0;
+    int      driftPpm = 0;
 };
 
 InputSnapshot snapshotInput(EngineFixture& fx,
@@ -112,20 +124,24 @@ InputSnapshot snapshotInput(EngineFixture& fx,
     if (!fx.waitForReply("/clockwork/clock/audio/inputs.reply", reply, 500)) return snap;
     const auto p = reply.parsed();
     const int count = p.argInt(0);
-    // Per entry: [peerName:s channelName:s busIdx:i sampleRate:i
-    //             sourceNumChannels:i bufferedMs:f state:i
-    //             droppedSourceBuffers:i networkGapBuffers:i
-    //             totalSourceBufferCalls:i duplicateCountCalls:i
-    //             latencySeconds:f] (12 args)
     for (int i = 0; i < count; ++i) {
-        const int base = 1 + i * 12;
-        if (p.argString(base + 0) == peerName &&
-            p.argString(base + 1) == channelName) {
-            snap.sourceNumChannels = p.argInt(base + 4);
-            snap.bufferedMs        = p.argFloat(base + 5);
-            snap.state             = p.argInt(base + 6);
-            break;
-        }
+        const int base = 1 + i * kInputFields;
+        if (p.argString(base + kPeer) != peerName || p.argString(base + kChannel) != channelName)
+            continue;
+        auto count64 = [&](int field) { return static_cast<uint64_t>(p.argInt(base + field)); };
+        snap.sourceNumChannels = p.argInt(base + kSourceChannels);
+        snap.bufferedMs        = p.argFloat(base + kBufferedMs);
+        snap.state             = p.argInt(base + kState);
+        snap.dropped           = count64(kDropped);
+        snap.networkGaps       = count64(kNetworkGaps);
+        snap.sourceCalls       = count64(kSourceCalls);
+        snap.duplicates        = count64(kDuplicates);
+        snap.latencySeconds    = p.argFloat(base + kLatency);
+        snap.underruns         = count64(kUnderruns);
+        snap.resyncs           = count64(kResyncs);
+        snap.warps             = count64(kWarps);
+        snap.driftPpm          = p.argInt(base + kDriftPpm);
+        break;
     }
     return snap;
 }
@@ -443,6 +459,20 @@ InputSnapshot waitForConnected(EngineFixture& fx,
     return snap;
 }
 
+// Wait until `peerName`/`channelName` has audio arriving, healthy or not.
+// What a hand-pumped engine can wait for: pumped a block at a time between
+// polls, slower than a device would, it hears a stream it cannot keep up
+// with, and the report says so. Its health is for a device-paced listen.
+bool waitForArriving(EngineFixture& fx,
+                     const std::string& peerName,
+                     const std::string& channelName,
+                     std::chrono::milliseconds timeout) {
+    return fx.pollUntil([&] {
+        const int state = snapshotInput(fx, peerName, channelName).state;
+        return state == kStateConnected || state == kStateDropout;
+    }, static_cast<int>(timeout.count()));
+}
+
 }  // namespace
 
 // A. Verify scsynth's audio graph actually consumes Link-delivered
@@ -471,9 +501,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
 
     const int32_t main = subscribe(fx, "FakeLive", "Main");
     REQUIRE(main >= 0);
-    REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(30)).state
-            == kStateConnected);
+    REQUIRE(waitForArriving(fx, "FakeLive", "Main", std::chrono::seconds(30)));
 
     // The synth reads the scsynth bus the stream's input channel is
     // (inBusFor). stereo_passthrough reads In.ar(in_bus, 2) and writes both
@@ -547,10 +575,8 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     REQUIRE(chanB >= 0);
     REQUIRE(chanA != chanB);
 
-    REQUIRE(waitForConnected(fx, "FakeLive", "ChanA",
-                              std::chrono::seconds(30)).state == kStateConnected);
-    REQUIRE(waitForConnected(fx, "FakeLive", "ChanB",
-                              std::chrono::seconds(30)).state == kStateConnected);
+    REQUIRE(waitForArriving(fx, "FakeLive", "ChanA", std::chrono::seconds(30)));
+    REQUIRE(waitForArriving(fx, "FakeLive", "ChanB", std::chrono::seconds(30)));
 
     // Poll bus contents — slow CI runners need time for drain to
     // populate both bus pairs after Connected. ChanA carries sine440
@@ -596,9 +622,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
 
     const int32_t main = subscribe(fx, "FakeLive", "Main");
     REQUIRE(main >= 0);
-    REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(30)).state
-            == kStateConnected);
+    REQUIRE(waitForArriving(fx, "FakeLive", "Main", std::chrono::seconds(30)));
 
     // Stereo passthrough: the stream's pair to output 0/1, preserving L/R.
     REQUIRE(fx.loadSynthDef("stereo_passthrough"));
@@ -657,9 +681,7 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
                                    std::chrono::seconds(30)));
     const int32_t main = subscribe(fx, "FakeLive", "Main");
     REQUIRE(main >= 0);
-    REQUIRE(waitForConnected(fx, "FakeLive", "Main",
-                              std::chrono::seconds(30)).state
-            == kStateConnected);
+    REQUIRE(waitForArriving(fx, "FakeLive", "Main", std::chrono::seconds(30)));
 
     // Confirm audio is on the bus before removal — pollUntil() pumps a block on
     // this thread before each check, so the snapshot can't race the drain.
@@ -725,29 +747,14 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
 
         std::this_thread::sleep_for(duration);
 
-        fx.clearReplies();
-        fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
-        OscReply reply;
-        REQUIRE(fx.waitForReply("/clockwork/clock/audio/inputs.reply", reply, 500));
-        const auto p = reply.parsed();
-        const int count = p.argInt(0);
+        const InputSnapshot in = snapshotInput(fx, "FakeLive", "Main");
+        REQUIRE(in.state >= 0);
         struct Stats {
             uint64_t queueDrops{0};
             uint64_t networkGaps{0};
             uint64_t totalCalls{0};
             uint64_t duplicates{0};
-        } st;
-        for (int i = 0; i < count; ++i) {
-            const int base = 1 + i * 12;
-            if (p.argString(base + 0) == "FakeLive" &&
-                p.argString(base + 1) == "Main") {
-                st.queueDrops  = static_cast<uint64_t>(p.argInt(base + 7));
-                st.networkGaps = static_cast<uint64_t>(p.argInt(base + 8));
-                st.totalCalls  = static_cast<uint64_t>(p.argInt(base + 9));
-                st.duplicates  = static_cast<uint64_t>(p.argInt(base + 10));
-                break;
-            }
-        }
+        } st{in.dropped, in.networkGaps, in.sourceCalls, in.duplicates};
 
         const double durationSec = static_cast<double>(duration.count());
         std::fprintf(stderr,
@@ -923,20 +930,179 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
     // the reply field reflects the new value and that no drops occurred.
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    fx.clearReplies();
-    fx.send(osc_test::message("/clockwork/clock/audio/inputs/get"));
-    OscReply inputsReply;
-    REQUIRE(fx.waitForReply("/clockwork/clock/audio/inputs.reply", inputsReply, 500));
-    const auto p = inputsReply.parsed();
-    REQUIRE(p.argInt(0) >= 1);
-    const int base = 1 + 0 * 12;  // first (only) entry
-    CHECK(p.argString(base + 0) == "FakeLive");
-    CHECK(p.argString(base + 1) == "Main");
-    CHECK(std::fabs(p.argFloat(base + 11) - 1.5f) < 0.001f);
+    const InputSnapshot in = snapshotInput(fx, "FakeLive", "Main");
+    REQUIRE(in.state >= 0);
+    CHECK(std::fabs(in.latencySeconds - 1.5f) < 0.001f);
     // No drops in the steady-state with a 1.5 s window — the ring is
     // sized for it. networkGaps stays zero (loopback peer).
-    CHECK(p.argInt(base + 7) == 0);   // droppedSourceBuffers
-    CHECK(p.argInt(base + 8) == 0);   // networkGapBuffers
+    CHECK(in.dropped == 0);
+    CHECK(in.networkGaps == 0);
+}
+
+namespace {
+
+constexpr double kTau = 6.283185307179586;
+
+// What a stream sounded like, from the samples that reached the engine's input.
+struct Heard {
+    size_t frames = 0;   // from the first sound on
+    size_t gaps   = 0;   // runs of exact silence inside the stream
+    size_t jumps  = 0;   // steps between samples no sine at this pitch and level can make
+    double hz     = 0.0;
+    float  peak   = 0.0f;
+    double pace   = 0.0;   // audio taken per second of wall clock: 1 is a device's pace
+};
+
+// Listen to one input channel for `seconds`, the engine driven as a device of
+// `deviceFrames` drives it: started afresh, then a callback's worth of blocks
+// at once and nothing until the next is due. What a device hears in its first
+// moments, while the stream finds its place, is not judged; after that every
+// sample is.
+Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t blockSize,
+             uint32_t deviceFrames, double seconds, double expectHz,
+             const std::function<void()>& settled) {
+    constexpr double kSettleSeconds = 0.25;
+    std::vector<float> stream, block;
+    const size_t settle = static_cast<size_t>(kSettleSeconds * sampleRate);
+    const size_t want   = settle + static_cast<size_t>(seconds * sampleRate);
+    fx.restartPump();
+    const auto began = std::chrono::steady_clock::now();
+    for (uint64_t callback = 0; stream.size() < want; ++callback) {
+        std::this_thread::sleep_until(began + std::chrono::nanoseconds(static_cast<int64_t>(
+            1e9 * double(callback * deviceFrames) / double(sampleRate))));
+        fx.pumpCallback(deviceFrames, [&] {
+            if (snapshotBus(channel, blockSize, block))
+                stream.insert(stream.end(), block.begin(), block.end());
+            if (stream.size() >= settle && stream.size() < settle + blockSize) settled();
+        });
+    }
+
+    Heard h;
+    h.pace = (double(stream.size()) / sampleRate)
+           / std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
+    size_t first = settle;
+    while (first < stream.size() && stream[first] == 0.0f) ++first;
+    for (size_t i = first; i < stream.size(); ++i) h.peak = std::max(h.peak, std::fabs(stream[i]));
+    const float maxStep = 2.0f * h.peak * static_cast<float>(kTau * expectHz / sampleRate);
+    size_t zeros = 0, rising = 0;
+    for (size_t i = first + 1; i < stream.size(); ++i) {
+        const float a = stream[i - 1], b = stream[i];
+        if (b == 0.0f) { if (++zeros == 8) ++h.gaps; } else zeros = 0;
+        if (std::fabs(b - a) > maxStep) ++h.jumps;
+        if (a < 0.0f && b >= 0.0f) ++rising;
+    }
+    h.frames = stream.size() - first;
+    if (h.frames > 0) h.hz = double(rising) * sampleRate / double(h.frames);
+    return h;
+}
+
+// A Sonic Pi peer publishing its 64-frame blocks at 48 kHz, the left channel
+// a 440 Hz sine, heard for two seconds by an engine at `engineRate` through a
+// device of `deviceFrames`. What was heard; what the engine said of the input
+// as the judging began and as it ended, read straight from it, since asking
+// over OSC would pump a block out of time; and its report over OSC after.
+struct Hearing {
+    Heard                   heard;
+    link_audio::InputStatus atStart, atEnd;
+    InputSnapshot           report;
+};
+
+link_audio::InputStatus inputStatus(EngineFixture& fx, const char* peer, const char* channel) {
+    for (const auto& in : fx.engine().linkAudio().listInputs())
+        if (in.peerName == peer && in.channelName == channel) return in;
+    return {};
+}
+
+Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames) {
+    FakeLinkPeerProcess::Options peerOpts;
+    peerOpts.name       = "FakeSonicPi";
+    peerOpts.blockSize  = 64;
+    peerOpts.sampleRate = 48000;
+    peerOpts.channels   = {{"Main", 2, "sine440-880"}};
+    FakeLinkPeerProcess peer{peerOpts};
+    REQUIRE(peer.ready());
+
+    auto cfg = linkInputConfig();
+    cfg.sampleRate      = engineRate;
+    cfg.blockSize       = 64;
+    cfg.manualAudioPump = true;
+    EngineFixture fx(cfg);
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));   // this machine only
+    REQUIRE(waitForChannelVisible(fx, "FakeSonicPi", "Main", std::chrono::seconds(30)));
+    const int32_t pair = subscribe(fx, "FakeSonicPi", "Main");
+    REQUIRE(pair >= 0);
+    // Arriving, not yet healthy: until the listening starts nothing takes the
+    // engine's blocks at a device's pace, and the report says so.
+    REQUIRE(waitForArriving(fx, "FakeSonicPi", "Main", std::chrono::seconds(30)));
+    Hearing out;
+    out.heard  = listen(fx, static_cast<uint32_t>(pair), engineRate, 64, deviceFrames, 2.0, 440.0,
+                        [&] { out.atStart = inputStatus(fx, "FakeSonicPi", "Main"); });
+    out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
+    out.report = snapshotInput(fx, "FakeSonicPi", "Main");
+    return out;
+}
+
+constexpr std::pair<int, uint32_t> kListeners[] = { {48000, 64u}, {44100, 512u} };
+
+}  // namespace
+
+// The report has to agree with what was heard. It said Connected, with no
+// drops, over a stream nobody could listen to: the gaps were the audio thread
+// reading silence, which nothing reported, and the jumps the timeline being
+// lost and found again, or bent, which nothing counted. Judged over the time
+// that was heard, and on the wire as well.
+TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
+          "[Link][LinkAudio][integration]") {
+    for (const auto& [rate, frames] : kListeners) {
+        const Hearing hearing = hearSonicPiPeer(rate, frames);
+        const Heard& h = hearing.heard;
+        const auto& a = hearing.atStart;
+        const auto& b = hearing.atEnd;
+        const uint64_t underruns = b.underruns - a.underruns;
+        const uint64_t resyncs   = b.resyncs - a.resyncs;
+        const uint64_t warps     = b.warps - a.warps;
+        INFO("engine " << rate << " Hz, device buffer " << frames << ": heard " << h.gaps
+             << " gaps and " << h.jumps << " jumps; meanwhile the engine counted " << underruns
+             << " underruns, " << resyncs << " resyncs and " << warps << " warps, and ended in state "
+             << int(b.state) << " with drift " << b.driftPpm << " ppm");
+        const bool damaged = h.gaps > 0 || h.jumps > 0;
+        if (h.gaps > 0)  CHECK(underruns > 0);
+        if (h.jumps > 0) CHECK(resyncs + warps > 0);
+        CHECK(int(b.state) == (damaged ? kStateDropout : kStateConnected));
+        if (!damaged) {
+            CHECK(underruns == 0);
+            CHECK(resyncs == 0);
+            CHECK(warps == 0);
+            // Against the rates' ratio, not 1.0, which read +88,000 ppm for a
+            // 48 kHz peer at 44.1 kHz. The block clock steers at up to 1000 ppm
+            // while it settles after a device starts; past twice that is not
+            // steering.
+            CHECK(std::abs(b.driftPpm) < 2000);
+        }
+        // What the OSC reply carries is what the engine counted: never less.
+        CHECK(hearing.report.underruns >= b.underruns);
+        CHECK(hearing.report.resyncs >= b.resyncs);
+        CHECK(hearing.report.warps >= b.warps);
+    }
+}
+
+// What arrives has to be the peer's audio, not just audio. The engine hears
+// it at its own rate, through whatever device it has: at a device's pace, but
+// a whole buffer at a time. The sine has to come out whole, at pitch, with
+// nothing missing.
+TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and device buffer",
+          "[Link][LinkAudio][integration]") {
+    for (const auto& [rate, frames] : kListeners) {
+        const Heard h = hearSonicPiPeer(rate, frames).heard;
+        INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
+             << " frames heard, peak " << h.peak << ", " << h.gaps << " gaps, "
+             << h.jumps << " jumps, " << h.hz << " Hz, at " << h.pace << " of a device's pace");
+        CHECK(h.frames > static_cast<size_t>(rate));
+        CHECK(h.peak > 0.5f);
+        CHECK(h.gaps == 0);
+        CHECK(h.jumps == 0);
+        CHECK(std::fabs(h.hz - 440.0) < 4.4);
+    }
 }
 
 #endif  // CLOCKWORK_LINK

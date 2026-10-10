@@ -2175,6 +2175,17 @@ export class SuperSonic {
   } | null;
 
   /**
+   * How many times a scope slot has gone live. A reader polls, and a slot can
+   * be claimed and released between two polls (a loop started and stopped in
+   * a moment); a reader that noted this and sees another number knows the
+   * slot went live in between. Wraps: compare for change only.
+   * SAB mode only; returns null when uninitialised or out of range.
+   *
+   * @param scopeNum - Scope slot index, from 0
+   */
+  getScopeActivations(scopeNum: number): number | null;
+
+  /**
    * List the scope slots in use. SAB mode only; empty otherwise.
    */
   getScopes(): Array<{ index: number; channels: number }>;
