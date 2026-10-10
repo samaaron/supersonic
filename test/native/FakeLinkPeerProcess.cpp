@@ -3,8 +3,11 @@
 #ifdef CLOCKWORK_LINK
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -22,7 +25,8 @@ namespace {
 
 // Build the option list as plain strings; each backend converts to its
 // platform-native argv / command-line form.
-std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts) {
+std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts,
+                                      const std::string& stallFlag) {
     std::vector<std::string> args;
     args.emplace_back(CLOCKWORK_TEST_LINK_PEER_BINARY);
     args.emplace_back("--name");        args.push_back(opts.name);
@@ -30,6 +34,10 @@ std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts) 
     args.emplace_back("--bpm");         args.push_back(std::to_string(opts.bpm));
     args.emplace_back("--block-size");  args.push_back(std::to_string(opts.blockSize));
     args.emplace_back("--sample-rate"); args.push_back(std::to_string(opts.sampleRate));
+    if (opts.stallFor.count() > 0) {
+        args.emplace_back("--stall");
+        args.push_back(std::to_string(opts.stallFor.count()) + ":" + stallFlag);
+    }
     for (const auto& c : opts.channels) {
         args.emplace_back("--channel");
         args.push_back(c.name + ":" + std::to_string(c.numChannels) + ":" + c.generator);
@@ -37,7 +45,22 @@ std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts) 
     return args;
 }
 
+// A path of this process's own for one peer's stall flag, nowhere yet.
+std::string freshStallFlag() {
+    static std::atomic<unsigned> serial{0};
+    std::error_code ec;
+    auto dir = std::filesystem::temp_directory_path(ec);
+    if (ec) dir = ".";
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return (dir / ("supersonic_peer_stall_" + std::to_string(now) + "_"
+                   + std::to_string(serial.fetch_add(1)))).string();
+}
+
 }  // namespace
+
+void FakeLinkPeerProcess::stall() {
+    std::ofstream(mStallFlag).put('\n');
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // POSIX implementation
@@ -74,7 +97,8 @@ bool waitForReadyLine(int fd, std::chrono::steady_clock::time_point deadline) {
 
 }  // namespace
 
-FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
+FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
+    : mOptions(opts), mStallFlag(freshStallFlag()) {
     int pipefd[2] = {-1, -1};
     if (::pipe(pipefd) != 0) {
         std::fprintf(stderr, "FakeLinkPeerProcess: pipe() failed: %s\n",
@@ -96,7 +120,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
         ::dup2(pipefd[1], STDOUT_FILENO);
         ::close(pipefd[1]);
 
-        const auto args = buildArgList(mOptions);
+        const auto args = buildArgList(mOptions, mStallFlag);
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);
         for (const auto& s : args) argv.push_back(const_cast<char*>(s.c_str()));
@@ -122,6 +146,8 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
 }
 
 FakeLinkPeerProcess::~FakeLinkPeerProcess() {
+    std::error_code ec;
+    std::filesystem::remove(mStallFlag, ec);
     if (mProcess <= 0) return;
     const pid_t pid = static_cast<pid_t>(mProcess);
     ::kill(pid, SIGTERM);
@@ -205,7 +231,8 @@ bool waitForReadyHandle(HANDLE readEnd,
 
 }  // namespace
 
-FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
+FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
+    : mOptions(opts), mStallFlag(freshStallFlag()) {
     SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
     HANDLE readEnd = nullptr, writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) {
@@ -217,7 +244,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
     // Parent's read end isn't inherited by the child.
     SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
 
-    const auto args = buildArgList(mOptions);
+    const auto args = buildArgList(mOptions, mStallFlag);
     const std::string cmdline = buildCommandLine(args);
     std::vector<char> cmdBuf(cmdline.begin(), cmdline.end());
     cmdBuf.push_back('\0');
@@ -262,6 +289,8 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts) : mOptions(opts) {
 }
 
 FakeLinkPeerProcess::~FakeLinkPeerProcess() {
+    std::error_code ec;
+    std::filesystem::remove(mStallFlag, ec);
     if (mProcess == 0 || mProcess == -1) return;
     HANDLE process = reinterpret_cast<HANDLE>(mProcess);
     // TerminateProcess is equivalent to SIGKILL — bypasses the peer's

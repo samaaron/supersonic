@@ -26,6 +26,7 @@
 
 #include "EngineFixture.h"
 #include "FakeLinkPeerProcess.h"
+#include "RealtimeThread.h"
 #include "ClockworkProcessor.h"
 #include "OscTestUtils.h"
 #include "lanes/lanes.h"
@@ -971,22 +972,28 @@ constexpr double kTau = 6.283185307179586;
 // What a stream sounded like, from the samples that reached the engine's input.
 struct Heard {
     size_t frames = 0;   // from the first sound on
+    size_t silent = 0;   // of them, exact silence
     size_t gaps   = 0;   // runs of exact silence inside the stream
     size_t jumps  = 0;   // steps between samples no sine at this pitch and level can make
+    size_t sinceDamage = 0;   // frames from the last gap or jump to the end
     double hz     = 0.0;
     float  peak   = 0.0f;
     double pace   = 0.0;   // audio taken per second of wall clock: 1 is a device's pace
 };
 
+// What a device hears in its first moments, while the stream finds its
+// place, is not judged.
+constexpr double kSettleSeconds = 0.25;
+
 // Listen to one input channel for `seconds`, the engine driven as a device of
 // `deviceFrames` drives it: started afresh, then a callback's worth of blocks
-// at once and nothing until the next is due. What a device hears in its first
-// moments, while the stream finds its place, is not judged; after that every
-// sample is.
+// at once and nothing until the next is due. After the settling every sample
+// is judged. `progress` is told after each block how many frames have been
+// heard so far, settling included, for whatever the listener wants to do at a
+// moment of its choosing.
 Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t blockSize,
              uint32_t deviceFrames, double seconds, double expectHz,
-             const std::function<void()>& settled) {
-    constexpr double kSettleSeconds = 0.25;
+             const std::function<void(size_t heard)>& progress) {
     std::vector<float> stream, block;
     const size_t settle = static_cast<size_t>(kSettleSeconds * sampleRate);
     const size_t want   = settle + static_cast<size_t>(seconds * sampleRate);
@@ -998,7 +1005,7 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
         fx.pumpCallback(deviceFrames, [&] {
             if (snapshotBus(channel, blockSize, block))
                 stream.insert(stream.end(), block.begin(), block.end());
-            if (stream.size() >= settle && stream.size() < settle + blockSize) settled();
+            progress(stream.size());
         });
     }
 
@@ -1009,14 +1016,15 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
     while (first < stream.size() && stream[first] == 0.0f) ++first;
     for (size_t i = first; i < stream.size(); ++i) h.peak = std::max(h.peak, std::fabs(stream[i]));
     const float maxStep = 2.0f * h.peak * static_cast<float>(kTau * expectHz / sampleRate);
-    size_t zeros = 0, rising = 0;
+    size_t zeros = 0, rising = 0, lastDamage = first;
     for (size_t i = first + 1; i < stream.size(); ++i) {
         const float a = stream[i - 1], b = stream[i];
-        if (b == 0.0f) { if (++zeros == 8) ++h.gaps; } else zeros = 0;
-        if (std::fabs(b - a) > maxStep) ++h.jumps;
+        if (b == 0.0f) { ++h.silent; if (++zeros == 8) { ++h.gaps; lastDamage = i; } } else zeros = 0;
+        if (std::fabs(b - a) > maxStep) { ++h.jumps; lastDamage = i; }
         if (a < 0.0f && b >= 0.0f) ++rising;
     }
     h.frames = stream.size() - first;
+    h.sinceDamage = stream.size() - lastDamage;
     if (h.frames > 0) h.hz = double(rising) * sampleRate / double(h.frames);
     return h;
 }
@@ -1038,12 +1046,16 @@ link_audio::InputStatus inputStatus(EngineFixture& fx, const char* peer, const c
     return {};
 }
 
-Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames) {
+// With a `peerStall`, the peer's callback stalls for that long half a second
+// into the judged time.
+Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
+                        std::chrono::milliseconds peerStall = std::chrono::milliseconds{0}) {
     FakeLinkPeerProcess::Options peerOpts;
     peerOpts.name       = "FakeSonicPi";
     peerOpts.blockSize  = 64;
     peerOpts.sampleRate = 48000;
     peerOpts.channels   = {{"Main", 2, "sine440-880"}};
+    peerOpts.stallFor   = peerStall;
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
@@ -1059,8 +1071,20 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames) {
     // engine's blocks at a device's pace, and the report says so.
     REQUIRE(waitForArriving(fx, "FakeSonicPi", "Main", std::chrono::seconds(30)));
     Hearing out;
+    const size_t settled = static_cast<size_t>(kSettleSeconds * engineRate);
+    const size_t stallAt = settled + static_cast<size_t>(engineRate) / 2;
+    bool started = false, stalled = false;
     out.heard  = listen(fx, static_cast<uint32_t>(pair), engineRate, 64, deviceFrames, 2.0, 440.0,
-                        [&] { out.atStart = inputStatus(fx, "FakeSonicPi", "Main"); });
+                        [&](size_t heard) {
+                            if (heard >= settled && !started) {
+                                started = true;
+                                out.atStart = inputStatus(fx, "FakeSonicPi", "Main");
+                            }
+                            if (heard >= stallAt && !stalled && peerStall.count() > 0) {
+                                stalled = true;
+                                peer.stall();
+                            }
+                        });
     out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
     out.report = snapshotInput(fx, "FakeSonicPi", "Main");
     return out;
@@ -1092,11 +1116,18 @@ TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
         const bool damaged = h.gaps > 0 || h.jumps > 0;
         if (h.gaps > 0)  CHECK(underruns > 0);
         if (h.jumps > 0) CHECK(resyncs + warps > 0);
-        CHECK(int(b.state) == (damaged ? kStateDropout : kStateConnected));
+        // Dropout for a second after the last trouble, Connected again after
+        // that. Damage heard around a second before the end could be either.
+        const double sinceDamageSeconds = double(h.sinceDamage) / rate;
+        if (!damaged || sinceDamageSeconds > 1.2)     CHECK(int(b.state) == kStateConnected);
+        else if (sinceDamageSeconds < 0.8)            CHECK(int(b.state) == kStateDropout);
         if (!damaged) {
             CHECK(underruns == 0);
-            CHECK(resyncs == 0);
-            CHECK(warps == 0);
+            // Since the subscription, not since the judging began: finding
+            // the stream's place is not losing it, and a stream that has just
+            // started is as whole as one that has run for a while.
+            CHECK(b.resyncs == 0);
+            CHECK(b.warps == 0);
             // Against the rates' ratio, not 1.0, which read +88,000 ppm for a
             // 48 kHz peer at 44.1 kHz. The block clock steers at up to 1000 ppm
             // while it settles after a device starts; past twice that is not
@@ -1126,6 +1157,72 @@ TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and d
         CHECK(h.gaps == 0);
         CHECK(h.jumps == 0);
         CHECK(std::fabs(h.hz - 440.0) < 4.4);
+    }
+}
+
+// The endpoint worker takes peers' audio off the network and resamples it
+// into the ring the audio thread reads: it feeds the audio thread, from an
+// ordinary thread's place in the queue, and on a busy machine it was starved
+// for tens of milliseconds at a time while the ring ran dry. It is scheduled
+// as the audio thread is. The engine can only ask: a Linux without rtprio for
+// this user says no, which is reported, not hidden.
+TEST_CASE("LinkAudio: the endpoint worker runs as a real-time thread",
+          "[Link][LinkAudio][integration]") {
+    FakeLinkPeerProcess::Options peerOpts;
+    peerOpts.name       = "FakeLive";
+    peerOpts.channels   = {{"Main", 2, "sine440-880"}};
+    FakeLinkPeerProcess peer{peerOpts};
+    REQUIRE(peer.ready());
+
+    EngineFixture fx{handPumpedConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));
+    REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main", std::chrono::seconds(30)));
+    REQUIRE(subscribe(fx, "FakeLive", "Main") >= 0);
+
+    std::optional<clockwork::RealtimeStatus> status;
+    REQUIRE(fx.pollUntil([&] {
+        status = fx.engine().linkAudio().endpointRealtime();
+        return status.has_value();
+    }, 5000));
+    INFO("the OS answered " << int(*status));
+#if defined(__linux__)
+    CHECK((*status == clockwork::RealtimeStatus::Applied
+           || *status == clockwork::RealtimeStatus::NotPermitted));
+#else
+    CHECK(*status == clockwork::RealtimeStatus::Applied);
+#endif
+}
+
+// A peer whose callback stalls makes no audio for that long, and the engine
+// hears that long of silence: one gap, with a step into it and one out. What
+// it must not hear is the stream catching up afterwards — the missed audio
+// played many times too fast, a chirp and a burst of clicks — nor the stream
+// running late from then on. The place is lost and found again, and the engine
+// says so: a resync, no warp, and a report that said Dropout while it was one
+// and Connected once it was over.
+TEST_CASE("LinkAudio: a peer that stalls is heard to drop out once and then carry on in time",
+          "[Link][LinkAudio][integration]") {
+    for (const auto& [rate, frames] : kListeners) {
+        const Hearing hearing = hearSonicPiPeer(rate, frames, std::chrono::milliseconds{100});
+        const Heard& h = hearing.heard;
+        const auto& a = hearing.atStart;
+        const auto& b = hearing.atEnd;
+        INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
+             << " frames heard, " << h.gaps << " gaps, " << h.jumps << " jumps, " << h.hz
+             << " Hz; the engine counted " << (b.underruns - a.underruns) << " underruns, "
+             << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps");
+        CHECK(h.gaps == 1);
+        CHECK(h.jumps <= 2);
+        // The silence is inside the frames the pitch is measured over.
+        const double hzLessSilence = 440.0 * double(h.frames - h.silent) / double(h.frames);
+        CHECK(std::fabs(h.hz - hzLessSilence) < 4.4);
+        CHECK(h.silent > size_t(rate) / 20);   // the stall, 100 ms, give or take the chunks around it
+        CHECK(h.silent < size_t(rate) / 7);
+        CHECK(b.underruns > a.underruns);
+        CHECK(b.resyncs - a.resyncs == 1);
+        CHECK(b.warps == a.warps);
+        // Over a second on from the stall, the report is Connected again.
+        CHECK(int(b.state) == kStateConnected);
     }
 }
 

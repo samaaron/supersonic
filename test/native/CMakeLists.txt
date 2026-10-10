@@ -169,8 +169,14 @@ endif()
 # CLOCKWORK_TEST_LINK_PEER_BINARY was never defined, which FakeLinkPeerProcess.cpp
 # needs to compile at all. The option is CLOCKWORK_LINK.
 if(CLOCKWORK_LINK)
+    # Publishes from a real-time thread, as the apps it stands in for do from
+    # their audio callbacks: clockwork's own helper, compiled in.
     add_executable(supersonic_test_link_peer
         peer/main.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../clockwork/src/native/RealtimeThread.cpp
+    )
+    target_include_directories(supersonic_test_link_peer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../clockwork/src/native
     )
     target_link_libraries(supersonic_test_link_peer PRIVATE
         Ableton::Link

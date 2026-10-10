@@ -22,6 +22,8 @@
 #endif
 #include <ableton/util/FloatIntConversion.hpp>
 
+#include "RealtimeThread.h"
+
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -29,6 +31,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -108,6 +111,10 @@ void printUsage() {
         "  --bpm <double>             Initial BPM (default: 120)\n"
         "  --block-size <int>         Frames per audio buffer (default: 1024)\n"
         "  --sample-rate <int>        Sample rate Hz (default: 48000)\n"
+        "  --stall <forMs>:<flagPath> When the file at <flagPath> appears, stop for <forMs>\n"
+        "                             as a stalled audio callback does: the frames that\n"
+        "                             fell in the stall are never made, and the stream\n"
+        "                             resumes stamped at the present. The file is removed.\n"
         "  --channel <name>:<numCh>:<gen>\n"
         "                             Add a channel (repeatable). Generators:\n"
         "                               silence, sine440, sine440-880, dc:<value>\n"
@@ -123,6 +130,8 @@ int main(int argc, char** argv) {
     double      bpm         = 120.0;
     int         blockSize   = 1024;
     int         sampleRate  = 48000;
+    int         stallForMs   = 0;   // --stall: the callback stops for this long...
+    std::string stallFlag;          // ...when this file appears
     std::vector<ChannelSpec> channels;
 
     for (int i = 1; i < argc; ++i) {
@@ -137,6 +146,13 @@ int main(int argc, char** argv) {
         }
         else if (a == "--sample-rate" && i + 1 < argc) {
             if (!parseInt(argv[++i], sampleRate)) { printUsage(); return 1; }
+        }
+        else if (a == "--stall"       && i + 1 < argc) {
+            const std::string v = argv[++i];
+            const auto colon = v.find(':');
+            if (colon == std::string::npos
+                || !parseInt(v.substr(0, colon).c_str(), stallForMs)) { printUsage(); return 1; }
+            stallFlag = v.substr(colon + 1);
         }
         else if (a == "--channel"     && i + 1 < argc) {
             ChannelSpec c;
@@ -217,7 +233,29 @@ int main(int argc, char** argv) {
     // audio to follow it.
     const auto clockAtFrameZero = link.clock().micros();
 
+    // Published from a real-time thread, as Live and Sonic Pi publish from
+    // their audio callbacks. An ordinary thread's late wakes on a loaded
+    // machine would be this peer dropping out, and nothing of the engine's.
+    {
+        const auto rt = clockwork::elevateCurrentThreadToRealtime(double(blockSize) / sampleRate);
+        if (rt.status == clockwork::RealtimeStatus::Failed)
+            std::fprintf(stderr, "supersonic_test_link_peer: the publish thread could not be made "
+                                 "realtime (error %d)\n", rt.error);
+    }
+
     while (!gShouldQuit.load(std::memory_order_relaxed)) {
+        // The stall, when the test says: a file is the one signal every
+        // platform can send a child, and a stat a block costs nothing.
+        std::error_code ec;
+        if (stallForMs > 0 && !stallFlag.empty() && std::filesystem::exists(stallFlag, ec)) {
+            std::filesystem::remove(stallFlag, ec);
+            std::this_thread::sleep_for(std::chrono::milliseconds(stallForMs));
+            // A stalled callback is not called for the frames it missed: they
+            // are gone, and the next buffer is stamped where the clock is now.
+            const auto missed = static_cast<uint64_t>(double(stallForMs) / 1000.0 * sampleRate);
+            frameOffset  += missed - missed % uint64_t(blockSize);
+            nextDeadline += blockDuration * int64_t(missed / uint64_t(blockSize));
+        }
 #if !defined(_WIN32)
         // Portable backstop (covers macOS, where PR_SET_PDEATHSIG doesn't
         // exist): if the parent died we get reparented to init/launchd, so

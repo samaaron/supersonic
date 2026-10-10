@@ -7,6 +7,7 @@
  * in the WASM build.  Tests simply send OSC and waitForReply().
  */
 #include "EngineFixture.h"
+#include "RealtimeThread.h"
 #include "DebugTail.h"
 #include "ClockworkProcessor.h"
 #include "HeadlessDriver.h"
@@ -315,6 +316,10 @@ EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames
     mFx.mEngine.restartManualPump();
     mFx.mDeviceRendering.store(true, std::memory_order_relaxed);
     mThread = std::thread([this, sampleRate, frames] {
+        // A device's callback thread is real-time, and so is this one: an
+        // ordinary thread stalled by a build on the same machine would be a
+        // device that stopped calling, a dropout of the test's own making.
+        clockwork::elevateCurrentThreadToRealtime(double(frames) / double(sampleRate));
         const auto began = std::chrono::steady_clock::now();
         for (uint64_t callback = 0; !mStop.load(std::memory_order_relaxed); ++callback) {
             std::this_thread::sleep_until(began + std::chrono::nanoseconds(static_cast<int64_t>(

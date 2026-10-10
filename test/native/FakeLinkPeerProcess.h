@@ -33,6 +33,10 @@ public:
         double      bpm          = 120.0;
         int         blockSize    = 1024;
         int         sampleRate   = 48000;
+        // How long the peer's callback stops for when stall() is called
+        // (0: it can't): the frames are never made, and the stream resumes
+        // stamped at the present.
+        std::chrono::milliseconds stallFor{0};
         std::vector<Channel> channels;
         std::chrono::milliseconds readyTimeout{5000};
     };
@@ -50,8 +54,14 @@ public:
 
     const Options& options() const { return mOptions; }
 
+    // Stall the peer's callback now, for Options::stallFor. The signal is a
+    // file the peer looks for once a block, the one signal every platform
+    // can send a child; it takes effect within a block.
+    void stall();
+
 private:
-    Options mOptions;
+    Options     mOptions;
+    std::string mStallFlag;   // the file that says stall
     // Opaque process handle. On POSIX this is a pid_t; on Windows a
     // HANDLE cast to intptr_t (-1 / 0 = invalid). The .cpp casts back
     // as needed under platform #ifdefs.
