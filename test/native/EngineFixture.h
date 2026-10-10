@@ -173,7 +173,10 @@ public:
     // afresh with it. Declared after its fixture, so that it stops first.
     class Device {
     public:
-        Device(EngineFixture& fx, int sampleRate, uint32_t frames);
+        // `afterEachBlock` runs on the device thread after each block it
+        // renders, as a device's callback would run a host's code.
+        Device(EngineFixture& fx, int sampleRate, uint32_t frames,
+               std::function<void()> afterEachBlock = {});
         ~Device();
         Device(const Device&) = delete;
         Device& operator=(const Device&) = delete;

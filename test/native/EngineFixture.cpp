@@ -310,12 +310,13 @@ void EngineFixture::restartPump() {
 }
 
 // Assertions stay on the test thread: Catch2's aren't safe from another.
-EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames) : mFx(fx) {
+EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames,
+                              std::function<void()> afterEachBlock) : mFx(fx) {
     REQUIRE(mFx.mManualPump);
     REQUIRE_FALSE(mFx.mDeviceRendering.load(std::memory_order_relaxed));
     mFx.mEngine.restartManualPump();
     mFx.mDeviceRendering.store(true, std::memory_order_relaxed);
-    mThread = std::thread([this, sampleRate, frames] {
+    mThread = std::thread([this, sampleRate, frames, afterEachBlock = std::move(afterEachBlock)] {
         // A device's callback thread is real-time, and so is this one: an
         // ordinary thread stalled by a build on the same machine would be a
         // device that stopped calling, a dropout of the test's own making.
@@ -324,7 +325,7 @@ EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames
         for (uint64_t callback = 0; !mStop.load(std::memory_order_relaxed); ++callback) {
             std::this_thread::sleep_until(began + std::chrono::nanoseconds(static_cast<int64_t>(
                 1e9 * double(callback * frames) / double(sampleRate))));
-            mFx.mEngine.pumpAudioCallback(frames);
+            mFx.mEngine.pumpAudioCallback(frames, afterEachBlock);
         }
     });
 }
