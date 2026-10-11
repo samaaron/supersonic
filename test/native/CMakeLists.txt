@@ -216,11 +216,16 @@ set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/CatchAddTestsUtf8.
 # swallows every `;` up to the next `]` — so "phase in [0, quantum)" fused
 # itself and the six cases after it into one entry that matched nothing and
 # failed. Tags are fine; prose in the name is not.
-catch_discover_tests(SuperSonicNativeTests TEST_SPEC "~[benchmark]~[Link]")
+#
+# A case whose every section SKIPs makes Catch2 exit with 4 ("all skipped"),
+# which ctest takes for a failure unless told: SKIP_RETURN_CODE reports it as
+# skipped, with the reason the case gave, so a skip is seen and not mistaken.
+catch_discover_tests(SuperSonicNativeTests TEST_SPEC "~[benchmark]~[Link]"
+                     PROPERTIES SKIP_RETURN_CODE 4)
 # The Link cases one at a time: Link peers on one machine share a session, so
 # two at once see each other's peers and set each other's tempo.
 catch_discover_tests(SuperSonicNativeTests TEST_SPEC "[Link]~[benchmark]"
-                     PROPERTIES RESOURCE_LOCK link_session)
+                     PROPERTIES RESOURCE_LOCK link_session SKIP_RETURN_CODE 4)
 
 # test_supersonic_binary.cpp spawns the SuperSonic process: build it first.
 add_dependencies(SuperSonicNativeTests SuperSonic)

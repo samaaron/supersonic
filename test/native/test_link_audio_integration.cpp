@@ -1002,13 +1002,18 @@ struct Heard {
     double worstLateSeconds = 0.0;   // the device's latest wake after its due time
 };
 
-// A device later than this has made a dropout of its own: the engine steps
-// over a hole of 10 ms in the stream it reads, and half that from the reader's
-// side is the same hole. What a test hears through such a device says nothing
-// about the engine, so the test says it had no device and skips, rather than
-// pass or fail on a run that never tested its claim. A runner sharing a host
-// did this at 64 frames; a developer's machine does not.
-constexpr double kDeviceKeptTimeSeconds = 0.005;
+// The engine holds a peer's audio the input latency ahead of where it reads
+// (0.05 s, the renderer's default, which these cases run at). A device that
+// wakes late reads the blocks it missed in a burst, which drains that margin
+// by however late it was: under the latency, nothing runs dry and what is
+// heard is the engine's doing; much over it, the device has made a dropout of
+// its own, and what is heard says nothing about the engine. Then the case says
+// it had no device and skips, rather than pass or fail on a run that never
+// tested its claim. Half the latency, for margin. Shared runners wake 5-15 ms
+// late at times, which is covered; a runner starved for tens of milliseconds
+// is not. (A threshold of 5 ms once skipped every case on every macOS runner.)
+constexpr double kInputLatencySeconds = 0.05;
+constexpr double kDeviceKeptTimeSeconds = kInputLatencySeconds / 2.0;
 
 void requireDeviceKeptTime(const Heard& h, int rate, uint32_t frames) {
     if (h.worstLateSeconds > kDeviceKeptTimeSeconds) {
