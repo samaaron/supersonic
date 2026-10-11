@@ -598,6 +598,51 @@ export class SuperSonic extends Clockwork {
   }
 
   /** What is loaded, for a client that wants to show it. */
+  // ── Scopes ────────────────────────────────────────────────────────────────
+  //
+  // SuperSonic's scopes are scsynth's: a ScopeOut2 in the graph publishes a
+  // stream, and a client draws it. Underneath they are clockwork's taps — the
+  // slots in the guest's half of the arena the ugen claims through the host
+  // (clockwork's getTap and friends). The names here stay SuperSonic's, as
+  // documented and as the ugen is called; each is the clockwork call by its
+  // tap name.
+
+  /**
+   * The newest `frames` frames of a ScopeOut2 scope stream.
+   * @param {number} scopeNum - Scope slot index, from 0
+   * @param {number} [frames] - Window length; defaults to 1024
+   * @returns {{ frames: number, channels: number, writePosition: bigint, interleaved: Float32Array }|null}
+   */
+  getScope(scopeNum, frames = 1024) {
+    return this.getTap(scopeNum, frames);
+  }
+
+  /**
+   * How many times a scope slot has gone live. Wraps: compare for change only.
+   * @param {number} scopeNum - Scope slot index, from 0
+   * @returns {number|null}
+   */
+  getScopeActivations(scopeNum) {
+    return this.getTapActivations(scopeNum);
+  }
+
+  /**
+   * The scope slots in use.
+   * @returns {Array<{ index: number, channels: number }>}
+   */
+  getScopes() {
+    return this.getTaps();
+  }
+
+  /**
+   * Scope geometry: slot count, per-slot ring frames, channels.
+   * @returns {{ maxScopes: number, ringFrames: number, channels: number }|null}
+   */
+  static getScopeSchema() {
+    const s = Clockwork.getTapSchema();
+    return s && { maxScopes: s.maxTaps, ringFrames: s.ringFrames, channels: s.channels };
+  }
+
   // ── The node tree ─────────────────────────────────────────────────────────
   //
   // scsynth publishes its tree into the window clockwork reserves. The host

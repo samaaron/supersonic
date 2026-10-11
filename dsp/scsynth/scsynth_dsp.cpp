@@ -322,12 +322,12 @@ extern "C" void supersonic_guest_log(const char* text, uint32_t len) {
     if (g_host.log) g_host.log(g_host.ctx, 6, line);
 }
 
-// The scope doors: ScopeBufferHnd is the ugens' shape of DspScopeHandle.
-static_assert(sizeof(ScopeBufferHnd) == sizeof(DspScopeHandle),
-              "ScopeBufferHnd and DspScopeHandle must be the same four words");
-static_assert(offsetof(ScopeBufferHnd, internalData) == offsetof(DspScopeHandle, slot)
-              && offsetof(ScopeBufferHnd, channels) == offsetof(DspScopeHandle, channels),
-              "ScopeBufferHnd and DspScopeHandle must agree on slot and channels");
+// The scope doors: ScopeBufferHnd is the ugens' shape of DspTapHandle.
+static_assert(sizeof(ScopeBufferHnd) == sizeof(DspTapHandle),
+              "ScopeBufferHnd and DspTapHandle must be the same four words");
+static_assert(offsetof(ScopeBufferHnd, internalData) == offsetof(DspTapHandle, slot)
+              && offsetof(ScopeBufferHnd, channels) == offsetof(DspTapHandle, channels),
+              "ScopeBufferHnd and DspTapHandle must agree on slot and channels");
 
 extern "C" bool supersonic_scope_get(World*, int index, int channels, int /*maxFrames*/,
                                      ScopeBufferHnd* hnd) {
@@ -336,21 +336,21 @@ extern "C" bool supersonic_scope_get(World*, int index, int channels, int /*maxF
     hnd->data = nullptr;
     hnd->channels = 0;
     hnd->maxFrames = 0;
-    if (!g_host.scope_open || index < 0 || channels < 0) return false;
-    return g_host.scope_open(g_host.ctx, (uint32_t)index, (uint32_t)channels,
-                             reinterpret_cast<DspScopeHandle*>(hnd)) != 0;
+    if (!g_host.tap_open || index < 0 || channels < 0) return false;
+    return g_host.tap_open(g_host.ctx, (uint32_t)index, (uint32_t)channels,
+                             reinterpret_cast<DspTapHandle*>(hnd)) != 0;
 }
 
 extern "C" void supersonic_scope_push(World*, ScopeBufferHnd*, int) {}   // a stream publishes on write
 
 extern "C" void supersonic_scope_release(World*, ScopeBufferHnd* hnd) {
-    if (hnd && g_host.scope_close) g_host.scope_close(g_host.ctx, reinterpret_cast<DspScopeHandle*>(hnd));
+    if (hnd && g_host.tap_close) g_host.tap_close(g_host.ctx, reinterpret_cast<DspTapHandle*>(hnd));
 }
 
 extern "C" void supersonic_scope_write(ScopeBufferHnd* hnd, const float* const* channels,
                                        uint32_t n_channels, uint32_t frames) {
-    if (hnd && hnd->internalData && g_host.scope_write)
-        g_host.scope_write(g_host.ctx, reinterpret_cast<DspScopeHandle*>(hnd), channels, n_channels, frames);
+    if (hnd && hnd->internalData && g_host.tap_write)
+        g_host.tap_write(g_host.ctx, reinterpret_cast<DspTapHandle*>(hnd), channels, n_channels, frames);
 }
 
 /*

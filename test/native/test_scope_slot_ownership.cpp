@@ -88,7 +88,7 @@ TEST_CASE("scope-ownership: late dtor of a superseded unit leaves the slot activ
     // The surviving writer's slot must still be live for readers: state == 1
     // and the stream cursor still advancing as blocks render.
     shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmNativeHandle()));
-    auto reader = client.get_scope_stream_reader((unsigned)kSlot);
+    auto reader = client.get_tap_stream_reader((unsigned)kSlot);
     REQUIRE(fix.waitForBlocks(40, 3000));
     CHECK(reader.valid());
     const uint64_t before = reader.write_position();

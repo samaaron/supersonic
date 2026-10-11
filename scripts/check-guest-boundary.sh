@@ -18,9 +18,9 @@ GUEST="$ROOT/dsp/scsynth"
 # Headers the guest may take from clockwork.
 ALLOWED='dsp_api\.h|clockwork_event_sink\.h|clockwork_clock_state\.h'
 # Headers that are clockwork's and not the boundary.
-FORBIDDEN_INCLUDES='shared_memory\.h|shm_[a-z_]+\.(h|hpp)|clockwork_[a-z_]+\.(h|hpp)|mem_region\.h|memory_profile\.h|audio_config\.h|audio_processor\.h|scope_streams\.h|clock/[A-Za-z_]+\.h|engine_state\.h|metrics_schema\.h|rt_alloc\.h|clockwork/'
+FORBIDDEN_INCLUDES='shared_memory\.h|shm_[a-z_]+\.(h|hpp)|clockwork_[a-z_]+\.(h|hpp)|mem_region\.h|memory_profile\.h|audio_config\.h|audio_processor\.h|tap_streams\.h|clock/[A-Za-z_]+\.h|engine_state\.h|metrics_schema\.h|rt_alloc\.h|clockwork/'
 # Symbols that are clockwork's own, reached by an extern declaration or a call.
-FORBIDDEN_SYMBOLS='clockwork_log|clockwork_heap_|clockwork_scope_|clockwork::mem|get_shared_memory_base|\bshared_memory\b|clockwork_shm_base|g_engine_frames|NATIVE_STAT|SHM_SCOPE|SHM_WINDOW|GUEST_CONFIG_START'
+FORBIDDEN_SYMBOLS='clockwork_log|clockwork_heap_|clockwork_tap_|clockwork::mem|get_shared_memory_base|\bshared_memory\b|clockwork_shm_base|g_engine_frames|NATIVE_STAT|SHM_TAP|SHM_WINDOW|GUEST_CONFIG_START'
 
 sources() {
     find "$GUEST" -type f \( -name '*.cpp' -o -name '*.h' -o -name '*.hpp' -o -name '*.mm' \) \

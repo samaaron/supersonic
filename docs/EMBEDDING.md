@@ -85,7 +85,7 @@ reader needs no attach socket:
 
 ```cpp
 shm_segment_client reader(host.dupSegmentHandle());   // owns the duplicate
-auto scope = reader.get_scope_stream_reader(0);
+auto scope = reader.get_tap_stream_reader(0);
 ```
 
 A reader re-attaches after a cold swap (`/clockwork/setup` on `onMessage`):

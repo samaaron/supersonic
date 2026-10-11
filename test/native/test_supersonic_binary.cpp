@@ -220,7 +220,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     // wall clock's: a loaded runner renders a fraction of a sleep.
     {
         ClockworkRegion taps {};
-        REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_AUDIO_TAPS, &taps) == CLOCKWORK_OK);
+        REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_RAW_SCOPE, &taps) == CLOCKWORK_OK);
         const auto* out = static_cast<const shm_audio_buffer*>(taps.base);
         REQUIRE(out->enabled.load() == 1);
         const auto written = [out] { return out->write_position.load(std::memory_order_acquire); };

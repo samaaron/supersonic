@@ -24,7 +24,7 @@ shm_audio_buffer* Recorder::masterSlot() {
     ClockworkClient* c = mEngine.egressClient();
     if (!c) return nullptr;
     ClockworkRegion taps {};
-    if (clockwork_client_region(c, CLOCKWORK_REGION_AUDIO_TAPS, &taps) != CLOCKWORK_OK || !taps.base) return nullptr;
+    if (clockwork_client_region(c, CLOCKWORK_REGION_RAW_SCOPE, &taps) != CLOCKWORK_OK || !taps.base) return nullptr;
     return static_cast<shm_audio_buffer*>(taps.base) + SHM_AUDIO_MASTER_SLOT;
 }
 

@@ -79,8 +79,8 @@ test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPa
       worldOptionsSize: bc.GUEST_CONFIG_SIZE,
       windowStart: bc.SHM_WINDOW_START,
       windowSize: bc.SHM_WINDOW_SIZE,
-      scopeStart: bc.SHM_SCOPE_START,
-      scopeTotalSize: bc.SHM_SCOPE_TOTAL_SIZE,
+      scopeStart: bc.SHM_TAP_START,
+      scopeTotalSize: bc.SHM_TAP_TOTAL_SIZE,
       sampleClockStart: bc.SAMPLE_CLOCK_START,
       sampleClockSize: bc.SAMPLE_CLOCK_SIZE,
       guestPersistStart: bc.GUEST_PERSIST_START,
@@ -100,7 +100,7 @@ test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPa
   // regions any attached reader may follow — METRICS, ..., SAMPLE_CLOCK,
   // CHANNEL_MAP, the audio taps — then its transport: CONTROL, the rings,
   // and the CLIENT SLOTS at the end. The guest's block follows, opening with
-  // what the guest publishes — its WINDOW, then the SCOPE — and then the
+  // what the guest publishes — its WINDOW, then the TAPS — and then the
   // guest's own: GUEST_CONFIG (the world options) and, closing the arena,
   // GUEST_PERSIST. A region is APPENDED to the run it belongs to, so the
   // seams pinned here are what this file follows when one is added.

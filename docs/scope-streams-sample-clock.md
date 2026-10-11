@@ -54,7 +54,7 @@ also usable for recording markers and visual sync.
 
 The scope region's slots change from `header + 3 × region` to a
 `shm_audio_buffer`-shaped ring (own struct so scope ring size is an
-independent memory_profile knob, `SHM_SCOPE_RING_FRAMES`). Its size per host
+independent memory_profile knob, `SHM_TAP_RING_FRAMES`). Its size per host
 (`clockwork/src/memory_profile.h`):
 
 - **Native:** 131072 frames, ≈ 2.7 s at 48 kHz (16384 up to v0.89.0). A
@@ -65,8 +65,8 @@ independent memory_profile knob, `SHM_SCOPE_RING_FRAMES`). Its size per host
 - **Embedded profiles** (ESP32-S3, Teensy 4.1): 512 frames.
 
 The ring must hold the output latency, the longest display window (250 ms)
-and the reader's margin (`shm_scope_ring_covers` in
-`clockwork/src/shm_scope_stream.hpp`). The native engine checks this at every
+and the reader's margin (`shm_tap_ring_covers` in
+`clockwork/src/shm_tap_stream.hpp`). The native engine checks this at every
 device start and logs a warning when the device's output latency is more than
 the ring covers: scopes would show nothing on that device.
 
@@ -90,10 +90,10 @@ Clockwork owns the slots and writes them; scsynth reaches them only through
 `DspHost` (`clockwork/src/dsp_api.h`). `ScopeOut2_Ctor` claims and activates
 its slot through `fGetScopeBuffer` (which retains only claim/release-ownership
 semantics — see the contract note in `SC_InterfaceTable.h`), which becomes
-`DspHost::scope_open`. Then `ScopeOut2_next` hands every block to
+`DspHost::tap_open`. Then `ScopeOut2_next` hands every block to
 `supersonic_scope_write` (`dsp/scsynth/scsynth_dsp.cpp`), which calls
-`DspHost::scope_write`. On clockwork's side (`dsp_host_scope_write` in
-`clockwork/src/audio_processor.cpp`) a `shm_scope_stream_writer` appends the
+`DspHost::tap_write`. On clockwork's side (`dsp_host_tap_write` in
+`clockwork/src/audio_processor.cpp`) a `shm_tap_stream_writer` appends the
 block, anchoring on `g_engine_frames`. The first write sets
 `base_engine_frames`; later writes heal forward cursor gaps (paused node
 groups). The old period/accumulation machinery is gone and `fPushScopeBuffer`
@@ -103,10 +103,10 @@ address.
 
 ## Readers
 
-- `shm_scope_stream_reader` (shm_scope_stream.hpp): `valid/channels/
+- `shm_tap_stream_reader` (shm_tap_stream.hpp): `valid/channels/
   capacity_frames`, `write_position()`, `base_engine_frames()`, and
   `copy_window(end_cursor, frames, out, &used_channels)` — zero-fills what
-  the ring no longer holds and stays `SHM_SCOPE_READ_MARGIN_FRAMES` clear of
+  the ring no longer holds and stays `SHM_TAP_READ_MARGIN_FRAMES` clear of
   the writer.
 - `sample_clock_view` from `shm_segment_client::get_sample_clock()`
   (`clockwork/src/shm_segment.hpp`): seqlock-consistent `{engine_frames,
