@@ -999,7 +999,23 @@ struct Heard {
     double hz     = 0.0;
     float  peak   = 0.0f;
     double pace   = 0.0;   // audio taken per second of wall clock: 1 is a device's pace
+    double worstLateSeconds = 0.0;   // the device's latest wake after its due time
 };
+
+// A device later than this has made a dropout of its own: the engine steps
+// over a hole of 10 ms in the stream it reads, and half that from the reader's
+// side is the same hole. What a test hears through such a device says nothing
+// about the engine, so the test says it had no device and skips, rather than
+// pass or fail on a run that never tested its claim. A runner sharing a host
+// did this at 64 frames; a developer's machine does not.
+constexpr double kDeviceKeptTimeSeconds = 0.005;
+
+void requireDeviceKeptTime(const Heard& h, int rate, uint32_t frames) {
+    if (h.worstLateSeconds > kDeviceKeptTimeSeconds) {
+        SKIP("this machine could not act as a " << frames << "-frame device at " << rate
+             << " Hz: a callback woke " << h.worstLateSeconds * 1e3 << " ms late, so what was heard is the device's doing, not the engine's");
+    }
+}
 
 // What a device hears in its first moments, while the stream finds its
 // place, is not judged.
@@ -1022,6 +1038,7 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
     std::atomic<size_t> heard{0};
     const auto began = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point ended;
+    double worstLate = 0.0;
     {
         EngineFixture::Device device{fx, sampleRate, deviceFrames, [&] {
             if (heard.load(std::memory_order_relaxed) >= want) return;   // enough: the rest is not kept
@@ -1033,9 +1050,11 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
         while (heard.load(std::memory_order_acquire) < want)
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         ended = std::chrono::steady_clock::now();
+        worstLate = device.worstLateSeconds();
     }
 
     Heard h;
+    h.worstLateSeconds = worstLate;
     h.pace = (double(stream.size()) / sampleRate)
            / std::chrono::duration<double>(ended - began).count();
     size_t first = settle;
@@ -1128,8 +1147,10 @@ constexpr std::pair<int, uint32_t> kListeners[] = { {48000, 64u}, {44100, 512u} 
 TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
           "[Link][LinkAudio][integration]") {
     for (const auto& [rate, frames] : kListeners) {
+      DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
         const Hearing hearing = hearSonicPiPeer(rate, frames);
         const Heard& h = hearing.heard;
+        requireDeviceKeptTime(h, rate, frames);
         const auto& a = hearing.atStart;
         const auto& b = hearing.atEnd;
         const uint64_t underruns = b.underruns - a.underruns;
@@ -1161,6 +1182,7 @@ TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
         CHECK(hearing.report.underruns >= b.underruns);
         CHECK(hearing.report.resyncs >= b.resyncs);
         CHECK(hearing.report.warps >= b.warps);
+      }
     }
 }
 
@@ -1171,7 +1193,9 @@ TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
 TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and device buffer",
           "[Link][LinkAudio][integration]") {
     for (const auto& [rate, frames] : kListeners) {
+      DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
         const Heard h = hearSonicPiPeer(rate, frames).heard;
+        requireDeviceKeptTime(h, rate, frames);
         INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
              << " frames heard, peak " << h.peak << ", " << h.gaps << " gaps, "
              << h.jumps << " jumps, " << h.hz << " Hz, at " << h.pace << " of a device's pace");
@@ -1180,6 +1204,7 @@ TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and d
         CHECK(h.gaps == 0);
         CHECK(h.jumps == 0);
         CHECK(std::fabs(h.hz - 440.0) < 4.4);
+      }
     }
 }
 
@@ -1226,8 +1251,10 @@ TEST_CASE("LinkAudio: the endpoint worker runs as a real-time thread",
 TEST_CASE("LinkAudio: a peer that stalls is heard to drop out once and then carry on in time",
           "[Link][LinkAudio][integration]") {
     for (const auto& [rate, frames] : kListeners) {
+      DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
         const Hearing hearing = hearSonicPiPeer(rate, frames, std::chrono::milliseconds{100});
         const Heard& h = hearing.heard;
+        requireDeviceKeptTime(h, rate, frames);
         const auto& a = hearing.atStart;
         const auto& b = hearing.atEnd;
         INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
@@ -1248,6 +1275,7 @@ TEST_CASE("LinkAudio: a peer that stalls is heard to drop out once and then carr
         CHECK(b.warps == a.warps);
         // Over a second on from the stall, the report is Connected again.
         CHECK(int(b.state) == kStateConnected);
+      }
     }
 }
 

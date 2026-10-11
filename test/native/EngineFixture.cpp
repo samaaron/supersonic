@@ -323,8 +323,13 @@ EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames
         clockwork::elevateCurrentThreadToRealtime(double(frames) / double(sampleRate));
         const auto began = std::chrono::steady_clock::now();
         for (uint64_t callback = 0; !mStop.load(std::memory_order_relaxed); ++callback) {
-            std::this_thread::sleep_until(began + std::chrono::nanoseconds(static_cast<int64_t>(
-                1e9 * double(callback * frames) / double(sampleRate))));
+            const auto due = began + std::chrono::nanoseconds(static_cast<int64_t>(
+                1e9 * double(callback * frames) / double(sampleRate)));
+            std::this_thread::sleep_until(due);
+            const auto late = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - due).count();
+            if (late > mWorstLateNanos.load(std::memory_order_relaxed))
+                mWorstLateNanos.store(late, std::memory_order_relaxed);
             mFx.mEngine.pumpAudioCallback(frames, afterEachBlock);
         }
     });

@@ -181,10 +181,18 @@ public:
         Device(const Device&) = delete;
         Device& operator=(const Device&) = delete;
 
+        // The latest any callback so far woke after its due time, in seconds.
+        // A real device's hardware keeps time whatever the host does, and the
+        // host underruns; this one catches up instead, so a late wake is heard
+        // as a burst of blocks. A test whose premise is a device keeping time
+        // reads this to know whether it had one.
+        double worstLateSeconds() const { return mWorstLateNanos.load(std::memory_order_relaxed) / 1e9; }
+
     private:
-        EngineFixture&    mFx;
-        std::atomic<bool> mStop{false};
-        std::thread       mThread;
+        EngineFixture&       mFx;
+        std::atomic<bool>    mStop{false};
+        std::atomic<int64_t> mWorstLateNanos{0};
+        std::thread          mThread;
     };
 
 private:
