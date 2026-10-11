@@ -8,12 +8,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "EmbeddedHost.h"
+#include "supersonic_commands.h"
 #include "OscTestUtils.h"
 #include "scsynth_options_text.h"
 
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <filesystem>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -125,4 +127,39 @@ TEST_CASE("scsynth options as a struct round-trip through the guest's text", "[e
     CHECK(back.realTimeMemorySize == 131072);
     CHECK(back.maxNodes == 4096);
     CHECK(back.numBuffers == o.numBuffers);
+}
+
+#ifndef CLOCKWORK_SAMPLES_DIR
+#define CLOCKWORK_SAMPLES_DIR ""
+#endif
+
+TEST_CASE("embedded host: a rebuild reaches the front through the engine's own push, and the lane is free again",
+          "[embedded][ColdSwap][load_sample]") {
+    // The whole path, with nothing called by hand: the engine rebuilds, pushes /clockwork/setup to its notify
+    // targets, the fronted transport lets the front hear it on the way, and the sample's slot is given back.
+    const std::string sample = std::string(CLOCKWORK_SAMPLES_DIR) + "/bd_haus.flac";
+    if (!std::filesystem::exists(sample)) SKIP("sample bd_haus.flac not found");
+    supersonic::EmbeddedHost host;
+    Replies replies;
+    std::string err;
+    supersonic::EmbeddedHost::Callbacks cb;
+    cb.onMessage = [&](const uint8_t* d, uint32_t n) { replies.add(d, n); };
+    REQUIRE(host.boot(headless(), cb, &err));
+
+    osc_test::Builder b;
+    b.begin("/b_allocRead") << int32_t{0} << sample.c_str() << int32_t{0} << int32_t{0};
+    const auto load = b.end();
+    REQUIRE(host.send(load.ptr(), load.size()));
+    REQUIRE(replies.waitFor("/done"));
+    REQUIRE(host.front().laneFreeBytes() < host.front().laneBytes());
+
+    const auto result = host.engine().switchDevice("", 44100);
+    REQUIRE(result.success);
+    REQUIRE(result.type == SwapType::Cold);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (host.front().laneFreeBytes() != host.front().laneBytes()
+           && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    CHECK(host.front().laneFreeBytes() == host.front().laneBytes());
+    host.shutdown();
 }

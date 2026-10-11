@@ -90,6 +90,10 @@ public:
 
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
     bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
+    // /clockwork/setup: scsynth was rebuilt and every buffer with it, so every
+    // lane slot a buffer held is free again, and a load in flight has nothing
+    // to land in (its asker hears /fail).
+    void        notice(const uint8_t* data, uint32_t size) override;
     const char* describe() const override {
         return "the file verbs (/b_allocRead, /b_read, /b_write, /d_load...) answered here, through the lanes";
     }

@@ -26,6 +26,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include "TestPid.h"
 #include "BlockBudget.h"
@@ -133,10 +134,14 @@ struct Rig {
     EngineFixture   fx;
     RecordingSink   sink;
     supersonic::Commands front;
+    // While set, the engine's /clockwork/asset/committed never reaches the
+    // front: a load stays in flight for as long as a case needs it to.
+    std::atomic<bool> holdCommitted { false };
 
     explicit Rig(ClockworkEngine::Config cfg = EngineFixture::defaultConfig())
         : fx(cfg), front(fx.engine(), &sink) {
         fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
+            if (holdCommitted.load() && osc_test::parseAddress(d, n) == "/clockwork/asset/committed") return;
             if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
         });
     }
@@ -756,4 +761,63 @@ TEST_CASE("front: /b_write refuses a format the codecs cannot write, at once, an
     CHECK(fail.parsed().argInt(2) == 0);
     CHECK_FALSE(std::filesystem::exists(out));
     CHECK(rig.sink.count("/b_info", kSpider) == 0);
+}
+
+// What the engine pushes to its notify targets on a rebuild, as the fronted
+// transport hands it on (test_embedded_host.cpp has it arrive that way).
+osc_test::Packet setupPush() {
+    osc_test::Builder b;
+    b.begin("/clockwork/setup") << int32_t{44100} << int32_t{64} << int32_t{2};
+    return b.end();
+}
+
+TEST_CASE("front: a cold swap hands every slot back",
+          "[front][load_sample][ColdSwap]") {
+    // scsynth rebuilt is scsynth with no buffers: the engine never says /clockwork/asset/released for a World
+    // that is gone, so the front must hear the rebuild itself (/clockwork/setup, through the fronted transport's
+    // notice) or the lane fills with the slots of samples no one can play — as it did, two swaps in, in Sonic Pi.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    Rig rig;
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.front.laneFreeBytes() < rig.front.laneBytes());
+
+    auto result = rig.fx.engine().switchDevice("", 44100);
+    REQUIRE(result.success);
+    REQUIRE(result.type == SwapType::Cold);
+    const auto setup = setupPush();
+    rig.front.notice(setup.ptr(), setup.size());
+    CHECK(rig.front.laneFreeBytes() == rig.front.laneBytes());
+
+    // the new World takes a load as the first did (the first's /done forgotten, so the wait is for this one's)
+    { std::lock_guard<std::mutex> lock(rig.sink.mu); rig.sink.sent.clear(); }
+    REQUIRE(rig.ingress(allocRead(1, samplePath("bd_haus.flac"))));
+    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    CHECK(rig.queryFrames(1) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
+    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
+}
+
+TEST_CASE("front: a load in flight when the engine is rebuilt fails to its asker, and its slot is free",
+          "[front][load_sample][ColdSwap]") {
+    // The sample is staged and committed, and the front is waiting for the engine to say it is in, when the World
+    // it was committed to goes. Nothing will ever say so: the asker is told, in scsynth's words, why its sample
+    // is not there, so it can ask the new World, and the slot goes back to the pool rather than waiting for a
+    // release that cannot come.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    Rig rig;
+    rig.holdCommitted = true;
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    // staged: the slot is taken before the commit is sent, and held until the engine answers
+    REQUIRE(rig.fx.pollUntil([&] { return rig.front.laneFreeBytes() < rig.front.laneBytes(); }, 5000));
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+
+    const auto setup = setupPush();
+    rig.front.notice(setup.ptr(), setup.size());
+    OscReply fail;
+    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_allocRead", &fail));
+    CHECK(fail.parsed().argString(1).find("rebuilt") != std::string::npos);
+    CHECK(fail.parsed().argInt(2) == 0);
+    CHECK(rig.front.laneFreeBytes() == rig.front.laneBytes());
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+    rig.holdCommitted = false;
 }

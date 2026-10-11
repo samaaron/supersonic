@@ -495,6 +495,32 @@ void Commands::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
 
+void Commands::notice(const uint8_t* data, uint32_t size) {
+    if (!isMessage(data, size, "/clockwork/setup")) return;
+    // The guest is new: nothing it held is held. The slots the old guest's
+    // buffers sat in go back to the pool (the engine will never say
+    // /clockwork/asset/released for a World that is gone), and a sample that
+    // was on its way in has no World to be committed to — its asker is told,
+    // in scsynth's words, so it can ask again of the new one.
+    std::vector<std::pair<uint32_t, Pending>> failed;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        if (mPool) for (auto& live : mLive) clockwork_asset_pool_free(mPool, live.second);
+        mLive.clear();
+        mFreeing.clear();
+        for (auto it = mPending.begin(); it != mPending.end();) {
+            if (it->what == Pending::Commit || it->what == Pending::ReadInto) {
+                if (mPool) clockwork_asset_pool_free(mPool, it->slot);
+                failed.emplace_back(it->token, std::move(*it));
+                it = mPending.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& f : failed) sendFail(f.first, f.second.cmd.c_str(), "the engine was rebuilt while the sample was loading", f.second.bufnum);
+}
+
 bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
     if (size < 8 || data[0] != '/') return false;
     enum { Committed, Refused, Released, Done, Fail, Info, Published, None } kind = None;
