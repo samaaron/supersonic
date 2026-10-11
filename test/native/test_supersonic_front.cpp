@@ -40,6 +40,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -137,12 +138,20 @@ struct Rig {
     // While set, the engine's /clockwork/asset/committed never reaches the
     // front: a load stays in flight for as long as a case needs it to.
     std::atomic<bool> holdCommitted { false };
+    // The engine's answers to the frees the front issued for itself (a
+    // /b_allocRead frees what the buffer held first), counted as they reach
+    // the front.
+    std::atomic<int> freesAnswered { 0 };
 
     explicit Rig(ClockworkEngine::Config cfg = EngineFixture::defaultConfig())
         : fx(cfg), front(fx.engine(), &sink) {
         fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
-            if (holdCommitted.load() && osc_test::parseAddress(d, n) == "/clockwork/asset/committed") return;
+            const std::string address = osc_test::parseAddress(d, n);
+            if (holdCommitted.load() && address == "/clockwork/asset/committed") return;
+            const bool answersAFree = address == "/done"
+                && std::string_view(reinterpret_cast<const char*>(d), n).find("/b_free") != std::string_view::npos;
             if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
+            else if (answersAFree) ++freesAnswered;
         });
     }
     ~Rig() { fx.setRoutedObserver(nullptr); }   // under the fixture's lock: no call runs after this
@@ -809,6 +818,13 @@ TEST_CASE("front: a load in flight when the engine is rebuilt fails to its asker
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
     // staged: the slot is taken before the commit is sent, and held until the engine answers
     REQUIRE(rig.fx.pollUntil([&] { return rig.front.laneFreeBytes() < rig.front.laneBytes(); }, 5000));
+    // A rebuild comes after everything the old World said: the engine drains
+    // its replies before it takes the World down. Here the rebuild is a notice
+    // handed to the front by hand, so the case waits for the World's answer to
+    // the free that comes before a load, as the engine would have delivered it;
+    // handed over sooner, that answer arrived after the notice, and reached the
+    // asker as a /done it never asked for (a slow runner, 2026-10-11).
+    REQUIRE(rig.fx.pollUntil([&] { return rig.freesAnswered.load() >= 1; }, 5000));
     CHECK(rig.sink.count("/done", kSpider) == 0);
 
     const auto setup = setupPush();

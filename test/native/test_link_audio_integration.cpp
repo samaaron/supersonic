@@ -1002,7 +1002,8 @@ struct Heard {
     size_t jumps  = 0;   // steps between samples no sine at this pitch and level can make
     size_t sinceDamage = 0;   // frames from the last gap or jump to the end
     double hz     = 0.0;
-    double hzSinceDamage = 0.0;   // pitch over the frames since the last gap or jump
+    size_t cleanFrames = 0;   // frames heard since the last gap or jump was over
+    double hzClean = 0.0;     // pitch over those frames
     float  peak   = 0.0f;
     double pace   = 0.0;   // audio taken per second of wall clock: 1 is a device's pace
     double worstLateSeconds = 0.0;   // the device's latest wake after its due time
@@ -1038,6 +1039,8 @@ constexpr double kSettleSeconds = 0.25;
 // is judged. `progress` is told after each block how many frames have been
 // heard so far, settling included, for whatever the listener wants to do at a
 // moment of its choosing.
+Heard analyseHeard(const std::vector<float>& stream, size_t settle, int sampleRate, double expectHz);
+
 Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t blockSize,
              uint32_t deviceFrames, double seconds, double expectHz,
              const std::function<void(size_t heard)>& progress) {
@@ -1064,27 +1067,86 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
         worstLate = device.worstLateSeconds();
     }
 
-    Heard h;
+    Heard h = analyseHeard(stream, settle, sampleRate, expectHz);
     h.worstLateSeconds = worstLate;
     h.pace = (double(stream.size()) / sampleRate)
            / std::chrono::duration<double>(ended - began).count();
+    return h;
+}
+
+// What `stream` (a bus as heard, a sine of `expectHz` once it settles) sounded
+// like from `settle` on: its gaps and jumps, and its pitch.
+Heard analyseHeard(const std::vector<float>& stream, size_t settle, int sampleRate, double expectHz) {
+    Heard h;
     size_t first = settle;
     while (first < stream.size() && stream[first] == 0.0f) ++first;
     for (size_t i = first; i < stream.size(); ++i) h.peak = std::max(h.peak, std::fabs(stream[i]));
     const float maxStep = 2.0f * h.peak * static_cast<float>(kTau * expectHz / sampleRate);
-    size_t zeros = 0, rising = 0, lastDamage = first, risingAtDamage = 0;
+    // Clean from where the last damage ended: the first sound after a gap,
+    // the sample after a jump. (From where it began, a hole's own silence was
+    // counted in the pitch after it.)
+    size_t zeros = 0, rising = 0, lastDamage = first, cleanFrom = first, risingAtClean = 0;
     for (size_t i = first + 1; i < stream.size(); ++i) {
         const float a = stream[i - 1], b = stream[i];
-        if (b == 0.0f) { ++h.silent; if (++zeros == 8) { ++h.gaps; lastDamage = i; risingAtDamage = rising; } } else zeros = 0;
-        if (std::fabs(b - a) > maxStep) { ++h.jumps; lastDamage = i; risingAtDamage = rising; }
+        if (b == 0.0f) {
+            ++h.silent;
+            if (++zeros == 8) { ++h.gaps; lastDamage = i; }
+        } else {
+            if (zeros >= 8) { cleanFrom = i; risingAtClean = rising; }
+            zeros = 0;
+        }
+        if (std::fabs(b - a) > maxStep) { ++h.jumps; lastDamage = i; cleanFrom = i + 1; risingAtClean = rising; }
         if (a < 0.0f && b >= 0.0f) ++rising;
     }
     h.frames = stream.size() - first;
     h.sinceDamage = stream.size() - lastDamage;
     if (h.frames > 0) h.hz = double(rising) * sampleRate / double(h.frames);
-    if (h.sinceDamage > 0)
-        h.hzSinceDamage = double(rising - risingAtDamage) * sampleRate / double(h.sinceDamage);
+    if (zeros < 8 && cleanFrom < stream.size()) {   // not still inside a gap at the end
+        h.cleanFrames = stream.size() - cleanFrom;
+        h.hzClean = double(rising - risingAtClean) * sampleRate / double(h.cleanFrames);
+    }
     return h;
+}
+
+// The listening tests judge a stream by its gaps, jumps and pitch. The pitch
+// after the last damage is measured over the audio heard once the damage was
+// over: on audio made up here, a 440 Hz sine with a 100 ms hole in it, stepped
+// into and resumed smoothly, and the other way round. It was measured from
+// the eighth sample of the hole, so a hole whose step came first left its own
+// silence in the measure: 409 Hz, on whichever runner made the step first.
+TEST_CASE("LinkAudio: what was heard is judged from where the damage ended", "[LinkAudio][analysis]") {
+    const int rate = 48000;
+    auto sine = [&](std::vector<float>& out, size_t frames, double phase0) {
+        for (size_t i = 0; i < frames; ++i)
+            out.push_back(static_cast<float>(0.8 * std::sin(phase0 + kTau * 440.0 * double(i) / rate)));
+    };
+    for (const bool stepIn : { true, false }) {
+        DYNAMIC_SECTION((stepIn ? "stepped into, resumed smoothly" : "entered smoothly, stepped out of")) {
+            std::vector<float> stream;
+            // Half a second of sine; into the hole at its peak (a step) or at
+            // a rising zero (smooth).
+            const size_t before = static_cast<size_t>(rate / 2);
+            sine(stream, before, stepIn ? kTau / 4 - kTau * 440.0 * double(before) / rate : 0.0);
+            stream.insert(stream.end(), size_t(rate / 10), 0.0f);   // 100 ms of nothing
+            // Out of the hole at a rising zero (smooth) or at a peak (a step).
+            sine(stream, size_t(rate), stepIn ? 0.0 : kTau / 4);
+            const Heard h = analyseHeard(stream, 0, rate, 440.0);
+            INFO(h.gaps << " gaps, " << h.jumps << " jumps, " << h.hzClean << " Hz over the "
+                 << h.cleanFrames << " frames after the damage");
+            CHECK(h.gaps == 1);
+            CHECK(h.jumps >= 1);
+            CHECK(std::fabs(h.hzClean - 440.0) < 4.4);
+            CHECK(h.cleanFrames > size_t(rate) * 9 / 10);
+        }
+    }
+    SECTION("a stream that never came back has nothing clean after its hole") {
+        std::vector<float> stream;
+        sine(stream, size_t(rate / 2), 0.0);
+        stream.insert(stream.end(), size_t(rate), 0.0f);
+        const Heard h = analyseHeard(stream, 0, rate, 440.0);
+        CHECK(h.gaps == 1);
+        CHECK(h.cleanFrames == 0);
+    }
 }
 
 // A Sonic Pi peer publishing its 64-frame blocks at 48 kHz, the left channel
@@ -1278,7 +1340,7 @@ TEST_CASE("LinkAudio: a peer that stalls is heard to drop out and then carry on 
         const auto& b = hearing.atEnd;
         INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
              << " frames heard, " << h.gaps << " gaps, " << h.jumps << " jumps; "
-             << h.hzSinceDamage << " Hz over the " << h.sinceDamage << " frames since the last damage;"
+             << h.hzClean << " Hz over the " << h.cleanFrames << " frames after the last damage;"
              << " the engine counted " << (b.underruns - a.underruns) << " underruns, "
              << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps");
         // The stall is heard: silence at least as long as it.
@@ -1290,8 +1352,11 @@ TEST_CASE("LinkAudio: a peer that stalls is heard to drop out and then carry on 
         CHECK(b.warps == a.warps);
         // And on from there at the peer's pitch, given a quarter second to
         // measure it over.
-        if (h.sinceDamage > size_t(rate) / 4)
-            CHECK(std::fabs(h.hzSinceDamage - 440.0) < 4.4);
+        // A stream that never came back has no clean frames after the hole,
+        // and fails here.
+        CHECK(h.cleanFrames > size_t(rate) / 4);
+        if (h.cleanFrames > size_t(rate) / 4)
+            CHECK(std::fabs(h.hzClean - 440.0) < 4.4);
         // Connected again over a second after the last trouble.
         if (double(h.sinceDamage) / rate > 1.2)
             CHECK(int(b.state) == kStateConnected);
