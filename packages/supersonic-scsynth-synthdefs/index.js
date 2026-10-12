@@ -5,7 +5,7 @@
 // included; under Node, node.js adds where the files are on disk.
 
 // CDN URL for browser usage (unpkg)
-export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.90.0';
+export const CDN_BASE = 'https://unpkg.com/supersonic-scsynth-synthdefs@0.90.1';
 export const SYNTHDEFS_CDN = `${CDN_BASE}/synthdefs/`;
 
 export const SYNTHDEF_NAMES = [
