@@ -30,6 +30,7 @@
 #include "ClockworkProcessor.h"
 #include "OscTestUtils.h"
 #include "lanes/lanes.h"
+#include "shared_memory.h"  // PerformanceMetrics
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -321,6 +322,63 @@ TEST_CASE("LinkAudio: /clock/reset clears active input subscriptions",
     // Poll until the async reset has cleared the subscription, rather than
     // guessing a fixed delay a loaded runner may overrun.
     CHECK(fx.pollUntil([&] { return countInputs(fx) == 0; }));
+}
+
+namespace {
+// The ports open in this process, every engine's: the registry is the process's.
+uint32_t openPorts() {
+    return clockwork_port_list(nullptr, 0);
+}
+}  // namespace
+
+// A subscription's port belongs to the process, not the engine: one nobody
+// closes stays bound to its channel and holds a slot of the registry until the
+// process ends. However the engine lets go of an input, its port is closed.
+TEST_CASE("LinkAudio: an input the engine lets go of closes its port",
+          "[Link][LinkAudio][integration]") {
+    FakeLinkPeerProcess::Options peerOpts;
+    peerOpts.name       = "FakeLive";
+    peerOpts.channels   = {{"Main", 2, "sine440-880"}};
+    FakeLinkPeerProcess peer{peerOpts};
+    REQUIRE(peer.ready());
+
+    EngineFixture fx{linkInputConfig()};
+    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));
+    REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main", std::chrono::seconds(30)));
+
+    const uint32_t before = openPorts();
+    REQUIRE(subscribe(fx, "FakeLive", "Main") >= 0);
+    REQUIRE(openPorts() == before + 1);
+
+    int inputsLeft = 0;
+    const char* letGo = "";
+    SECTION("when Link's visibility changes") {
+        letGo = "Link's visibility changed";
+        fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));
+    }
+    SECTION("when the clock is reset") {
+        letGo = "the clock was reset";
+        fx.send(osc_test::message("/clockwork/clock/reset"));
+    }
+    SECTION("when the inputs are cleared") {
+        letGo = "the inputs were cleared";
+        fx.send(osc_test::message("/clockwork/clock/audio/input/clear"));
+    }
+    SECTION("when the input is removed") {
+        letGo = "the input was removed";
+        osc_test::Builder b;
+        auto& s = b.begin("/clockwork/clock/audio/input/remove");
+        s << "FakeLive" << "Main";
+        fx.send(b.end());
+    }
+    SECTION("when the same channel is subscribed again") {
+        letGo = "the same channel was subscribed again";
+        REQUIRE(subscribe(fx, "FakeLive", "Main") >= 0);
+        inputsLeft = 1;
+    }
+    INFO(letGo << ": " << before << " ports were open before the subscription");
+    REQUIRE(fx.pollUntil([&] { return countInputs(fx) == inputsLeft; }));
+    CHECK(openPorts() == before + static_cast<uint32_t>(inputsLeft));
 }
 
 // ── Where a subscription lands ─────────────────────────────────────────────
@@ -1177,16 +1235,24 @@ TEST_CASE("LinkAudio: what was heard is judged from where the damage ended", "[L
 // device of `deviceFrames`. What was heard; what the engine said of the input
 // as the judging began and as it ended, read straight from it, since asking
 // over OSC would pump a block out of time; and its report over OSC after.
+// Beside each, the engine's own count of Link Audio underruns, as a client
+// reads it from the metrics; and that count once the input was removed.
 struct Hearing {
     Heard                   heard;
     link_audio::InputStatus atStart, atEnd;
     InputSnapshot           report;
+    uint64_t                engineUnderrunsAtStart = 0, engineUnderrunsAtEnd = 0;
+    uint64_t                engineUnderrunsAfterRemove = 0;
 };
 
 link_audio::InputStatus inputStatus(EngineFixture& fx, const char* peer, const char* channel) {
     for (const auto& in : fx.engine().linkAudio().listInputs())
         if (in.peerName == peer && in.channelName == channel) return in;
     return {};
+}
+
+uint64_t engineUnderruns(EngineFixture& fx) {
+    return fx.engine().getMetrics().link_audio_underruns.load(std::memory_order_relaxed);
 }
 
 // With a `peerStall`, the peer's callback stalls for that long half a second
@@ -1222,6 +1288,7 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                             if (heard >= settled && !started) {
                                 started = true;
                                 out.atStart = inputStatus(fx, "FakeSonicPi", "Main");
+                                out.engineUnderrunsAtStart = engineUnderruns(fx);
                             }
                             if (heard >= stallAt && !stalled && peerStall.count() > 0) {
                                 stalled = true;
@@ -1229,7 +1296,20 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                             }
                         });
     out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
+    out.engineUnderrunsAtEnd = engineUnderruns(fx);
     out.report = snapshotInput(fx, "FakeSonicPi", "Main");
+
+    // Removed, the input's count stays in the engine's: waited for, since the
+    // metrics are published as a block begins, and given its deadline.
+    {
+        osc_test::Builder b;
+        auto& s = b.begin("/clockwork/clock/audio/input/remove");
+        s << "FakeSonicPi" << "Main";
+        fx.send(b.end());
+    }
+    REQUIRE(fx.pollUntil([&] { return countInputs(fx) == 0; }));
+    fx.pollUntil([&] { return engineUnderruns(fx) >= out.atEnd.underruns; }, 1000);
+    out.engineUnderrunsAfterRemove = engineUnderruns(fx);
     return out;
 }
 
@@ -1383,6 +1463,15 @@ TEST_CASE("LinkAudio: a peer that stalls is heard to drop out and then carry on 
         // Connected again over a second after the last trouble.
         if (double(h.sinceDamage) / rate > 1.2)
             CHECK(int(b.state) == kStateConnected);
+        // The engine's count, the one a client reads from the metrics, is its
+        // inputs': it rose with this one's, never past it, and kept it once
+        // the input was removed.
+        INFO("the engine's metric counted " << hearing.engineUnderrunsAtStart << " underruns at the start, "
+             << hearing.engineUnderrunsAtEnd << " at the end and " << hearing.engineUnderrunsAfterRemove
+             << " after the input was removed; the input counted " << a.underruns << " and " << b.underruns);
+        CHECK(hearing.engineUnderrunsAtEnd > hearing.engineUnderrunsAtStart);
+        CHECK(hearing.engineUnderrunsAtEnd <= b.underruns);
+        CHECK(hearing.engineUnderrunsAfterRemove >= b.underruns);
       }
     }
 }

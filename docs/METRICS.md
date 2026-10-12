@@ -142,7 +142,7 @@ Native only: always 0 on the web, which has no Ableton Link.
 | `linkPlaying` | Link transport playing (0/1) |
 | `linkAudioInChannels` | Active received Link Audio channels |
 | `linkAudioStreamRate` | Received Link Audio stream sample rate (Hz) |
-| `linkAudioUnderruns` | Receiver queue underruns |
+| `linkAudioUnderruns` | Link Audio input frames that arrived too late to play, every input together |
 | `linkAudioBufferedMs` | Received Link Audio queued in the receiver (ms) |
 | `linkAudioDriftPpm` | Read-rate deviation from the sender's clock (ppm) |
 | `linkAudioPublish` | Link Audio publishing enabled (0/1) |

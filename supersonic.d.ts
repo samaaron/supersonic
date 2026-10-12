@@ -438,7 +438,7 @@ export interface SuperSonicMetrics {
   linkAudioInChannels: number;
   /** Received Link Audio stream sample rate in Hz. */
   linkAudioStreamRate: number;
-  /** Receiver queue underruns — stream audio arrived too late to play. */
+  /** Link Audio input frames that arrived too late to play, every input together. */
   linkAudioUnderruns: number;
   /** Received Link Audio queued in the receiver (ms). */
   linkAudioBufferedMs: number;
