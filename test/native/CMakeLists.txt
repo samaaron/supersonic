@@ -183,6 +183,10 @@ if(CLOCKWORK_LINK)
     target_link_libraries(supersonic_test_link_peer PRIVATE
         Ableton::Link
     )
+    # timeBeginPeriod: the peer asks for Windows' 1 ms timer (peer/main.cpp).
+    if(WIN32)
+        target_link_libraries(supersonic_test_link_peer PRIVATE winmm)
+    endif()
     # Link's headers are C++17 (std::optional, std::invoke_result_t) and the
     # Ableton::Link interface target does not state a standard, so this target
     # would otherwise take the compiler's default and fail inside Link itself.

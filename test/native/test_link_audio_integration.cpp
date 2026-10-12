@@ -918,7 +918,7 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
     // Block-size sweep at fixed BPM — chunk rate is set by Link's
     // per-chunk byte cap, not the peer's block size.
     std::fprintf(stderr, "\n--- block-size sweep at 120 BPM ---\n");
-    const auto b64   = probe(120.0, "block=2",   std::chrono::seconds(2), 2);
+    const auto b64   = probe(120.0, "block=64",  std::chrono::seconds(2), 64);
     const auto b256  = probe(120.0, "block=256",  std::chrono::seconds(2), 256);
     const auto b2048 = probe(120.0, "block=2048", std::chrono::seconds(2), 2048);
 

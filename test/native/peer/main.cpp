@@ -17,6 +17,8 @@
 #include <ableton/LinkAudio.hpp>
 #if defined(_WIN32)
 #  include <ableton/platforms/windows/ScanIpIfAddrs.hpp>
+#  include <windows.h>
+#  include <timeapi.h>
 #else
 #  include <ableton/platforms/posix/ScanIpIfAddrs.hpp>
 #endif
@@ -125,6 +127,22 @@ void printUsage() {
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_WIN32)
+    // Windows wakes a program's waits on its 15.6 ms timer tick unless the
+    // program asks for finer, as every audio app does (the engine through
+    // JUCE, at start-up). Left at the tick, this peer's Link threads sent its
+    // audio in 15.6 ms bursts rather than a block at a time as a device's
+    // callbacks do, and an engine holding less than that ran dry between
+    // them: the block-size sweep never connected on Windows on ARM. Asked for
+    // the whole process, because the sending is Link's threads, not this
+    // loop: a precise wait in the loop alone still left the engine starving.
+    struct TimerResolution {
+        TimerResolution() { timeBeginPeriod(1); }
+        ~TimerResolution() { timeEndPeriod(1); }
+        TimerResolution(const TimerResolution&) = delete;
+        TimerResolution& operator=(const TimerResolution&) = delete;
+    } timerResolution;
+#endif
     std::string peerName    = "TestPeer";
     bool        loopbackOnly = false;
     double      bpm         = 120.0;
