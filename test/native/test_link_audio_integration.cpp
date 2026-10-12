@@ -37,6 +37,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <atomic>
 #include <thread>
@@ -218,6 +219,28 @@ ClockworkEngine::Config handDrivenConfig() {
     cfg.manualAudioPump = true;
     cfg.freewheelClock  = true;
     return cfg;
+}
+
+// Renders as a device does — on its own real-time thread, at a device's pace —
+// until `heard` says so or `timeout` passes, and says whether it did. `heard`
+// runs on that thread after each block: it is the only thread rendering, so it
+// reads the buses race-free, and what it records is the test's to read once
+// this returns. It must not assert: a check on that thread is not Catch's to
+// catch. Pumped by hand instead — a block, then 3 ms asleep — a slow runner
+// fell behind the wall clock that Link Audio is placed by (94 ms behind on
+// Linux arm64), the stream never landed where the engine read, and the bus
+// stayed silent.
+bool renderUntil(EngineFixture& fx, const std::function<bool()>& heard, std::chrono::milliseconds timeout) {
+    std::atomic<bool> done{false};
+    {
+        EngineFixture::Device device{fx, 48000, 128, [&] {
+            if (!done.load(std::memory_order_relaxed) && heard()) done.store(true, std::memory_order_release);
+        }};
+        const auto deadline = std::chrono::steady_clock::now() + timeout * kTimeoutScale;
+        while (!done.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return done.load(std::memory_order_acquire);
 }
 
 }  // namespace
@@ -567,20 +590,20 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     // fixed sleep to: (1) let the HeadlessDriver drain Link audio
     // into its pair, (2) let scsynth run the synth at least once with
     // non-zero In.ar input, (3) settle into a steady stream.
-    // pollUntil() pumps a block on this thread before each check (manual mode),
-    // so the read below sees freshly-rendered output and can't race the drain.
+    // Rendered at a device's pace (renderUntil), the read after each block on
+    // the thread that rendered it.
     const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
     float pL = 0.0f, pR = 0.0f, diff = 0.0f;
-    fx.pollUntil([&] {
+    renderUntil(fx, [&] {
         std::vector<float> outL(outBus,             outBus +     kBlockSize);
         std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
         pL   = peakAbs(outL);
         pR   = peakAbs(outR);
         diff = maxAbsDiff(outL, outR);
         return pL > 0.01f && pR > 0.01f && diff > 0.01f;
-    }, 5000);
+    }, std::chrono::milliseconds(5000));
     if (!(pL > 0.01f && pR > 0.01f && diff > 0.01f))
         explainInput(fx, "In.ar output silent", snapshotInput(fx, "FakeLive", "Main"));
     INFO("output peakL=" << pL << " peakR=" << pR
@@ -600,7 +623,7 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
-    // Manual pump: bus snapshots below must not race a real-time driver.
+    // Manual pump: the bus is read on the thread that renders it (renderUntil).
     EngineFixture fx(handPumpedConfig());
     fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
@@ -625,9 +648,9 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> busA, busB;
     float peakA = 0.0f, peakB = 0.0f, diff = 0.0f;
-    // A bus not there yet is waited for, not failed: a check inside the
-    // callback would be nested in pollUntil's and abort the whole binary.
-    fx.pollUntil([&] {
+    // A bus not there yet is waited for (a check in the callback would be on
+    // the device's thread, out of Catch's reach).
+    renderUntil(fx, [&] {
         if (!snapshotBus(static_cast<uint32_t>(chanA), kBlockSize, busA)
             || !snapshotBus(static_cast<uint32_t>(chanB), kBlockSize, busB))
             return false;
@@ -635,7 +658,7 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
         peakB = peakAbs(busB);
         diff  = maxAbsDiff(busA, busB);
         return peakA > 0.1f && peakB > 0.3f && diff > 0.1f;
-    }, 5000);
+    }, std::chrono::milliseconds(5000));
     if (!(peakA > 0.1f && peakB > 0.3f && diff > 0.1f)) {
         explainInput(fx, "ChanA", snapshotInput(fx, "FakeLive", "ChanA"));
         explainInput(fx, "ChanB", snapshotInput(fx, "FakeLive", "ChanB"));
@@ -689,14 +712,14 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
     float pL = 0.0f, pR = 0.0f, diff = 0.0f;
-    fx.pollUntil([&] {
+    renderUntil(fx, [&] {
         std::vector<float> outL(outBus,             outBus +     kBlockSize);
         std::vector<float> outR(outBus + kBlockSize, outBus + 2 * kBlockSize);
         pL   = peakAbs(outL);
         pR   = peakAbs(outR);
         diff = maxAbsDiff(outL, outR);
         return pL > 0.01f && pR > 0.01f && diff > 0.01f;
-    }, 5000);
+    }, std::chrono::milliseconds(5000));
     if (!(pL > 0.01f && pR > 0.01f && diff > 0.01f))
         explainInput(fx, "receive-only output silent", snapshotInput(fx, "FakeLive", "Main"));
     INFO("receive-only output peakL=" << pL << " peakR=" << pR
@@ -729,16 +752,16 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     REQUIRE(main >= 0);
     REQUIRE(waitForArriving(fx, "FakeLive", "Main", std::chrono::seconds(30)));
 
-    // Confirm audio is on the bus before removal — pollUntil() pumps a block on
-    // this thread before each check, so the snapshot can't race the drain.
+    // Audio on the bus before removal: rendered at a device's pace until it is
+    // there (renderUntil), read on the thread that rendered it. A bus not
+    // there yet is waited for.
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> busL;
-    // A bus not there yet is waited for, not failed: a check inside the
-    // callback is nested in this one, and on a slow runner, where the first
-    // poll came before the input's bus existed, it aborted the whole binary.
-    REQUIRE(fx.pollUntil([&] {
+    const bool arrived = renderUntil(fx, [&] {
         return snapshotBus(static_cast<uint32_t>(main), kBlockSize, busL) && peakAbs(busL) > 0.01f;
-    }, 5000));
+    }, std::chrono::milliseconds(5000));
+    if (!arrived) explainInput(fx, "no audio on the bus before removal", snapshotInput(fx, "FakeLive", "Main"));
+    REQUIRE(arrived);
 
     // Explicit remove.
     {
