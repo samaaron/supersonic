@@ -37,15 +37,24 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <memory>
 #include <atomic>
+#include <sstream>
 #include <thread>
 #include <utility>
 #include <vector>
 
 namespace {
+
+// Link on this machine only. Network-wide, any Link app on the network (a
+// Sonic Pi or Live on another computer) joins a test's session: its tempo
+// becomes the session's, and the channels are rebuilt as the sessions merge,
+// so a subscription made in that moment finds nothing. The fake peer is on
+// this machine only too (FakeLinkPeerProcess::Options::loopbackOnly).
+constexpr int32_t kThisMachineOnly = 1;
 
 // Sanitizer builds (ASAN/TSAN) run ~2-3x slower, so a fixed wall-clock wait
 // for out-of-process peer discovery / buffer fill can expire before the work
@@ -258,9 +267,9 @@ TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
 
     EngineFixture fx{handDrivenConfig()};
     EngineFixture::Device device{fx, 48000, 512};
-    // NetworkWide + publish=1 so LinkAudio is on and the engine can
-    // see other peers' channels via link.channels().
-    fx.send(osc_test::message("/clockwork/clock/visibility",         int32_t{2}));
+    // Link on (this machine only) + publish=1 so Link Audio is on and the
+    // engine can see other peers' channels via link.channels().
+    fx.send(osc_test::message("/clockwork/clock/visibility",         kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set",  int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -308,7 +317,7 @@ TEST_CASE("LinkAudio: /clock/reset clears active input subscriptions",
     REQUIRE(peer.ready());
 
     EngineFixture fx{linkInputConfig()};
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -343,7 +352,7 @@ TEST_CASE("LinkAudio: an input the engine lets go of closes its port",
     REQUIRE(peer.ready());
 
     EngineFixture fx{linkInputConfig()};
-    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility", kThisMachineOnly));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main", std::chrono::seconds(30)));
 
     const uint32_t before = openPorts();
@@ -354,7 +363,7 @@ TEST_CASE("LinkAudio: an input the engine lets go of closes its port",
     const char* letGo = "";
     SECTION("when Link's visibility changes") {
         letGo = "Link's visibility changed";
-        fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));
+        fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{0}));   // Off
     }
     SECTION("when the clock is reset") {
         letGo = "the clock was reset";
@@ -404,7 +413,7 @@ FakeLinkPeerProcess::Options peerWithChannels(int count) {
 }
 
 void joinMesh(EngineFixture& fx, const FakeLinkPeerProcess::Options& peer) {
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
     for (const auto& c : peer.channels)
         REQUIRE(waitForChannelVisible(fx, peer.name, c.name, std::chrono::seconds(30)));
@@ -521,7 +530,7 @@ TEST_CASE("LinkAudio: setLinkVisibility(Off) clears active input subscriptions",
     REQUIRE(peer.ready());
 
     EngineFixture fx{linkInputConfig()};
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -615,7 +624,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     // Manual pump: this test reads the output bus, so the test thread must be the
     // sole audio-thread writer (no real-time driver) or the read races the drain.
     EngineFixture fx(handPumpedConfig());
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -683,7 +692,7 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
 
     // Manual pump: the bus is read on the thread that renders it (renderUntil).
     EngineFixture fx(handPumpedConfig());
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "ChanA",
@@ -741,7 +750,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
 
     // Manual pump: reads the output bus below; test thread is the sole writer.
     EngineFixture fx(handPumpedConfig());
-    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));  // NetworkWide
+    fx.send(osc_test::message("/clockwork/clock/visibility", kThisMachineOnly));
     // NB: no /clock/audio/publish/set — engine is receive-only.
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -801,7 +810,7 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     // Manual pump: this test snapshots the stream's pair (before and after removal), so the
     // test thread must own the audio thread — no real-time driver writing the bus.
     EngineFixture fx(handPumpedConfig());
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -863,7 +872,7 @@ TEST_CASE("LinkAudio: no drops at default lookahead across BPM + block-size",
 
         EngineFixture fx{handDrivenConfig()};
         EngineFixture::Device device{fx, 48000, 512};
-        fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+        fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
         fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
         fx.send(osc_test::message("/clockwork/clock/tempo/set", static_cast<float>(bpm)));
 
@@ -946,7 +955,7 @@ TEST_CASE("LinkAudio: replacement preserves renderer diagnostic counters",
 
     EngineFixture fx{handDrivenConfig()};
     EngineFixture::Device device{fx, 48000, 512};
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
@@ -992,7 +1001,7 @@ TEST_CASE("LinkAudio: latency setter rejects values above the supported max",
     REQUIRE(peer.ready());
 
     EngineFixture fx{linkInputConfig()};
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
                                    std::chrono::seconds(30)));
@@ -1034,7 +1043,7 @@ TEST_CASE("LinkAudio: per-input latency setter takes effect end-to-end",
 
     EngineFixture fx{handDrivenConfig()};
     EngineFixture::Device device{fx, 48000, 512};
-    fx.send(osc_test::message("/clockwork/clock/visibility",        int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility",        kThisMachineOnly));
     fx.send(osc_test::message("/clockwork/clock/audio/publish/set", int32_t{1}));
 
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
@@ -1088,6 +1097,7 @@ struct Heard {
     float  peak   = 0.0f;
     double pace   = 0.0;   // audio taken per second of wall clock: 1 is a device's pace
     double worstLateSeconds = 0.0;   // the device's latest wake after its due time
+    std::string damage;   // where the gaps and jumps were, for a failure to say
 };
 
 // The engine holds a peer's audio the input latency ahead of where it reads
@@ -1167,18 +1177,35 @@ Heard analyseHeard(const std::vector<float>& stream, size_t settle, int sampleRa
     // the sample after a jump. (From where it began, a hole's own silence was
     // counted in the pitch after it.)
     size_t zeros = 0, rising = 0, lastDamage = first, cleanFrom = first, risingAtClean = 0;
+    // Each gap and jump, in seconds from where the judging began, the first
+    // dozen of them.
+    std::ostringstream where;
+    where.setf(std::ios::fixed);
+    where.precision(3);
+    size_t told = 0;
+    const auto tell = [&](const char* what, size_t at, size_t frames) {
+        if (++told > 12) return;
+        where << (told > 1 ? "; " : "") << what << " at " << double(at - settle) / sampleRate << " s";
+        if (frames != 0) where << " for " << 1e3 * double(frames) / sampleRate << " ms";
+    };
     for (size_t i = first + 1; i < stream.size(); ++i) {
         const float a = stream[i - 1], b = stream[i];
         if (b == 0.0f) {
             ++h.silent;
             if (++zeros == 8) { ++h.gaps; lastDamage = i; }
         } else {
-            if (zeros >= 8) { cleanFrom = i; risingAtClean = rising; }
+            if (zeros >= 8) { cleanFrom = i; risingAtClean = rising; tell("gap", i - zeros, zeros); }
             zeros = 0;
         }
-        if (std::fabs(b - a) > maxStep) { ++h.jumps; lastDamage = i; cleanFrom = i + 1; risingAtClean = rising; }
+        if (std::fabs(b - a) > maxStep) {
+            ++h.jumps; lastDamage = i; cleanFrom = i + 1; risingAtClean = rising;
+            tell("jump", i, 0);
+        }
         if (a < 0.0f && b >= 0.0f) ++rising;
     }
+    if (zeros >= 8) tell("gap to the end", stream.size() - zeros, zeros);
+    if (told > 12) where << "; and " << told - 12 << " more";
+    h.damage = told == 0 ? "none" : where.str();
     h.frames = stream.size() - first;
     h.sinceDamage = stream.size() - lastDamage;
     if (h.frames > 0) h.hz = double(rising) * sampleRate / double(h.frames);
@@ -1243,6 +1270,15 @@ struct Hearing {
     InputSnapshot           report;
     uint64_t                engineUnderrunsAtStart = 0, engineUnderrunsAtEnd = 0;
     uint64_t                engineUnderrunsAfterRemove = 0;
+    std::string             engineLog;   // the engine's debug lines
+    std::string             engineAccount;   // where it ran dry, and how much it held, as the judging went
+
+    // What a failure says of it: where the damage was heard, the engine's
+    // account of the same time, and its log, which says whether the session
+    // held more than this test's peer.
+    std::string story() const {
+        return "heard: " + heard.damage + "\nthe engine: " + engineAccount + "\nengine log:\n" + engineLog;
+    }
 };
 
 link_audio::InputStatus inputStatus(EngineFixture& fx, const char* peer, const char* channel) {
@@ -1272,7 +1308,7 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
     cfg.sampleRate = engineRate;
     cfg.blockSize  = 64;
     EngineFixture fx(cfg);
-    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{1}));   // this machine only
+    fx.send(osc_test::message("/clockwork/clock/visibility", kThisMachineOnly));
     REQUIRE(waitForChannelVisible(fx, "FakeSonicPi", "Main", std::chrono::seconds(30)));
     const int32_t pair = subscribe(fx, "FakeSonicPi", "Main");
     REQUIRE(pair >= 0);
@@ -1283,20 +1319,67 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
     const size_t settled = static_cast<size_t>(kSettleSeconds * engineRate);
     const size_t stallAt = settled + static_cast<size_t>(engineRate) / 2;
     bool started = false, stalled = false;
+    // The engine's own account as the judging goes, looked at every
+    // hundredth of a second heard, in seconds from the judging's start: where
+    // the input ran dry and flowed again, lost its place or bent, and the
+    // least it held in each tenth of a second.
+    std::ostringstream events;
+    events.setf(std::ios::fixed);
+    events.precision(3);
+    std::vector<uint32_t> leastHeldMs;
+    leastHeldMs.reserve(32);
+    link_audio::InputStatus seen;
+    uint64_t underrunsAtDry = 0;
+    bool dry = false;
+    size_t lastLook = SIZE_MAX;
+    const auto event = [&](size_t at) -> std::ostream& {
+        return events << (events.tellp() > 0 ? "; " : "") << double(at) / engineRate << " s ";
+    };
     out.heard  = listen(fx, static_cast<uint32_t>(pair), engineRate, 64, deviceFrames, 2.0, 440.0,
                         [&](size_t heard) {
                             if (heard >= settled && !started) {
                                 started = true;
                                 out.atStart = inputStatus(fx, "FakeSonicPi", "Main");
                                 out.engineUnderrunsAtStart = engineUnderruns(fx);
+                                seen = out.atStart;
                             }
                             if (heard >= stallAt && !stalled && peerStall.count() > 0) {
                                 stalled = true;
                                 peer.stall();
                             }
+                            if (!started) return;
+                            const size_t at = heard - settled;
+                            const size_t look = at * 100 / static_cast<size_t>(engineRate);
+                            if (look == lastLook) return;
+                            lastLook = look;
+                            const auto now = inputStatus(fx, "FakeSonicPi", "Main");
+                            if (leastHeldMs.size() <= look / 10) leastHeldMs.resize(look / 10 + 1, UINT32_MAX);
+                            leastHeldMs[look / 10] = std::min(leastHeldMs[look / 10],
+                                static_cast<uint32_t>(now.bufferedSeconds * 1000.0f));
+                            if (now.underruns > seen.underruns && !dry) {
+                                dry = true;
+                                underrunsAtDry = seen.underruns;
+                                event(at) << "ran dry";
+                            } else if (now.underruns == seen.underruns && dry) {
+                                dry = false;
+                                event(at) << "flowed again, "
+                                          << 1e3 * double(now.underruns - underrunsAtDry) / engineRate << " ms missed";
+                            }
+                            if (now.resyncs > seen.resyncs) event(at) << "lost its place (" << now.resyncs - seen.resyncs << ")";
+                            if (now.warps > seen.warps)     event(at) << "bent (" << now.warps - seen.warps << ")";
+                            seen = now;
                         });
+    {
+        std::ostringstream account;
+        account << (events.tellp() > 0 ? events.str() : std::string("nothing happened"))
+                << (dry ? ", and was dry at the end" : "")
+                << "\nthe least it held in each tenth of a second, in ms:";
+        for (const uint32_t ms : leastHeldMs) account << ' ' << ms;
+        out.engineAccount = account.str();
+    }
     out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
     out.engineUnderrunsAtEnd = engineUnderruns(fx);
+    out.engineLog = fx.debugMessagesDump();
     out.report = snapshotInput(fx, "FakeSonicPi", "Main");
 
     // Removed, the input's count stays in the engine's: waited for, since the
@@ -1338,6 +1421,7 @@ TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
              << " gaps and " << h.jumps << " jumps; meanwhile the engine counted " << underruns
              << " underruns, " << resyncs << " resyncs and " << warps << " warps, and ended in state "
              << int(b.state) << " with drift " << b.driftPpm << " ppm");
+        INFO(hearing.story());
         const bool damaged = h.gaps > 0 || h.jumps > 0;
         if (h.gaps > 0)  CHECK(underruns > 0);
         if (h.jumps > 0) CHECK(resyncs + warps > 0);
@@ -1372,11 +1456,19 @@ TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and d
           "[Link][LinkAudio][integration]") {
     for (const auto& [rate, frames] : kListeners) {
       DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
-        const Heard h = hearSonicPiPeer(rate, frames).heard;
+        const Hearing hearing = hearSonicPiPeer(rate, frames);
+        const Heard& h = hearing.heard;
         requireDeviceKeptTime(h, rate, frames);
+        const auto& a = hearing.atStart;
+        const auto& b = hearing.atEnd;
         INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
              << " frames heard, peak " << h.peak << ", " << h.gaps << " gaps, "
-             << h.jumps << " jumps, " << h.hz << " Hz, at " << h.pace << " of a device's pace");
+             << h.jumps << " jumps, " << h.hz << " Hz, at " << h.pace << " of a device's pace;"
+             << " the device's worst callback " << h.worstLateSeconds * 1e3 << " ms late;"
+             << " while judged the engine counted " << (b.underruns - a.underruns) << " underruns, "
+             << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps, drift "
+             << b.driftPpm << " ppm");
+        INFO(hearing.story());
         CHECK(h.frames > static_cast<size_t>(rate));
         CHECK(h.peak > 0.5f);
         CHECK(h.gaps == 0);
@@ -1401,7 +1493,7 @@ TEST_CASE("LinkAudio: the endpoint worker runs as a real-time thread",
     REQUIRE(peer.ready());
 
     EngineFixture fx{handPumpedConfig()};
-    fx.send(osc_test::message("/clockwork/clock/visibility", int32_t{2}));
+    fx.send(osc_test::message("/clockwork/clock/visibility", kThisMachineOnly));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main", std::chrono::seconds(30)));
     REQUIRE(subscribe(fx, "FakeLive", "Main") >= 0);
 
@@ -1417,6 +1509,53 @@ TEST_CASE("LinkAudio: the endpoint worker runs as a real-time thread",
 #else
     CHECK(*status == clockwork::RealtimeStatus::Applied);
 #endif
+}
+
+// The engine's metric for the Link Audio it holds is its input's own figure.
+// It counted the renderer's queue alone, which the endpoint worker empties
+// into the port ring as fast as there is room: a stream playing cleanly,
+// holding its latency's worth, read 0 ms.
+TEST_CASE("LinkAudio: the buffered metric counts all an input holds",
+          "[Link][LinkAudio][integration]") {
+    FakeLinkPeerProcess::Options peerOpts;
+    peerOpts.name     = "FakeLive";
+    peerOpts.channels = {{"Main", 2, "sine440-880"}};
+    FakeLinkPeerProcess peer{peerOpts};
+    REQUIRE(peer.ready());
+
+    // Both read on the device's thread after each block for a second: the
+    // metric as published when the block began, the input's figure as it
+    // ended. A block apart, and the metric in whole milliseconds, so within
+    // a block and a millisecond of each other.
+    constexpr int kLooks = 750;
+    constexpr double kApartMs = 1e3 * 64.0 / 48000.0 + 1.0;
+    std::atomic<bool> looking{false};
+    std::atomic<int> looks{0};
+    double metricMs = 0.0, inputMs = 0.0;
+    auto cfg = handDrivenConfig();
+    cfg.blockSize = 64;
+    EngineFixture fx{cfg};
+    EngineFixture::Device device{fx, 48000, 64, [&] {
+        if (!looking.load(std::memory_order_acquire) || looks.load(std::memory_order_relaxed) == kLooks) return;
+        metricMs += fx.engine().getMetrics().link_audio_buffered_ms.load(std::memory_order_relaxed);
+        inputMs  += 1e3 * inputStatus(fx, "FakeLive", "Main").bufferedSeconds;
+        looks.fetch_add(1, std::memory_order_release);
+    }};
+    fx.send(osc_test::message("/clockwork/clock/visibility", kThisMachineOnly));
+    REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main", std::chrono::seconds(30)));
+    REQUIRE(subscribe(fx, "FakeLive", "Main") >= 0);
+    REQUIRE(waitForConnected(fx, "FakeLive", "Main", std::chrono::seconds(10)).state == kStateConnected);
+
+    looking.store(true, std::memory_order_release);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (looks.load(std::memory_order_acquire) < kLooks && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    REQUIRE(looks.load(std::memory_order_acquire) == kLooks);
+
+    INFO("over " << kLooks << " blocks the metric said " << metricMs / kLooks << " ms on average, and the input "
+         << inputMs / kLooks << " ms");
+    CHECK(inputMs / kLooks > 5.0);
+    CHECK(std::fabs(metricMs - inputMs) / kLooks < kApartMs);
 }
 
 // A peer whose callback stalls makes no audio for that long, and the engine
@@ -1445,7 +1584,9 @@ TEST_CASE("LinkAudio: a peer that stalls is heard to drop out and then carry on 
              << " frames heard, " << h.gaps << " gaps, " << h.jumps << " jumps; "
              << h.hzClean << " Hz over the " << h.cleanFrames << " frames after the last damage;"
              << " the engine counted " << (b.underruns - a.underruns) << " underruns, "
-             << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps");
+             << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps; "
+             << "the peer stalled 0.5 s in");
+        INFO(hearing.story());
         // The stall is heard: silence at least as long as it.
         CHECK(h.gaps >= 1);
         CHECK(h.silent > size_t(rate) / 20);

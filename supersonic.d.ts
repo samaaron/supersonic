@@ -440,7 +440,7 @@ export interface SuperSonicMetrics {
   linkAudioStreamRate: number;
   /** Link Audio input frames that arrived too late to play, every input together. */
   linkAudioUnderruns: number;
-  /** Received Link Audio queued in the receiver (ms). */
+  /** Received Link Audio held ahead of playback, the most of any input (ms). */
   linkAudioBufferedMs: number;
   /** Read-rate deviation from the sender's clock (parts per million, signed). */
   linkAudioDriftPpm: number;
