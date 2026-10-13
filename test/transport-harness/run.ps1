@@ -1,13 +1,12 @@
 # Transport harness (Windows) -- boots the real SuperSonic binary once per
-# command transport (UDP, TCP, named pipe), sends /status over that transport
+# command transport (UDP, TCP, named pipe, SHM), sends /status over that transport
 # with the transport_probe client, and requires a reply. Headless throughout.
 #
 #   powershell -File test\transport-harness\run.ps1 [path-to-SuperSonic.exe]
 #
 # Exit 0 = every transport answered. macOS/Linux (UDP/TCP/UDS) is run.sh.
 #
-# WARNING: not yet exercised on a real Windows machine (CI runs it on the
-# windows-x64 runner).
+# CI runs it on the windows-x64 runner; it has also run on Windows on ARM.
 param([string]$Bin = "")
 
 $ErrorActionPreference = "Stop"
@@ -29,14 +28,19 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
     $proc = Start-Process -FilePath $Bin -ArgumentList (@("--headless", "-u", "0") + $ServerArgs) `
         -RedirectStandardError $log -RedirectStandardOutput "$log.out" -PassThru -NoNewWindow
     $ok = $false
+    # The server binds its transport shortly after boot, so the first probes
+    # can find nothing there: their complaints are kept, and shown only if the
+    # server never answers (as run.sh does), rather than read as failures.
+    $smokeErr = "$log.probe"
     foreach ($i in 1..20) {
         # The probe blocks <=3s itself; treat a hung pipe read as failure too.
         $p = Start-Process -FilePath $Probe -ArgumentList @($Proto, $Target) `
-            -PassThru -NoNewWindow -Wait
+            -RedirectStandardError $smokeErr -PassThru -NoNewWindow -Wait
         if ($p.ExitCode -eq 0) { $ok = $true; break }
         if ($proc.HasExited) { break }
         Start-Sleep -Milliseconds 500
     }
+    if (-not $ok -and (Test-Path $smokeErr)) { Get-Content $smokeErr | ForEach-Object { Write-Host $_ } }
     # Server is up (smoke answered) -> medium end-to-end load blast: many /sync
     # ids through the real engine, verify the /synced replies.
     if ($ok) {
