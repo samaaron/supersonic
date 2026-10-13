@@ -5,8 +5,8 @@
 // included; under Node, node.js adds where the files are on disk.
 
 // CDN URLs for convenience
-export const UNPKG_BASE = 'https://unpkg.com/supersonic-scsynth-samples@0.90.1/samples/';
-export const JSDELIVR_BASE = 'https://cdn.jsdelivr.net/npm/supersonic-scsynth-samples@0.90.1/samples/';
+export const UNPKG_BASE = 'https://unpkg.com/supersonic-scsynth-samples@0.91.0/samples/';
+export const JSDELIVR_BASE = 'https://cdn.jsdelivr.net/npm/supersonic-scsynth-samples@0.91.0/samples/';
 
 // Helper to get CDN URL
 export function getSampleURL(filename, cdn = 'unpkg') {

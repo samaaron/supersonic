@@ -19,15 +19,15 @@ packages live. The engine, the AudioWorklet and the workers are fetched when
 you call `init()`; synthdefs and samples on demand.
 
 ```javascript
-import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.90.1/dist/supersonic.js";
+import { SuperSonic } from "https://unpkg.com/supersonic-scsynth@0.91.0/dist/supersonic.js";
 
 const CDN = "https://unpkg.com/";   // or "https://cdn.jsdelivr.net/npm/"
 const supersonic = new SuperSonic({
-  baseURL:         CDN + "supersonic-scsynth@0.90.1/dist/",              // client, workers
-  coreBaseURL:     CDN + "supersonic-scsynth-core@0.90.1/",              // engine wasm, AudioWorklet
-  wasmBaseURL:     CDN + "supersonic-scsynth-core@0.90.1/wasm/",         // needed up to 0.81.0, see below
-  synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.90.1/synthdefs/",
-  sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.90.1/samples/",
+  baseURL:         CDN + "supersonic-scsynth@0.91.0/dist/",              // client, workers
+  coreBaseURL:     CDN + "supersonic-scsynth-core@0.91.0/",              // engine wasm, AudioWorklet
+  wasmBaseURL:     CDN + "supersonic-scsynth-core@0.91.0/wasm/",         // needed up to 0.81.0, see below
+  synthdefBaseURL: CDN + "supersonic-scsynth-synthdefs@0.91.0/synthdefs/",
+  sampleBaseURL:   CDN + "supersonic-scsynth-samples@0.91.0/samples/",
 });
 
 // Browsers start audio only after a click, tap or keypress
