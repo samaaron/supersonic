@@ -204,7 +204,7 @@ The AudioWorklet reads the OUT ring buffer directly and sends replies to the mai
 
 Natively, replies written off the audio thread go on the NRT-out ring. The engine's control thread reads both rings, OUT first, and sends each reply to the client it answers, or to every subscriber of a broadcast.
 
-**The OSC-out log**: the `out:osc` events show what was sent, read from the IN ring. The engine consumes that ring, so the log watches it through a tap: a read cursor of its own that takes nothing (`openTap`, `tapPoll`, `tapMissed` in `clockwork/js/lib/wasm_client.js`). Writers reserve space against the engine's cursor, not the tap's, so a log that falls behind is overwritten. The tap then resyncs to the newest traffic and counts what went past. In SAB mode the log worker (`osc_out_log_sab_worker.js`) runs the tap; in PM mode the worklet does, on its snapshot heartbeat.
+**The OSC-out log**: the `out:osc` events show what was sent, read from the IN ring. The engine consumes that ring, so the log watches it through a tap: a read cursor of its own that takes nothing (`RingTap` in `clockwork/js/lib/ring.js`). Writers reserve space against the engine's cursor, not the tap's, so a log that falls behind is overwritten. The tap then resyncs to the newest traffic and counts what went past. In SAB mode the log worker (`osc_out_log_sab_worker.js`) runs the tap; in PM mode the worklet does, on its snapshot heartbeat.
 
 ### Debug Messages
 
@@ -218,7 +218,7 @@ Debug lines from the engine ride the egress as `/clockwork/debug` messages, on e
 | Buffer command rewriting (web) | `js/lib/osc_rewriter.js` |
 | OscChannel | `clockwork/js/lib/osc_channel.js` |
 | OscChannel (AudioWorklet-safe entry) | `clockwork/js/osc_channel.js` |
-| Ring buffer read/write, taps | `clockwork/js/lib/wasm_client.js` over `clockwork/src/clockwork_client.cpp` |
+| Ring buffer read/write, taps | `clockwork/js/lib/ring.js` outside the worklet, `clockwork/src/clockwork_client.cpp` inside it |
 | SAB transport | `clockwork/js/lib/transport/sab_transport.js` |
 | PM transport | `clockwork/js/lib/transport/postmessage_transport.js` |
 | Reply worker (SAB only) | `clockwork/js/workers/osc_in_worker.js` |

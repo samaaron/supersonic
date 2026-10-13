@@ -87,8 +87,8 @@ test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPa
       guestPersistSize: bc.GUEST_PERSIST_SIZE,
       channelMapStart: bc.CHANNEL_MAP_START,
       channelMapSize: bc.CHANNEL_MAP_SIZE,
-      clientSlotsStart: bc.CLIENT_SLOTS_START,
-      clientSlotsSize: bc.CLIENT_SLOTS_SIZE,
+      nrtOutStart: bc.NRT_OUT_BUFFER_START,
+      nrtOutSize: bc.NRT_OUT_BUFFER_SIZE,
       clockworkBlockSize: bc.CLOCKWORK_BLOCK_SIZE,
       guestRegionStart: bc.GUEST_REGION_START,
       totalBufferSize: bc.TOTAL_BUFFER_SIZE,
@@ -98,13 +98,13 @@ test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPa
   // The arena is two blocks (clockwork/js/lib/arena.js), each laid out
   // published-first (clockwork/docs/ARENA.md). clockwork's block runs the
   // regions any attached reader may follow — METRICS, ..., SAMPLE_CLOCK,
-  // CHANNEL_MAP, the audio taps — then its transport: CONTROL, the rings,
-  // and the CLIENT SLOTS at the end. The guest's block follows, opening with
+  // CHANNEL_MAP, the audio taps — then its transport: CONTROL, and the rings,
+  // with the NRT-out ring at the end. The guest's block follows, opening with
   // what the guest publishes — its WINDOW, then the TAPS — and then the
   // guest's own: GUEST_CONFIG (the world options) and, closing the arena,
   // GUEST_PERSIST. A region is APPENDED to the run it belongs to, so the
   // seams pinned here are what this file follows when one is added.
-  expect(result.clientSlotsStart + result.clientSlotsSize).toBe(result.clockworkBlockSize);
+  expect(result.nrtOutStart + result.nrtOutSize).toBe(result.clockworkBlockSize);
   expect(result.guestRegionStart).toBe(result.clockworkBlockSize);
   expect(result.windowStart).toBe(result.guestRegionStart);
   expect(result.scopeStart).toBeGreaterThanOrEqual(result.windowStart + result.windowSize);
@@ -112,7 +112,7 @@ test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPa
   expect(result.guestPersistStart).toBeGreaterThanOrEqual(result.worldOptionsStart + result.worldOptionsSize);
   expect(result.guestPersistStart + result.guestPersistSize).toBe(result.totalBufferSize);
   expect(result.channelMapStart + result.channelMapSize)
-    .toBeLessThanOrEqual(result.clientSlotsStart);
+    .toBeLessThanOrEqual(result.nrtOutStart);
   expect(result.sampleClockStart + result.sampleClockSize)
     .toBeLessThanOrEqual(result.channelMapStart);
 });
