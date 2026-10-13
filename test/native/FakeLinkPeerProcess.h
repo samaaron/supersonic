@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -37,8 +38,21 @@ public:
         // (0: it can't): the frames are never made, and the stream resumes
         // stamped at the present.
         std::chrono::milliseconds stallFor{0};
+        // Whether the peer keeps its own timing, for timing().
+        bool reportTiming = false;
         std::vector<Channel> channels;
         std::chrono::milliseconds readyTimeout{5000};
+    };
+
+    // What the peer saw of its own timing, in slots from t0 on the steady
+    // clock every process on the machine shares: in each, how late its
+    // publishing woke, how long Link's thread, which sends what it publishes,
+    // kept a task waiting, and the blocks it could not publish for a full
+    // queue to that thread.
+    struct Timing {
+        std::chrono::steady_clock::time_point t0;
+        std::chrono::steady_clock::duration   slot = std::chrono::milliseconds(10);
+        std::vector<int32_t> lateUs, waitUs, skipped;
     };
 
     explicit FakeLinkPeerProcess(const Options& opts);
@@ -59,9 +73,15 @@ public:
     // can send a child; it takes effect within a block.
     void stall();
 
+    // The peer's timing (Options::reportTiming) as it stood once it had
+    // written past `after`, which it does every 100 ms: nothing if it had
+    // not within a second.
+    std::optional<Timing> timing(std::chrono::steady_clock::time_point after) const;
+
 private:
     Options     mOptions;
     std::string mStallFlag;   // the file that says stall
+    std::string mReport;      // the file the peer keeps its timing in
     // Opaque process handle. On POSIX this is a pid_t; on Windows a
     // HANDLE cast to intptr_t (-1 / 0 = invalid). The .cpp casts back
     // as needed under platform #ifdefs.

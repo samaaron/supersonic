@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <atomic>
 #include <sstream>
 #include <thread>
@@ -1272,14 +1273,46 @@ struct Hearing {
     uint64_t                engineUnderrunsAfterRemove = 0;
     std::string             engineLog;   // the engine's debug lines
     std::string             engineAccount;   // where it ran dry, and how much it held, as the judging went
+    std::string             peerAccount;     // how late the peer was to publish and to send, as the judging went
 
     // What a failure says of it: where the damage was heard, the engine's
-    // account of the same time, and its log, which says whether the session
-    // held more than this test's peer.
+    // and the peer's accounts of the same time, which between them say which
+    // of the two let the audio stop, and the engine's log, which says whether
+    // the session held more than this test's peer.
     std::string story() const {
-        return "heard: " + heard.damage + "\nthe engine: " + engineAccount + "\nengine log:\n" + engineLog;
+        return "heard: " + heard.damage + "\nthe engine: " + engineAccount + "\nthe peer: " + peerAccount
+             + "\nengine log:\n" + engineLog;
     }
 };
+
+// The peer's account of the judged time, from its own timing: in each tenth
+// of a second by the clock from `judgedFrom`, its latest wake to publish, the
+// longest Link's thread kept it waiting to send, and the blocks it could not
+// publish because that thread had not taken the ones before.
+std::string peerAccountOf(const std::optional<FakeLinkPeerProcess::Timing>& t,
+                          std::chrono::steady_clock::time_point judgedFrom, size_t tenths) {
+    if (!t) return "its timing was not to be had";
+    std::vector<int32_t> late(tenths, 0), wait(tenths, 0), skipped(tenths, 0);
+    const size_t slots = std::min({t->lateUs.size(), t->waitUs.size(), t->skipped.size()});
+    for (size_t i = 0; i < slots; ++i) {
+        const auto at = t->t0 + t->slot * static_cast<int64_t>(i);
+        if (at < judgedFrom) continue;
+        const auto k = static_cast<size_t>((at - judgedFrom) / std::chrono::milliseconds(100));
+        if (k >= tenths) break;
+        late[k] = std::max(late[k], t->lateUs[i]);
+        wait[k] = std::max(wait[k], t->waitUs[i]);
+        skipped[k] += t->skipped[i];
+    }
+    std::ostringstream account;
+    const auto row = [&](const char* what, const std::vector<int32_t>& v, bool us) {
+        account << what;
+        for (const int32_t x : v) account << ' ' << (us ? (x + 500) / 1000 : x);
+    };
+    row("in each tenth of a second by the clock, the latest it woke to publish, in ms:", late, true);
+    row("\n  the longest Link's thread kept it waiting to send, in ms:", wait, true);
+    row("\n  the blocks it could not publish for a full queue:", skipped, false);
+    return account.str();
+}
 
 link_audio::InputStatus inputStatus(EngineFixture& fx, const char* peer, const char* channel) {
     for (const auto& in : fx.engine().linkAudio().listInputs())
@@ -1301,6 +1334,7 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
     peerOpts.sampleRate = 48000;
     peerOpts.channels   = {{"Main", 2, "sine440-880"}};
     peerOpts.stallFor   = peerStall;
+    peerOpts.reportTiming = true;
     FakeLinkPeerProcess peer{peerOpts};
     REQUIRE(peer.ready());
 
@@ -1321,13 +1355,15 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
     bool started = false, stalled = false;
     // The engine's own account as the judging goes, looked at every
     // hundredth of a second heard, in seconds from the judging's start: where
-    // the input ran dry and flowed again, lost its place or bent, and the
-    // least it held in each tenth of a second.
+    // the input ran dry and flowed again, lost its place or bent, and in each
+    // tenth of a second the least it held and the peer's buffers that arrived.
     std::ostringstream events;
     events.setf(std::ios::fixed);
     events.precision(3);
-    std::vector<uint32_t> leastHeldMs;
+    std::vector<uint32_t> leastHeldMs, arrived;
     leastHeldMs.reserve(32);
+    arrived.reserve(32);
+    std::chrono::steady_clock::time_point judgedFrom;
     link_audio::InputStatus seen;
     uint64_t underrunsAtDry = 0;
     bool dry = false;
@@ -1339,6 +1375,7 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                         [&](size_t heard) {
                             if (heard >= settled && !started) {
                                 started = true;
+                                judgedFrom = std::chrono::steady_clock::now();
                                 out.atStart = inputStatus(fx, "FakeSonicPi", "Main");
                                 out.engineUnderrunsAtStart = engineUnderruns(fx);
                                 seen = out.atStart;
@@ -1353,9 +1390,14 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                             if (look == lastLook) return;
                             lastLook = look;
                             const auto now = inputStatus(fx, "FakeSonicPi", "Main");
-                            if (leastHeldMs.size() <= look / 10) leastHeldMs.resize(look / 10 + 1, UINT32_MAX);
+                            if (leastHeldMs.size() <= look / 10) {
+                                leastHeldMs.resize(look / 10 + 1, UINT32_MAX);
+                                arrived.resize(look / 10 + 1, 0);
+                            }
                             leastHeldMs[look / 10] = std::min(leastHeldMs[look / 10],
                                 static_cast<uint32_t>(now.bufferedSeconds * 1000.0f));
+                            arrived[look / 10] += static_cast<uint32_t>(
+                                now.totalSourceBufferCalls - seen.totalSourceBufferCalls);
                             if (now.underruns > seen.underruns && !dry) {
                                 dry = true;
                                 underrunsAtDry = seen.underruns;
@@ -1369,14 +1411,18 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                             if (now.warps > seen.warps)     event(at) << "bent (" << now.warps - seen.warps << ")";
                             seen = now;
                         });
+    const auto listened = std::chrono::steady_clock::now();
     {
         std::ostringstream account;
         account << (events.tellp() > 0 ? events.str() : std::string("nothing happened"))
                 << (dry ? ", and was dry at the end" : "")
                 << "\nthe least it held in each tenth of a second, in ms:";
         for (const uint32_t ms : leastHeldMs) account << ' ' << ms;
+        account << "\n  the peer's buffers that arrived in each:";
+        for (const uint32_t n : arrived) account << ' ' << n;
         out.engineAccount = account.str();
     }
+    out.peerAccount = peerAccountOf(peer.timing(listened), judgedFrom, leastHeldMs.size());
     out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
     out.engineUnderrunsAtEnd = engineUnderruns(fx);
     out.engineLog = fx.debugMessagesDump();

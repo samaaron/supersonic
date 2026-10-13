@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -26,7 +27,8 @@ namespace {
 // Build the option list as plain strings; each backend converts to its
 // platform-native argv / command-line form.
 std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts,
-                                      const std::string& stallFlag) {
+                                      const std::string& stallFlag,
+                                      const std::string& report) {
     std::vector<std::string> args;
     args.emplace_back(CLOCKWORK_TEST_LINK_PEER_BINARY);
     args.emplace_back("--name");        args.push_back(opts.name);
@@ -38,6 +40,9 @@ std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts,
         args.emplace_back("--stall");
         args.push_back(std::to_string(opts.stallFor.count()) + ":" + stallFlag);
     }
+    if (opts.reportTiming) {
+        args.emplace_back("--report");  args.push_back(report);
+    }
     for (const auto& c : opts.channels) {
         args.emplace_back("--channel");
         args.push_back(c.name + ":" + std::to_string(c.numChannels) + ":" + c.generator);
@@ -45,21 +50,60 @@ std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts,
     return args;
 }
 
-// A path of this process's own for one peer's stall flag, nowhere yet.
-std::string freshStallFlag() {
+// A path of this process's own for one of a peer's files, nowhere yet.
+std::string freshPath(const char* what) {
     static std::atomic<unsigned> serial{0};
     std::error_code ec;
     auto dir = std::filesystem::temp_directory_path(ec);
     if (ec) dir = ".";
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    return (dir / ("supersonic_peer_stall_" + std::to_string(now) + "_"
+    return (dir / ("supersonic_peer_" + std::string(what) + "_" + std::to_string(now) + "_"
                    + std::to_string(serial.fetch_add(1)))).string();
+}
+
+void removePeerFiles(const std::string& stallFlag, const std::string& report) {
+    std::error_code ec;
+    std::filesystem::remove(stallFlag, ec);
+    std::filesystem::remove(report, ec);
+    std::filesystem::remove(report + ".tmp", ec);
+}
+
+std::chrono::steady_clock::time_point steadyAt(int64_t ns) {
+    return std::chrono::steady_clock::time_point(
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::nanoseconds(ns)));
 }
 
 }  // namespace
 
 void FakeLinkPeerProcess::stall() {
     std::ofstream(mStallFlag).put('\n');
+}
+
+std::optional<FakeLinkPeerProcess::Timing>
+FakeLinkPeerProcess::timing(std::chrono::steady_clock::time_point after) const {
+    if (!mOptions.reportTiming) return std::nullopt;
+    const auto giveUp = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    do {
+        std::ifstream in(mReport);
+        Timing t;
+        std::chrono::steady_clock::time_point written;
+        std::string line;
+        while (std::getline(in, line)) {
+            std::istringstream row(line);
+            std::string key;
+            row >> key;
+            int64_t v = 0;
+            if (key == "t0" && row >> v)           t.t0 = steadyAt(v);
+            else if (key == "written" && row >> v) written = steadyAt(v);
+            else if (key == "late_us") while (row >> v) t.lateUs.push_back(static_cast<int32_t>(v));
+            else if (key == "wait_us") while (row >> v) t.waitUs.push_back(static_cast<int32_t>(v));
+            else if (key == "skipped") while (row >> v) t.skipped.push_back(static_cast<int32_t>(v));
+        }
+        in.close();
+        if (written >= after) return t;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while (std::chrono::steady_clock::now() < giveUp);
+    return std::nullopt;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -98,7 +142,7 @@ bool waitForReadyLine(int fd, std::chrono::steady_clock::time_point deadline) {
 }  // namespace
 
 FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
-    : mOptions(opts), mStallFlag(freshStallFlag()) {
+    : mOptions(opts), mStallFlag(freshPath("stall")), mReport(freshPath("timing")) {
     int pipefd[2] = {-1, -1};
     if (::pipe(pipefd) != 0) {
         std::fprintf(stderr, "FakeLinkPeerProcess: pipe() failed: %s\n",
@@ -120,7 +164,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
         ::dup2(pipefd[1], STDOUT_FILENO);
         ::close(pipefd[1]);
 
-        const auto args = buildArgList(mOptions, mStallFlag);
+        const auto args = buildArgList(mOptions, mStallFlag, mReport);
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);
         for (const auto& s : args) argv.push_back(const_cast<char*>(s.c_str()));
@@ -145,22 +189,26 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
     }
 }
 
+// Once the peer is gone: it writes its timing a last time as it stops.
 FakeLinkPeerProcess::~FakeLinkPeerProcess() {
-    std::error_code ec;
-    std::filesystem::remove(mStallFlag, ec);
-    if (mProcess <= 0) return;
-    const pid_t pid = static_cast<pid_t>(mProcess);
-    ::kill(pid, SIGTERM);
-    int status = 0;
-    const auto killDeadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (std::chrono::steady_clock::now() < killDeadline) {
-        const pid_t r = ::waitpid(pid, &status, WNOHANG);
-        if (r == pid || r < 0) return;
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (mProcess > 0) {
+        const pid_t pid = static_cast<pid_t>(mProcess);
+        ::kill(pid, SIGTERM);
+        int status = 0;
+        const auto killDeadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        bool reaped = false;
+        while (!reaped && std::chrono::steady_clock::now() < killDeadline) {
+            const pid_t r = ::waitpid(pid, &status, WNOHANG);
+            reaped = r == pid || r < 0;
+            if (!reaped) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        if (!reaped) {
+            ::kill(pid, SIGKILL);
+            ::waitpid(pid, &status, 0);
+        }
     }
-    ::kill(pid, SIGKILL);
-    ::waitpid(pid, &status, 0);
+    removePeerFiles(mStallFlag, mReport);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -232,7 +280,7 @@ bool waitForReadyHandle(HANDLE readEnd,
 }  // namespace
 
 FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
-    : mOptions(opts), mStallFlag(freshStallFlag()) {
+    : mOptions(opts), mStallFlag(freshPath("stall")), mReport(freshPath("timing")) {
     SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
     HANDLE readEnd = nullptr, writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) {
@@ -244,7 +292,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
     // Parent's read end isn't inherited by the child.
     SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
 
-    const auto args = buildArgList(mOptions, mStallFlag);
+    const auto args = buildArgList(mOptions, mStallFlag, mReport);
     const std::string cmdline = buildCommandLine(args);
     std::vector<char> cmdBuf(cmdline.begin(), cmdline.end());
     cmdBuf.push_back('\0');
@@ -288,20 +336,21 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
     }
 }
 
+// Once the peer is gone, which may have been writing its timing.
 FakeLinkPeerProcess::~FakeLinkPeerProcess() {
-    std::error_code ec;
-    std::filesystem::remove(mStallFlag, ec);
-    if (mProcess == 0 || mProcess == -1) return;
-    HANDLE process = reinterpret_cast<HANDLE>(mProcess);
-    // TerminateProcess is equivalent to SIGKILL — bypasses the peer's
-    // signal handlers, so Link doesn't shut down gracefully and may
-    // leave brief stale entries in other peers' session lists. Fine
-    // for tests; switch to GenerateConsoleCtrlEvent if a graceful path
-    // becomes important.
-    TerminateProcess(process, 0);
-    WaitForSingleObject(process, 2000);
-    CloseHandle(process);
-    if (mWinThread) CloseHandle(reinterpret_cast<HANDLE>(mWinThread));
+    if (mProcess != 0 && mProcess != -1) {
+        HANDLE process = reinterpret_cast<HANDLE>(mProcess);
+        // TerminateProcess is equivalent to SIGKILL — bypasses the peer's
+        // signal handlers, so Link doesn't shut down gracefully and may
+        // leave brief stale entries in other peers' session lists. Fine
+        // for tests; switch to GenerateConsoleCtrlEvent if a graceful path
+        // becomes important.
+        TerminateProcess(process, 0);
+        WaitForSingleObject(process, 2000);
+        CloseHandle(process);
+        if (mWinThread) CloseHandle(reinterpret_cast<HANDLE>(mWinThread));
+    }
+    removePeerFiles(mStallFlag, mReport);
 }
 
 #endif  // _WIN32

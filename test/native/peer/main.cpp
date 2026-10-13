@@ -26,6 +26,7 @@
 
 #include "RealtimeThread.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -34,6 +35,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -117,12 +119,68 @@ void printUsage() {
         "                             as a stalled audio callback does: the frames that\n"
         "                             fell in the stall are never made, and the stream\n"
         "                             resumes stamped at the present. The file is removed.\n"
+        "  --report <path>            Keep at <path> this peer's own timing, in 10 ms slots\n"
+        "                             (see Timing), rewritten every 100 ms.\n"
         "  --channel <name>:<numCh>:<gen>\n"
         "                             Add a channel (repeatable). Generators:\n"
         "                               silence, sine440, sine440-880, dc:<value>\n"
         "                             e.g. Main:2:sine440-880\n",
         stderr);
 }
+
+// What this peer saw of its own timing, so a test that heard a gap can tell
+// whether its peer made it: in each 10 ms from t0, on the steady clock every
+// process on the machine shares, how late the publishing woke, how long
+// Link's thread, which sends what is published, kept a task waiting, and how
+// many blocks found the queue to it full. Each slot has one writer: the
+// publishing thread, or Link's thread for the waits.
+struct Timing {
+    static constexpr auto   kSlot  = std::chrono::milliseconds(10);
+    static constexpr size_t kSlots = 6000;   // a minute: these peers live for seconds
+
+    const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    std::atomic<int32_t> lateUs[kSlots]{};
+    std::atomic<int32_t> waitUs[kSlots]{};
+    std::atomic<int32_t> skipped[kSlots]{};
+    std::atomic<bool>    probing{false};   // a task is waiting on Link's thread
+
+    size_t slotOf(std::chrono::steady_clock::time_point t) const {
+        return std::min(static_cast<size_t>((t - t0) / kSlot), kSlots - 1);
+    }
+    static void keepWorst(std::atomic<int32_t>& slot, std::chrono::steady_clock::duration d) {
+        const auto us = static_cast<int32_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(d).count());
+        if (us > slot.load(std::memory_order_relaxed)) slot.store(us, std::memory_order_relaxed);
+    }
+
+    // The slots so far, to `path` whole: written aside and renamed over it,
+    // so a reader never sees half. A rename refused (Windows, while the test
+    // has it open) waits for the next.
+    void write(const std::string& path) const {
+        const auto now = std::chrono::steady_clock::now();
+        const size_t n = slotOf(now) + 1;
+        const auto ns = [](std::chrono::steady_clock::time_point t) {
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(t.time_since_epoch()).count();
+        };
+        std::string out = "t0 " + std::to_string(ns(t0)) + "\nwritten " + std::to_string(ns(now)) + "\n";
+        const auto row = [&](const char* name, const std::atomic<int32_t>* slots) {
+            out += name;
+            for (size_t i = 0; i < n; ++i)
+                out += ' ' + std::to_string(slots[i].load(std::memory_order_relaxed));
+            out += '\n';
+        };
+        row("late_us", lateUs);
+        row("wait_us", waitUs);
+        row("skipped", skipped);
+        const std::string aside = path + ".tmp";
+        if (FILE* f = std::fopen(aside.c_str(), "wb")) {
+            std::fwrite(out.data(), 1, out.size(), f);
+            std::fclose(f);
+            std::error_code ec;
+            std::filesystem::rename(aside, path, ec);
+        }
+    }
+};
 
 }  // namespace
 
@@ -150,6 +208,7 @@ int main(int argc, char** argv) {
     int         sampleRate  = 48000;
     int         stallForMs   = 0;   // --stall: the callback stops for this long...
     std::string stallFlag;          // ...when this file appears
+    std::string reportPath;         // --report: where Timing is kept
     std::vector<ChannelSpec> channels;
 
     for (int i = 1; i < argc; ++i) {
@@ -172,6 +231,7 @@ int main(int argc, char** argv) {
                 || !parseInt(v.substr(0, colon).c_str(), stallForMs)) { printUsage(); return 1; }
             stallFlag = v.substr(colon + 1);
         }
+        else if (a == "--report"      && i + 1 < argc) { reportPath = argv[++i]; }
         else if (a == "--channel"     && i + 1 < argc) {
             ChannelSpec c;
             if (!parseChannelArg(argv[++i], c)) { printUsage(); return 1; }
@@ -214,14 +274,27 @@ int main(int argc, char** argv) {
         loopbackOnly, std::memory_order_relaxed);
 #endif
 
+    // Before the link, as is the priority below, so a task of the watcher's
+    // still queued on Link's thread finds it there until that thread is gone.
+    const auto timing = std::make_unique<Timing>();
+
+    // Link's thread sends what is published, on a 1 ms timer, and is raised
+    // as every real peer raises it (Clockwork's LinkSession, Ableton's
+    // linkaudiohut). Left in an ordinary thread's place, a loaded machine kept
+    // it waiting for up to 200 ms while this peer's audio was made on time,
+    // and the engine ran dry for want of it.
+    ableton::link::platform::ThreadPriority linkThreadPriority;
+
     ableton::LinkAudio link{bpm, peerName};
     link.enable(true);
+    link.callOnLinkThread([&linkThreadPriority] { linkThreadPriority.setHigh(); });
     link.enableLinkAudio(true);
 
     constexpr size_t kSinkMaxSamples = 4096;
     struct ActiveChannel {
         ChannelSpec            spec;
         ableton::LinkAudioSink sink;
+        bool                   published = false;
     };
     std::vector<ActiveChannel> sinks;
     sinks.reserve(channels.size());
@@ -261,7 +334,39 @@ int main(int argc, char** argv) {
                                  "realtime (error %d)\n", rt.error);
     }
 
+    // For --report: a task posted to Link's thread every 2 ms, one at a time,
+    // and how long it waited there to run; and the report kept. Real-time
+    // itself, so that on a machine loaded enough to keep Link's thread
+    // waiting it still posts and reports on time: an ordinary thread was
+    // starved there past the test's wait for the report.
+    std::atomic<bool> watching{!reportPath.empty()};
+    std::thread watcher;
+    if (watching.load(std::memory_order_relaxed)) {
+        watcher = std::thread([&] {
+            clockwork::elevateCurrentThreadToRealtime(0.002);
+            auto nextReport = std::chrono::steady_clock::now();
+            while (watching.load(std::memory_order_relaxed)) {
+                if (!timing->probing.exchange(true, std::memory_order_acq_rel)) {
+                    const auto posted = std::chrono::steady_clock::now();
+                    link.callOnLinkThread([t = timing.get(), posted] {
+                        Timing::keepWorst(t->waitUs[t->slotOf(posted)],
+                                          std::chrono::steady_clock::now() - posted);
+                        t->probing.store(false, std::memory_order_release);
+                    });
+                }
+                if (std::chrono::steady_clock::now() >= nextReport) {
+                    timing->write(reportPath);
+                    nextReport += std::chrono::milliseconds(100);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+            timing->write(reportPath);
+        });
+    }
+
     while (!gShouldQuit.load(std::memory_order_relaxed)) {
+        const auto woke = std::chrono::steady_clock::now();
+        Timing::keepWorst(timing->lateUs[timing->slotOf(woke)], woke - nextDeadline);
         // The stall, when the test says: a file is the one signal every
         // platform can send a child, and a stat a block costs nothing.
         std::error_code ec;
@@ -282,7 +387,12 @@ int main(int argc, char** argv) {
 #endif
         for (auto& a : sinks) {
             ableton::LinkAudioSink::BufferHandle buf(a.sink);
-            if (!buf) continue;  // No subscriber → skip silently.
+            if (!buf) {
+                // No subscriber yet; once one has had audio, a queue Link's
+                // thread has not emptied (or the subscriber gone).
+                if (a.published) timing->skipped[timing->slotOf(woke)].fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
             const size_t needed = size_t(blockSize) * size_t(a.spec.numChannels);
             if (needed > buf.maxNumSamples) continue;
             for (int f = 0; f < blockSize; ++f) {
@@ -298,15 +408,18 @@ int main(int argc, char** argv) {
                 static_cast<int64_t>(1e6 * double(frameOffset) / sampleRate));
             const double beatsAtBegin =
                 sessionState.beatAtTime(hostMicros, /*quantum=*/4.0);
-            buf.commit(sessionState, beatsAtBegin, /*quantum=*/4.0,
-                       size_t(blockSize), size_t(a.spec.numChannels),
-                       uint32_t(sampleRate));
+            a.published = buf.commit(sessionState, beatsAtBegin, /*quantum=*/4.0,
+                                     size_t(blockSize), size_t(a.spec.numChannels),
+                                     uint32_t(sampleRate))
+                       || a.published;
         }
         frameOffset += blockSize;
         nextDeadline += blockDuration;
         std::this_thread::sleep_until(nextDeadline);
     }
 
+    watching.store(false, std::memory_order_relaxed);
+    if (watcher.joinable()) watcher.join();
     link.enableLinkAudio(false);
     link.enable(false);
     return 0;
