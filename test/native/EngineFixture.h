@@ -81,19 +81,31 @@ public:
     // Generic deadline loop for non-block conditions: a metric atomic
     // reaching a value, a counter draining to zero. Returns the final
     // pred() value (true = condition met before the deadline).
+    //
+    // Pumped, the wait has two budgets, and gives up only once both are
+    // spent: timeoutMs of audio, pumped a block a turn (what the audio thread
+    // answers after so many blocks arrives on audio time, however slow the
+    // machine), and timeoutMs of wall clock (what one of the engine's threads
+    // delivers once woken needs real time to run). One budget alone was
+    // wrong: the wall clock ran out before the audio on a loaded runner,
+    // each turn's sleep stretched (SendReply at 2 Hz, macOS arm64, 2026-10-14).
     template <typename Pred>
     bool pollUntil(Pred pred, int timeoutMs = 2000) {
         const auto deadline = std::chrono::steady_clock::now()
                             + std::chrono::milliseconds(timeoutMs);
+        uint32_t owed = testPumps() ? blocksOfAudio(timeoutMs) : 0;
         while (true) {
             // In manual-pump mode nothing advances the engine unless we do it
             // here, on this thread — keeps the test the sole audio-thread writer.
-            if (testPumps()) pumpBlock();
+            if (owed) { pumpBlock(); --owed; }
             if (pred()) return true;
-            if (std::chrono::steady_clock::now() >= deadline) return false;
+            if (!owed && std::chrono::steady_clock::now() >= deadline) return false;
             std::this_thread::sleep_for(std::chrono::milliseconds(testPumps() ? 3 : 2));
         }
     }
+
+    // The blocks the engine renders in `ms` of audio, at its rate and block size.
+    uint32_t blocksOfAudio(int ms) const;
 
     // Get all collected replies so far
     std::vector<OscReply> allReplies() const;
@@ -202,6 +214,7 @@ private:
     // The test thread renders: manual pump, and no Device rendering instead.
     bool testPumps() const { return mManualPump && !mDeviceRendering.load(std::memory_order_relaxed); }
     bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
+    int              mSampleRate = 48000;  // cfg.sampleRate — blocksOfAudio
     std::atomic<bool> mDeviceRendering{false};  // a Device is the renderer
     uint64_t         mGeneration = 0;      // unique per fixture (see generation())
 

@@ -12,6 +12,7 @@
 #include "ClockworkProcessor.h"
 #include "HeadlessDriver.h"
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <chrono>
@@ -70,6 +71,7 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg) {
     // In manual-pump mode there is no audio-driver thread; the wait primitives
     // drive process_audio on the test thread instead (see pollUntil/waitForReply).
     mManualPump = cfg.manualAudioPump;
+    mSampleRate = cfg.sampleRate;
 
     // Wire reply/debug callbacks before initialising
     mEngine.onReply = [this](const uint8_t* data, uint32_t size) {
@@ -161,11 +163,14 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
 
     // Manual-pump mode: the NRT gateway only delivers replies after the audio
     // thread ticks, and nothing ticks unless we pump here on the test thread.
+    // Two budgets, audio and wall clock, both spent before giving up
+    // (pollUntil says why).
     if (testPumps()) {
+        uint32_t owed = blocksOfAudio(timeoutMs);
         while (true) {
-            pumpBlock();
+            if (owed) { pumpBlock(); --owed; }
             if (take()) return true;
-            if (std::chrono::steady_clock::now() >= deadline) {
+            if (!owed && std::chrono::steady_clock::now() >= deadline) {
                 // The caller's assertion expands to a bare "false"; say what we
                 // waited for and what did arrive, so a timeout separates "wrong
                 // reply" from "no reply at all" without a rerun.
@@ -233,11 +238,21 @@ bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
     }
 }
 
+uint32_t EngineFixture::blocksOfAudio(int ms) const {
+    const double frames = double(ms) * double(mSampleRate) / 1000.0;
+    return static_cast<uint32_t>(std::ceil(frames / double(get_audio_buffer_samples())));
+}
+
 bool EngineFixture::waitForBlocks(uint32_t n, int timeoutMs) {
     const uint32_t start =
         mEngine.processor().processCount.load(std::memory_order_acquire);
     // Unsigned wrap is fine: (now - start) is the number of blocks rendered
     // since the snapshot regardless of counter wraparound.
+    // Pumped: the blocks are rendered here, now, however busy the machine is.
+    if (testPumps()) {
+        pumpBlock(n);
+        return mEngine.processor().processCount.load(std::memory_order_acquire) - start >= n;
+    }
     return pollUntil([&] {
         return mEngine.processor().processCount.load(
                    std::memory_order_acquire) - start >= n;
