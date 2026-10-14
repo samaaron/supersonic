@@ -152,20 +152,26 @@ jobs:
       # benchmarks excluded) and the guest boundary check. A case that only
       # passes after another has run fails here, as does one whose name the
       # discovery cannot carry. Both happened, with this workflow green.
+      # The pumped cases depend on no thread's timing, so they run in
+      # parallel; the real-time ones (label rt: [rt] and [Link]) have a step
+      # of their own below, one at a time, with nothing beside them.
       - name: Run tests (each case on its own)
-        run: ctest --test-dir build/native -C Release --output-on-failure -j 2 --timeout 300
+        run: ctest --test-dir build/native -C Release --output-on-failure -LE rt -j 4 --timeout 300
 
-      # The binary, every case in one process, in a shuffled order: a case
-      # that leaves something behind for the next fails here. The seed is the
-      # run number: every run shuffles differently, and re-running a failed
-      # job runs the same order again. Catch2 prints it first ("Randomness
-      # seeded to"); locally, --order rand --rng-seed <that>.
+      - name: Run real-time tests (one at a time)
+        run: ctest --test-dir build/native -C Release --output-on-failure -L rt -j 1 --timeout 300
+
+      # The binary, every pumped case in one process, in a shuffled order: a
+      # case that leaves something behind for the next fails here. The seed is
+      # the run number: every run shuffles differently, and re-running a
+      # failed job runs the same order again. Catch2 prints it first
+      # ("Randomness seeded to"); locally, --order rand --rng-seed <that>.
       - name: Run tests (one process, shuffled)
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
+            ./build/native/test/native/Release/SuperSonicNativeTests.exe "~[benchmark]~[rt]~[Link]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
           else
-            ./build/native/test/native/SuperSonicNativeTests "~[benchmark]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
+            ./build/native/test/native/SuperSonicNativeTests "~[benchmark]~[rt]~[Link]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
           fi
         shell: bash
 

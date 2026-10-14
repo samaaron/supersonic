@@ -146,7 +146,7 @@ int settleThreadCount(std::chrono::milliseconds timeout = std::chrono::milliseco
 
 }  // namespace
 
-TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][stress]") {
+TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][stress][rt]") {
     constexpr int kCycles = 40;
 
     ClockworkEngine::Config cfg;
@@ -261,7 +261,7 @@ TEST_CASE("Shutdown without init is safe", "[lifecycle]") {
 }
 
 TEST_CASE("Partial-init failure cleans up allocated resources",
-          "[lifecycle]") {
+          "[lifecycle][rt]") {
     // Drives init() to throw after the scsynth World has been
     // created, worker threads have started, and the audio callback is
     // wired, but before mRunning is set. shutdown()

@@ -224,12 +224,18 @@ set(_CATCH_DISCOVER_TESTS_SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/CatchAddTestsUtf8.
 # A case whose every section SKIPs makes Catch2 exit with 4 ("all skipped"),
 # which ctest takes for a failure unless told: SKIP_RETURN_CODE reports it as
 # skipped, with the reason the case gave, so a skip is seen and not mistaken.
-catch_discover_tests(SuperSonicNativeTests TEST_SPEC "~[benchmark]~[Link]"
+#
+# Most cases are pumped by the test thread on a sample-count clock (the
+# fixture's default) and depend on no thread's timing, so they run in
+# parallel. The real-time ones — [rt]: a live driver, real sockets, a spawned
+# process; and [Link]: Link peers on one machine share a session, so two at
+# once see each other's peers and set each other's tempo — are labelled `rt`
+# and take turns. CI runs them in a step of their own, one at a time, beside
+# nothing (`ctest -L rt -j 1`), and everything else with `-LE rt`.
+catch_discover_tests(SuperSonicNativeTests TEST_SPEC "~[benchmark]~[Link]~[rt]"
                      PROPERTIES SKIP_RETURN_CODE 4)
-# The Link cases one at a time: Link peers on one machine share a session, so
-# two at once see each other's peers and set each other's tempo.
-catch_discover_tests(SuperSonicNativeTests TEST_SPEC "[Link]~[benchmark]"
-                     PROPERTIES RESOURCE_LOCK link_session SKIP_RETURN_CODE 4)
+catch_discover_tests(SuperSonicNativeTests TEST_SPEC "[Link]~[benchmark],[rt]~[benchmark]"
+                     PROPERTIES LABELS rt RESOURCE_LOCK realtime SKIP_RETURN_CODE 4)
 
 # test_supersonic_binary.cpp spawns the SuperSonic process: build it first.
 add_dependencies(SuperSonicNativeTests SuperSonic)

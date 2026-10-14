@@ -53,8 +53,10 @@ constexpr int kReopenTimeoutMs = 20000 * kReopenScale;
 
 ClockworkEngine::Config recoverConfig() {
     auto cfg = EngineFixture::defaultConfig();
-    // Non-manual-pump: a real audio source (headless driver) actually runs, so
+    // The headless driver, not the test's pump: a real audio source runs, so
     // audioSource() is meaningful and recoverAudio's stop/start hits real state.
+    cfg.manualAudioPump  = false;
+    cfg.freewheelClock   = false;
     cfg.callbackWatchdog = true;
     cfg.watchdogStallMs  = 250;
     cfg.watchdogPollMs   = 50;
@@ -67,7 +69,7 @@ ClockworkEngine::Config recoverConfig() {
 // thread, which always ends by broadcasting /supersonic/devices/reopen.done.
 // If this fails, clockwork can't drive recovery and the tests below are moot.
 TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.done",
-          "[Recover]") {
+          "[Recover][rt]") {
     EngineFixture fix(recoverConfig());
 
     std::string reason;
@@ -75,7 +77,9 @@ TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.do
     REQUIRE(reason == "started");
 
     OscReply r;
-    REQUIRE(fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs));
+    const bool reopened = fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs);
+    INFO("engine log:\n" << fix.debugMessagesDump());   // where recovery got to
+    REQUIRE(reopened);
 }
 
 // Use-after-free guard: recoverAudio -> recreateDeviceManager resets
@@ -87,7 +91,7 @@ TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.do
 // data race if the swap gate doesn't serialise the reset against the readers;
 // on a normal build it is a latent UAF.
 TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
-          "[Recover][race]") {
+          "[Recover][race][rt]") {
     EngineFixture fix(recoverConfig());
 
     // Every public reader that dereferences mDeviceManager must take the swap
@@ -132,7 +136,7 @@ TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
 // audioSource() is never None afterwards. (A non-headless build parks at None by
 // design and the watchdog keeps retrying — see test_no_audio_device.)
 TEST_CASE("Recover: recovery never strands the engine with no audio source",
-          "[Recover]") {
+          "[Recover][rt]") {
     EngineFixture fix(recoverConfig());
     REQUIRE(fix.engine().audioSource() != ClockworkEngine::AudioSource::None);
 
@@ -140,6 +144,8 @@ TEST_CASE("Recover: recovery never strands the engine with no audio source",
     fix.engine().requestAudioRecovery(reason);
 
     OscReply r;
-    REQUIRE(fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs));
+    const bool reopened = fix.waitForReply("/clockwork/devices/reopen.done", r, kReopenTimeoutMs);
+    INFO("engine log:\n" << fix.debugMessagesDump());   // where recovery got to
+    REQUIRE(reopened);
     CHECK(fix.engine().audioSource() != ClockworkEngine::AudioSource::None);
 }

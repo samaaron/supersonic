@@ -67,7 +67,7 @@ static void spawnScopeSynth(EngineFixture& fix, int32_t nodeId) {
     fix.send(b.end());
 }
 
-TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace]") {
+TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace][rt]") {
     std::string defPath = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
     if (!std::filesystem::exists(defPath)) {
         SKIP("sonic-pi-scope synthdef not available");
@@ -136,7 +136,7 @@ TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace]") 
 }
 
 TEST_CASE("ScopeRace: aggressive stress — 100 swaps with 8 scope synths",
-          "[ScopeRace][Stress][.slow]") {
+          "[ScopeRace][Stress][.slow][rt]") {
     std::string defPath = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
     if (!std::filesystem::exists(defPath)) {
         SKIP("sonic-pi-scope synthdef not available");

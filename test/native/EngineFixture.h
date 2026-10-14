@@ -1,9 +1,11 @@
 /*
  * EngineFixture.h — Boots a ClockworkEngine for in-process testing.
  *
- * Each test constructs an EngineFixture, which initialises the engine in
- * headless mode with manual audio pumping via the HeadlessDriver.
- * Replies and debug messages are collected for assertions.
+ * Each test constructs an EngineFixture, which initialises the engine with no
+ * device, pumped by the test thread on a sample-count clock (defaultConfig):
+ * the waits render blocks themselves. A case about real time boots the
+ * HeadlessDriver instead, and is tagged [rt]. Replies and debug messages are
+ * collected for assertions.
  */
 #pragma once
 

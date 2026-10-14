@@ -81,6 +81,9 @@ struct RecordingSink final : IOscTransport {
     struct Sent { uint32_t token; OscReply reply; };
     std::mutex        mu;
     std::vector<Sent> sent;
+    // What a wait does between looks when it brings no tick of its own: the
+    // rig's idle, which renders a block when the engine is pumped.
+    std::function<void()> idle;
 
     bool send(uint32_t token, const uint8_t* d, uint32_t n, bool) override {
         std::lock_guard<std::mutex> lock(mu);
@@ -118,7 +121,9 @@ struct RecordingSink final : IOscTransport {
                     return true;
                 }
             }
-            if (tick) tick(); else std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            if (tick) tick();
+            else if (idle) idle();
+            else std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
         return false;
     }
@@ -145,6 +150,7 @@ struct Rig {
 
     explicit Rig(ClockworkEngine::Config cfg = EngineFixture::defaultConfig())
         : fx(cfg), front(fx.engine(), &sink) {
+        sink.idle = [this] { idle(); };
         fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
             const std::string address = osc_test::parseAddress(d, n);
             if (holdCommitted.load() && address == "/clockwork/asset/committed") return;
@@ -155,6 +161,13 @@ struct Rig {
         });
     }
     ~Rig() { fx.setRoutedObserver(nullptr); }   // under the fixture's lock: no call runs after this
+
+    // A wait's pause between looks, as the fixture's own waits take it: a
+    // pumped engine renders nothing unless the test does, so a block first.
+    void idle() {
+        if (fx.manualPump()) fx.pumpBlock();
+        std::this_thread::sleep_for(std::chrono::milliseconds(fx.manualPump() ? 3 : 2));
+    }
 
     bool ingress(const osc_test::Packet& p, uint32_t token = kSpider) {
         return front.ingress(p.ptr(), p.size(), token);
@@ -171,7 +184,7 @@ struct Rig {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
         while (std::chrono::steady_clock::now() < deadline) {
             if (front.laneFreeBytes() == front.laneBytes()) return true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            idle();
         }
         return front.laneFreeBytes() == front.laneBytes();
     }
@@ -250,7 +263,7 @@ TEST_CASE("front: start and frame count are honoured, and a load replaces what t
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (rig.front.laneBytes() - rig.front.laneFreeBytes() >= oneSlot
            && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        rig.idle();
     CHECK(rig.front.laneBytes() - rig.front.laneFreeBytes() < oneSlot);
     // The /b_free the front issued to make room is its own affair.
     CHECK(rig.sink.count("/done", kSpider) == 1);

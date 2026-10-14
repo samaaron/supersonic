@@ -86,6 +86,14 @@ ClockworkEngine::Config pumpedConfig() {
     return cfg;
 }
 
+// The headless driver rendering on its own thread, as a device does.
+ClockworkEngine::Config liveConfig() {
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = false;
+    cfg.freewheelClock  = false;
+    return cfg;
+}
+
 struct Rig {
     EngineFixture    fx;
     RecordingSink    sink;
@@ -368,12 +376,12 @@ TEST_CASE("recording: three in a row, each the length it was asked for, none emp
 }
 
 TEST_CASE("recording: against the live audio thread, the file holds what clockwork wrote between the start and the stop",
-          "[front][recording]") {
+          "[front][recording][rt]") {
     // The headless driver renders on its own thread, as a device does, while the recorder reads the tap. Bounded in
     // the engine's frames all the same: at least what was written between the start's reply and the stop's request,
     // at most what was written between the start's request and the stop's reply. A frame the ring lapped is counted
     // (framesLost), never hidden, so the frames written and lost together are bounded the same way.
-    Rig rig(EngineFixture::defaultConfig());
+    Rig rig(liveConfig());
     const std::string path = tempWav("front-record-live");
     const uint64_t beforeStart = rig.written();
     REQUIRE(rig.start(path));

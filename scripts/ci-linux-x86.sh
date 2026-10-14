@@ -121,11 +121,13 @@ phase_build() {
 phase_test() {
     echo "=== test: Catch2 suite ==="
     setup_paths
-    # Twice, as the x64 job and for its reasons (native.yml): every
-    # registered test with each Catch2 case in a process of its own, then the
-    # binary with every case in one process, in a shuffled order.
-    ctest --test-dir "$BUILD_DIR" --output-on-failure -j 2 --timeout 300
-    "$BUILD_DIR/test/native/SuperSonicNativeTests" "~[benchmark]" --order rand ${GITHUB_RUN_NUMBER:+--rng-seed "$GITHUB_RUN_NUMBER"}
+    # As the x64 job, and for its reasons (native.yml): each case in a process
+    # of its own, the pumped ones in parallel and the real-time ones (label rt)
+    # one at a time beside nothing; then the pumped ones in one process, in a
+    # shuffled order.
+    ctest --test-dir "$BUILD_DIR" --output-on-failure -LE rt -j 4 --timeout 300
+    ctest --test-dir "$BUILD_DIR" --output-on-failure -L rt -j 1 --timeout 300
+    "$BUILD_DIR/test/native/SuperSonicNativeTests" "~[benchmark]~[rt]~[Link]" --order rand ${GITHUB_RUN_NUMBER:+--rng-seed "$GITHUB_RUN_NUMBER"}
 }
 
 phase_transport() {

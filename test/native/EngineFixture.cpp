@@ -12,6 +12,7 @@
 #include "ClockworkProcessor.h"
 #include "HeadlessDriver.h"
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
 #include <fstream>
 #include <chrono>
 #include <thread>
@@ -42,6 +43,16 @@ ClockworkEngine::Config EngineFixture::defaultConfig() {
     // want a predictable 2-in / 2-out world to reason against.
     cfg.numOutputChannels = 2;
     cfg.numInputChannels  = 2;
+    // Pumped: the test thread renders every block (manualAudioPump) on a
+    // clock that is the sample count (freewheelClock), so nothing a case
+    // asserts can depend on how a real-time driver was scheduled, or on a
+    // runner being busy. A case whose claim is about real time asks for the
+    // headless driver itself, and is tagged [rt]. SUPERSONIC_TEST_REALTIME=1
+    // runs the whole suite on the driver instead, the shape it once had.
+    const char* realtime = std::getenv("SUPERSONIC_TEST_REALTIME");
+    const bool pumped = !(realtime && *realtime == '1');
+    cfg.manualAudioPump = pumped;
+    cfg.freewheelClock  = pumped;
     return cfg;
 }
 
@@ -91,7 +102,7 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg) {
 
     mEngine.init(cfg);
 
-    // HeadlessDriver is now ticking — wait for the engine to be ready
+    // Wait for the engine to be ready (a pumped one is pumped by the wait)
     OscReply r;
     mEngine.sendOSC(osc_test::message("/sync", 0).ptr(),
                     osc_test::message("/sync", 0).size());
@@ -282,6 +293,7 @@ std::string EngineFixture::repliesDump() const {
 // ── HeadlessDriver control ───────────────────────────────────────────────────
 
 void EngineFixture::stopHeadlessDriver() {
+    if (mManualPump) return;   // pumped: there is no driver to stop
     mEngine.mHeadlessDriver->signalThreadShouldExit();
     mEngine.mHeadlessDriver->stopThread(2000);
     std::this_thread::sleep_for(std::chrono::milliseconds(50));

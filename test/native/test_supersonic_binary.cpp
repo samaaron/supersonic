@@ -169,7 +169,7 @@ struct Client {
 } // namespace
 
 TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engine, serves the segment, and stops on SIGTERM",
-          "[binary]") {
+          "[binary][rt]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
     Process p;
@@ -287,7 +287,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
 // device is in the preferences). The banner names the kind of command
 // transport but not its port, which Sonic Pi picks at random on every boot.
 TEST_CASE("the SuperSonic binary: /clockwork/summary sends the version and features down the debug channel, and no port is logged",
-          "[binary]") {
+          "[binary][rt]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
     Process p;
@@ -349,7 +349,7 @@ TEST_CASE("the SuperSonic binary: /clockwork/summary sends the version and featu
 // scsynth's /quit: the server answers /done and ends, as Sonic Pi's daemon
 // expects when it sends one on the way out.
 TEST_CASE("the SuperSonic binary: /quit answers /done and the server shuts down cleanly",
-          "[binary]") {
+          "[binary][rt]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     const int tcpPort = freePort(SOCK_STREAM);
     Process p;
@@ -386,7 +386,7 @@ struct ScopedEnv {
 // /d_loadDir loads from the same directory: the engine may refuse a file, and
 // does so the same way for both.
 TEST_CASE("the SuperSonic binary: -D 1 loads the synthdef directory before the first command, -D 0 none",
-          "[binary]") {
+          "[binary][rt]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     const std::string dir = CLOCKWORK_SYNTHDEFS_DIR;
     ScopedEnv env("SC_SYNTHDEF_PATH", dir);
@@ -426,7 +426,7 @@ TEST_CASE("the SuperSonic binary: -D 1 loads the synthdef directory before the f
 }
 
 // -V is scsynth's verbosity, not a second spelling of -v: the server boots.
-TEST_CASE("the SuperSonic binary: -V sets verbosity and the server boots", "[binary]") {
+TEST_CASE("the SuperSonic binary: -V sets verbosity and the server boots", "[binary][rt]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     const int tcpPort = freePort(SOCK_STREAM);
     Process p;
@@ -439,7 +439,7 @@ TEST_CASE("the SuperSonic binary: -V sets verbosity and the server boots", "[bin
     std::filesystem::remove(p.log);
 }
 
-TEST_CASE("the SuperSonic binary: -v names the product and exits at once", "[binary]") {
+TEST_CASE("the SuperSonic binary: -v names the product and exits at once", "[binary][rt]") {
     REQUIRE(std::filesystem::exists(SUPERSONIC_BINARY));
     Process p;
     p.start({ "-v" });

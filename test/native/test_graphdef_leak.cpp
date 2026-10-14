@@ -17,7 +17,6 @@
 
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
-#include "rt_alloc.h"
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
@@ -29,11 +28,6 @@
 #include <iterator>
 #include <string>
 #include <vector>
-
-extern "C" {
-    bool process_audio(double current_time, uint32_t active_output_channels,
-                       uint32_t active_input_channels);
-}
 
 #if defined(_WIN32)
 #  include <windows.h>
@@ -96,14 +90,6 @@ long resident_kb() {
 #  endif
 #endif
 
-void pump(int blocks, double& ntp) {
-    constexpr double blockSecs = 128.0 / 48000.0;
-    for (int i = 0; i < blocks; ++i) {
-        process_audio(ntp, 2, 0);
-        ntp += blockSecs;
-    }
-}
-
 } // namespace
 
 TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
@@ -114,28 +100,34 @@ TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
     auto bytes = readSynthDef("sonic-pi-beep");
     REQUIRE(!bytes.empty());
 
-    fx.stopHeadlessDriver();
-    double ntp = 3'000'000'000.0;
-    pump(200, ntp); // settle lazy init
+    fx.pumpBlock(200);   // settle lazy init
+
+    // A round is the def in and out again, and waits for the engine's /synced:
+    // what the audio thread lets go of is freed on another thread, so rounds
+    // that ran ahead of it — a pumped engine renders four blocks in
+    // microseconds — held many defs at once, and the resident set's high-water
+    // mark grew by megabytes with nothing leaked (5.5 MB, in three runs of
+    // ten). Paced by the engine's answer, as a client is, each round's def is
+    // gone before the next.
+    int32_t syncId = 0;
+    const auto round = [&] {
+        fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
+        fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
+        fx.send(osc_test::message("/sync", ++syncId));
+        OscReply synced;
+        REQUIRE(fx.waitForReply("/synced", synced));
+    };
 
     // Warm up: the first few rounds touch pages that stay touched, so the
     // baseline is taken after the allocator has reached a steady state rather
     // than before it.
-    for (int i = 0; i < 20; ++i) {
-        fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
-        fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
-        pump(4, ntp);
-    }
+    for (int i = 0; i < 20; ++i) round();
 
     const long before = resident_kb();
     REQUIRE(before > 0);
 
     constexpr int kRounds = 400;
-    for (int i = 0; i < kRounds; ++i) {
-        fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
-        fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
-        pump(4, ntp);
-    }
+    for (int i = 0; i < kRounds; ++i) round();
     const long after = resident_kb();
 
     // sonic-pi-beep is tens of kilobytes built out; leaking it 400 times would

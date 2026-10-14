@@ -329,7 +329,7 @@ std::vector<uint8_t> readFramed(int fd) {
 } // namespace
 
 TEST_CASE("host transports: UDP receives from the start and holds what arrives until the engine is ready",
-          "[host][transports]") {
+          "[host][transports][rt]") {
     const int port = freePort(SOCK_DGRAM);
     Options o = parse({ "-u", std::to_string(port), "-B", "127.0.0.1" });
     IngestLog log;
@@ -364,7 +364,7 @@ TEST_CASE("host transports: UDP receives from the start and holds what arrives u
 }
 
 TEST_CASE("host transports: TCP is the command port when asked, and a reply goes back to its sender",
-          "[host][transports]") {
+          "[host][transports][rt]") {
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
     Options o = parse({ "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1",
                         "--max-connections", "2" });
@@ -426,7 +426,7 @@ struct UdpClient {
 } // namespace
 
 TEST_CASE("host egress pump: the engine's replies reach the socket through the client API, not the engine's gateway",
-          "[host][egress]") {
+          "[host][egress][rt]") {
     // The whole path a running host has, in one process: a UDP command port,
     // an engine that leaves its egress rings to the host, and the pump that
     // takes from them and routes to the transport.
