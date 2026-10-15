@@ -393,7 +393,7 @@ expectType<number>(chMetrics.bytesSent);
 declare const sabTransfer: OscChannelSABTransferable;
 expectType<'sab'>(sabTransfer.mode);
 expectType<SharedArrayBuffer>(sabTransfer.sharedBuffer);
-expectType<number>(sabTransfer.ringBufferBase);
+expectType<number>(sabTransfer.arenaBase);
 expectType<Record<string, number>>(sabTransfer.bufferConstants);
 expectType<Record<string, number>>(sabTransfer.controlIndices);
 expectType<number>(sabTransfer.sourceId);
@@ -445,7 +445,7 @@ expectType<boolean>(sonic.initializing);
 expectType<AudioContext | null>(sonic.audioContext);
 expectType<TransportMode>(sonic.mode);
 expectType<Record<string, number> | null>(sonic.bufferConstants);
-expectType<number>(sonic.ringBufferBase);
+expectType<number>(sonic.arenaBase);
 expectType<SharedArrayBuffer | null>(sonic.sharedBuffer);
 expectError(sonic.initTime);
 
