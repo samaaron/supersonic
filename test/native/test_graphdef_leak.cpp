@@ -6,34 +6,31 @@
  * never-drained fifo and free nothing, leaking the whole GraphDef; this guards
  * that regression.
  *
- * Measured by repetition rather than by counting allocations. The counters in
- * test_rt_alloc.cpp hook operator new and delete, which sees only what the C++
- * side allocates; an engine that holds its definitions in memory obtained any
- * other way would report zero allocations and pass a balance check without
- * having been tested at all. Loading and freeing the same definition many
- * times leaks visibly whatever the allocator underneath, which is the property
- * this file is actually about.
+ * Measured by the guest's own census. Everything a definition is built out
+ * of comes from the guest's pool (dsp/scsynth/guest_heap.h: clockwork's
+ * allocator over the guest's bulk memory), and the pool counts the bytes in
+ * use, exactly, into the metrics (guest_pool_used_bytes). Load and free the
+ * same definition many times: the count after has to be the count before.
+ * A definition leaked once is tens of kilobytes over; leaked every round,
+ * megabytes.
+ *
+ * Until 2026-10-15 this weighed the process instead — its resident set
+ * before and after, against a 2 MB allowance — to be independent of whichever
+ * allocator held the definition. The resident set is the process's, not the
+ * definition's: with the pool's count flat to the byte across 400 rounds it
+ * drifted by 1.5 MB in one run and 7 MB in the next, and failed on Windows at
+ * 2132 kB. Now that the definition's memory is counted where it lives, the
+ * count is the measure.
  */
-
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
 #include <catch2/catch_test_macros.hpp>
-
 #include <cstdint>
-#if defined(__APPLE__)
-#include <mach/mach.h>
-#endif
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <vector>
-
-#if defined(_WIN32)
-#  include <windows.h>
-#  include <psapi.h>
-#  pragma comment(lib, "psapi.lib")
-#endif
 
 namespace {
 
@@ -44,71 +41,17 @@ std::vector<uint8_t> readSynthDef(const char* name) {
     return { std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>() };
 }
 
-/// Resident set size in kilobytes, or 0 where it cannot be read.
-///
-/// A coarse instrument, deliberately: it is immune to which allocator the
-/// engine uses, and a leak of a whole synthdef repeated hundreds of times is
-/// not a subtle signal.
-///
-/// Two implementations because /proc is Linux's. This read /proc/self/statm
-/// unconditionally and returned 0 everywhere else — and the caller's
-/// REQUIRE(before > 0) then turned "this platform cannot be measured" into a
-/// test failure, which is the wrong verdict: the engine was never exercised.
-long resident_kb() {
-#if defined(__APPLE__)
-    // mach's task_basic_info is the platform's own answer to the same
-    // question. resident_size is bytes.
-    mach_task_basic_info_data_t info{};
-    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
-                  reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS)
-        return 0;
-    return static_cast<long>(info.resident_size / 1024);
-#elif defined(_WIN32)
-    PROCESS_MEMORY_COUNTERS pmc{};
-    pmc.cb = sizeof(pmc);
-    if (!GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) return 0;
-    return static_cast<long>(pmc.WorkingSetSize / 1024);
-#else
-    std::ifstream f("/proc/self/statm");
-    long total = 0, resident = 0;
-    if (!(f >> total >> resident)) return 0;
-    return resident * (sysconf(_SC_PAGESIZE) / 1024);
-#endif
-}
-
-// Under AddressSanitizer the resident set is not the engine's: the allocator
-// quarantines freed blocks and pads every allocation, so 400 rounds of
-// alloc-and-free grow it by megabytes with nothing leaked. The suite's
-// sanitizer job is for races and UB; the leak question is answered by the
-// uninstrumented matrix.
-#if defined(__SANITIZE_ADDRESS__)
-#  define GRAPHDEF_LEAK_UNDER_ASAN 1
-#elif defined(__has_feature)
-#  if __has_feature(address_sanitizer)
-#    define GRAPHDEF_LEAK_UNDER_ASAN 1
-#  endif
-#endif
-
 } // namespace
 
 TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
-#ifdef GRAPHDEF_LEAK_UNDER_ASAN
-    SKIP("resident set is the sanitizer's under ASan, not the engine's");
-#endif
     EngineFixture fx;
     auto bytes = readSynthDef("sonic-pi-beep");
     REQUIRE(!bytes.empty());
 
     fx.pumpBlock(200);   // settle lazy init
 
-    // A round is the def in and out again, and waits for the engine's /synced:
-    // what the audio thread lets go of is freed on another thread, so rounds
-    // that ran ahead of it — a pumped engine renders four blocks in
-    // microseconds — held many defs at once, and the resident set's high-water
-    // mark grew by megabytes with nothing leaked (5.5 MB, in three runs of
-    // ten). Paced by the engine's answer, as a client is, each round's def is
-    // gone before the next.
+    // A round is the def in and out again, paced by the engine's /synced as a
+    // client's would be: each round's def is gone before the next begins.
     int32_t syncId = 0;
     const auto round = [&] {
         fx.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
@@ -118,24 +61,20 @@ TEST_CASE("GraphDef: /d_free frees the def (no leak)", "[graphdef_leak]") {
         REQUIRE(fx.waitForReply("/synced", synced));
     };
 
-    // Warm up: the first few rounds touch pages that stay touched, so the
-    // baseline is taken after the allocator has reached a steady state rather
-    // than before it.
+    // Warm up: the first rounds may leave something behind once (a table
+    // grown to fit, kept), so the baseline is taken after them.
     for (int i = 0; i < 20; ++i) round();
 
-    const long before = resident_kb();
-    REQUIRE(before > 0);
+    const auto& m = fx.engine().getMetrics();
+    const uint32_t before = m.guest_pool_used_bytes.load(std::memory_order_relaxed);
+    REQUIRE(before > 0);   // the guest's state is in the pool: a 0 would mean it is not being counted
 
     constexpr int kRounds = 400;
     for (int i = 0; i < kRounds; ++i) round();
-    const long after = resident_kb();
+    const uint32_t after = m.guest_pool_used_bytes.load(std::memory_order_relaxed);
 
-    // sonic-pi-beep is tens of kilobytes built out; leaking it 400 times would
-    // add megabytes. A few hundred kilobytes of ordinary allocator drift is
-    // not a leak, and this is set to tell the two apart rather than to be
-    // tight.
-    const long growth = after - before;
-    INFO("resident before=" << before << "kB after=" << after << "kB growth=" << growth << "kB");
-    CHECK(growth < 2048);
-
+    INFO("the guest's pool held " << before << " bytes before " << kRounds << " rounds and " << after
+         << " after: " << (after >= before ? "+" : "-")
+         << (after >= before ? after - before : before - after) << " bytes");
+    CHECK(after == before);
 }
