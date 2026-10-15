@@ -117,7 +117,7 @@ std::string usage(const char* productName) {
         "  --shm-commands      SHM segment's peer command plane (one trusted\n"
         "                      co-located peer; requires -u > 0)\n"
         "  --max-connections <n>  Stream/pipe connection cap, 1-1024 (default 4)\n"
-        "  --inbox-mb <n>      The inbox lane a client loads samples and other\n"
+        "  --assets-mb <n>      The assets area lane a client loads samples and other\n"
         "                      assets into, in MB, 1-3072 (default 512). Address\n"
         "                      space, not memory: pages are committed as they are\n"
         "                      written.\n"
@@ -159,7 +159,7 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     // The guest's options start from its defaults, with the host's choices on top.
     for (const auto& d : kHostOptionDefaults)
         clockwork::guest_config_text::set(cfg.guestConfig, d.name, std::to_string(d.value));
-    long inboxMb = 512;   // the host's default: generous, because it is only address space
+    long assetsMb = 512;   // the host's default: generous, because it is only address space
 
     // A mistake stops the boot, naming the flag: a value that went missing or
     // is not a number is configuration the caller believes they gave.
@@ -201,12 +201,12 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
         if (std::strcmp(arg, "--pipe") == 0)         { if (!val) return missing(); o.pipeName = val; ++i; continue; }
         if (std::strcmp(arg, "--shm-commands") == 0) { o.shmCommands = true; continue; }
         if (std::strcmp(arg, "--shm-endpoint") == 0) { if (!val) return missing(); o.shmEndpoint = val; ++i; continue; }
-        if (std::strcmp(arg, "--inbox-mb") == 0) {
+        if (std::strcmp(arg, "--assets-mb") == 0) {
             if (!val) return missing();
             if (!wholeNumber(val, n)) return notANumber();
             // Header offsets are 32-bit: the lane and everything before it
             // must stay under 4 GB.
-            inboxMb = n < 1 ? 1 : (n > 3072 ? 3072 : n);
+            assetsMb = n < 1 ? 1 : (n > 3072 ? 3072 : n);
             ++i;
             continue;
         }
@@ -320,7 +320,7 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
         o.shmEndpoint = shm_attach::default_endpoint(static_cast<unsigned>(cfg.udpPort));
     cfg.headless    = o.headless;
     cfg.shmCommands = o.shmCommands;
-    cfg.inboxBytes  = static_cast<size_t>(inboxMb) * 1024u * 1024u;
+    cfg.assetsBytes  = static_cast<size_t>(assetsMb) * 1024u * 1024u;
 
     // -D, as scsynth will read it (the guest's own parser). A config the guest
     // will refuse is left to it to refuse, with its line.

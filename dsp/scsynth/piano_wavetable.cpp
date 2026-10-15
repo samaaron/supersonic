@@ -6,6 +6,7 @@
 #include "SC_InterfaceTable.h"
 #include "SC_Prototypes.h"
 #include "sc_msg_iter.h"
+#include "buffer_commands.h"   // supersonic_guest_alloc_bytes: the guest's heap
 
 #include <atomic>
 #include <cmath>
@@ -24,7 +25,7 @@ struct TableCmd {
     int    bufnum;      // -1: take the table away
     short* fresh;       // built in stage 2
     size_t frames;
-    short* stale;       // the table this one replaced, freed in stage 4
+    short* stale;       // the table this one replaced, handed back to the heap in stage 4
 };
 
 // Non real time: read channel 0 of the buffer into 16-bit integers, the way
@@ -35,7 +36,7 @@ bool stage2(World* world, void* data) {
     const SndBuf* buf = World_GetNRTBuf(world, (uint32)cmd->bufnum);
     if (!buf || !buf->data || buf->frames <= 0) return true;
     const size_t frames = (size_t)buf->frames;
-    short* table = new (std::nothrow) short[frames];
+    short* table = static_cast<short*>(supersonic_guest_alloc_bytes(frames * sizeof(short)));   // the guest's heap, not new
     if (!table) return true;
     const int stride = buf->channels > 0 ? buf->channels : 1;
     for (size_t i = 0; i < frames; ++i) {
@@ -64,7 +65,7 @@ bool stage3(World*, void* data) {
 // Non real time: the table nobody reads any more.
 bool stage4(World*, void* data) {
     auto* cmd = static_cast<TableCmd*>(data);
-    delete[] cmd->stale;
+    supersonic_guest_free_bytes(cmd->stale);
     return true;   // /done
 }
 

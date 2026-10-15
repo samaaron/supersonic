@@ -141,10 +141,10 @@ test.describe("Audio Capture API", () => {
 
       const bc = sonic.bufferConstants;
       return {
-        captureFrames: bc.SHM_AUDIO_FRAMES,
-        captureChannels: bc.SHM_AUDIO_CHANNELS,
-        captureSampleRate: bc.SHM_AUDIO_SAMPLE_RATE,
-        expectedSeconds: bc.SHM_AUDIO_FRAMES / bc.SHM_AUDIO_SAMPLE_RATE,
+        captureFrames: bc.SCOPE_FRAMES,
+        captureChannels: bc.SCOPE_CHANNELS,
+        captureSampleRate: bc.SCOPE_SAMPLE_RATE,
+        expectedSeconds: bc.SCOPE_FRAMES / bc.SCOPE_SAMPLE_RATE,
       };
     }, sonicConfig);
 
@@ -610,15 +610,15 @@ test.describe("OSC Bundle Timing", () => {
 
         // Get NTP start time and drift from SharedArrayBuffer (same reference as WASM uses)
         const sharedBuffer = sonic.sharedBuffer;
-        const ringBufferBase = sonic.ringBufferBase;
+        const arenaBase = sonic.arenaBase;
         const ntpStartView = new Float64Array(
           sharedBuffer,
-          ringBufferBase + sonic.bufferConstants.NTP_START_TIME_START,
+          arenaBase + sonic.bufferConstants.NTP_START_TIME_START,
           1
         );
         const driftView = new Int32Array(
           sharedBuffer,
-          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
         const ntpStartTime = ntpStartView[0];
@@ -700,11 +700,11 @@ test.describe("OSC Bundle Timing", () => {
         await sonic.loadSynthDef("sonic-pi-beep");
 
         const sharedBuffer = sonic.sharedBuffer;
-        const ringBufferBase = sonic.ringBufferBase;
+        const arenaBase = sonic.arenaBase;
         const ntpStartTime = new Float64Array(
-          sharedBuffer, ringBufferBase + sonic.bufferConstants.NTP_START_TIME_START, 1)[0];
+          sharedBuffer, arenaBase + sonic.bufferConstants.NTP_START_TIME_START, 1)[0];
         const driftSeconds = Atomics.load(new Int32Array(
-          sharedBuffer, ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START, 1), 0) / 1000000;
+          sharedBuffer, arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START, 1), 0) / 1000000;
 
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
@@ -867,10 +867,10 @@ test.describe("OSC Bundle Timing", () => {
         // Get NTP start time from SharedArrayBuffer
         const sharedBuffer = sonic.sharedBuffer;
         const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const ringBufferBase = sonic.ringBufferBase;
+        const arenaBase = sonic.arenaBase;
         const ntpStartView = new Float64Array(
           sharedBuffer,
-          ringBufferBase + ntpStartOffset,
+          arenaBase + ntpStartOffset,
           1
         );
         const ntpStartTime = ntpStartView[0];
@@ -878,7 +878,7 @@ test.describe("OSC Bundle Timing", () => {
         // Read drift from SAB
         const driftView = new Int32Array(
           sharedBuffer,
-          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
         const driftUs = Atomics.load(driftView, 0);
@@ -1012,10 +1012,10 @@ test.describe("OSC Bundle Timing", () => {
         // Get NTP start time
         const sharedBuffer = sonic.sharedBuffer;
         const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const ringBufferBase = sonic.ringBufferBase;
+        const arenaBase = sonic.arenaBase;
         const ntpStartView = new Float64Array(
           sharedBuffer,
-          ringBufferBase + ntpStartOffset,
+          arenaBase + ntpStartOffset,
           1
         );
         const ntpStartTime = ntpStartView[0];
@@ -1023,7 +1023,7 @@ test.describe("OSC Bundle Timing", () => {
         // Read drift from SAB
         const driftView = new Int32Array(
           sharedBuffer,
-          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
         const driftUs = Atomics.load(driftView, 0);
@@ -1128,10 +1128,10 @@ test.describe("OSC Bundle Timing", () => {
         // Get NTP start time
         const sharedBuffer = sonic.sharedBuffer;
         const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const ringBufferBase = sonic.ringBufferBase;
+        const arenaBase = sonic.arenaBase;
         const ntpStartView = new Float64Array(
           sharedBuffer,
-          ringBufferBase + ntpStartOffset,
+          arenaBase + ntpStartOffset,
           1
         );
         const ntpStartTime = ntpStartView[0];
@@ -1139,7 +1139,7 @@ test.describe("OSC Bundle Timing", () => {
         // Read drift from SAB
         const driftView = new Int32Array(
           sharedBuffer,
-          ringBufferBase + sonic.bufferConstants.DRIFT_OFFSET_START,
+          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
           1
         );
         const driftUs = Atomics.load(driftView, 0);

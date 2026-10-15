@@ -170,10 +170,10 @@ test.describe("Scheduler Queue Overflow", () => {
         // Get NTP time the CORRECT way - using AudioContext + ntpStartTime
         // This matches how the WASM scheduler calculates time
         const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const ringBufferBase = sonic.ringBufferBase;
+        const arenaBase = sonic.arenaBase;
         const ntpStartView = new Float64Array(
           sonic.sharedBuffer,
-          ringBufferBase + ntpStartOffset,
+          arenaBase + ntpStartOffset,
           1
         );
         const ntpStartTime = ntpStartView[0];
@@ -505,7 +505,7 @@ test.describe("Scheduler Queue Overflow", () => {
 
       // The pool is far too large to construct a test bundle for directly.
       // Verify the limit is exported correctly and is reasonable.
-      const inBufSize = sonic.bufferConstants.IN_BUFFER_SIZE;
+      const inBufSize = sonic.bufferConstants.IN_RING_SIZE;
 
       await sonic.destroy();
 

@@ -18,11 +18,30 @@
 import { GrowableBufferPool } from '../../clockwork/js/lib/growable_buffer_pool.js';
 import { isAiff, aiffToWav } from './aiff_converter.js';
 
+/** A 32-bit float WAV of interleaved `samples`, as a Blob. */
+export function encodeFloatWav(samples, channels, sampleRate) {
+    const dataBytes = samples.length * 4;
+    const buf = new ArrayBuffer(44 + dataBytes);
+    const v = new DataView(buf);
+    const ascii = (at, text) => { for (let i = 0; i < text.length; i++) v.setUint8(at + i, text.charCodeAt(i)); };
+    ascii(0, "RIFF"); v.setUint32(4, 36 + dataBytes, true); ascii(8, "WAVE");
+    ascii(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 3, true);   // 3: IEEE float
+    v.setUint16(22, channels, true); v.setUint32(24, sampleRate, true);
+    v.setUint32(28, sampleRate * channels * 4, true); v.setUint16(32, channels * 4, true); v.setUint16(34, 32, true);
+    ascii(36, "data"); v.setUint32(40, dataBytes, true);
+    new Float32Array(buf, 44, samples.length).set(samples);
+    return new Blob([buf], { type: "audio/wav" });
+}
+
 export class BufferManager {
     // Private configuration
     #mode;
     #sampleBaseURL;
     #assetLoader;
+    #onBufferWritten = null;
+    #readSlots = new Map();        // bufnum -> slots staged for /supersonic/buffer/read, freed as it answers
+    #writeLock = Promise.resolve(); // /b_write, one at a time over the returns area
+    #writePending = null;
 
     // Private implementation
     #audioContext;
@@ -43,6 +62,7 @@ export class BufferManager {
             sampleBaseURL,
             maxBuffers = 1024,
             assetLoader = null,
+            onBufferWritten = null,
             clockwork = null,
             wasmMemory = null,
             maxBufferMemory = null,
@@ -92,6 +112,7 @@ export class BufferManager {
         this.#wasmMemory = wasmMemory;
         this.#sampleBaseURL = sampleBaseURL;
         this.#assetLoader = assetLoader;
+        this.#onBufferWritten = onBufferWritten;
 
         // Determine max pool size (user config → memory layout default → initial size)
         const effectiveMaxSize = maxBufferMemory || bufferPoolConfig.maxSize || bufferPoolConfig.size;
@@ -109,9 +130,9 @@ export class BufferManager {
             growIncrement: bufferGrowIncrement,
             // In SAB mode GrowableBufferPool grows the shared memory itself.
             // In postMessage mode only the worklet has a heap to grow, and
-            // asking it is `growInbox` — the same call, whatever the mode.
+            // asking it is `growAssets` — the same call, whatever the mode.
             growFn: (mode === 'postMessage')
-                ? (growFn || ((pages) => clockwork.growInbox(pages * 65536)))
+                ? (growFn || ((pages) => clockwork.growAssets(pages * 65536)))
                 : null,
             onGrowth: onBufferPoolGrowth,
         });
@@ -151,7 +172,7 @@ export class BufferManager {
      * Fetch (if path) or convert source, decode audio, interleave with guard samples
      * @returns {Promise<{interleaved: Float32Array, numFrames: number, numChannels: number, sampleRate: number, sourceInfo: object|null}>}
      */
-    async #fetchAndDecode({ source, startFrame = 0, numFrames = 0, channels = null }) {
+    async #fetchAndDecode({ source, startFrame = 0, numFrames = 0, channels = null, guards = true }) {
         let arrayBuffer;
         let sourceInfo;
 
@@ -181,9 +202,10 @@ export class BufferManager {
 
         const selectedChannels = this.#normalizeChannels(channels, audioBuffer.numberOfChannels);
         const numCh = selectedChannels.length;
-        const totalSamples = (framesRequested * numCh) + ((this.GUARD_BEFORE + this.GUARD_AFTER) * numCh);
+        const guardBefore = guards ? this.GUARD_BEFORE : 0, guardAfter = guards ? this.GUARD_AFTER : 0;
+        const totalSamples = (framesRequested * numCh) + ((guardBefore + guardAfter) * numCh);
         const interleaved = new Float32Array(totalSamples);
-        const dataOffset = this.GUARD_BEFORE * numCh;
+        const dataOffset = guardBefore * numCh;
 
         for (let frame = 0; frame < framesRequested; frame++) {
             for (let ch = 0; ch < numCh; ch++) {
@@ -321,9 +343,15 @@ export class BufferManager {
         try {
             await this.#awaitPendingReplacement(bufnum);
 
-            // Execute the actual operation (loading file or allocating empty buffer)
+            // Execute the actual operation (loading the file into a slot)
             const { ptr, sizeBytes, numFrames, numChannels, sampleRate, source, ...extraProps } = await operation();
             allocatedPtr = ptr;
+
+            // scsynth's replace semantics, from this side, as the native front
+            // does it: whatever the buffer held goes first, and the guest lets
+            // its asset go with it — the release (handleAssetReleased) frees
+            // the old slot. A buffer never allocated has nothing to free.
+            if (this.#allocatedBuffers.has(bufnum)) await this.#clockwork.send("/b_free", bufnum);
 
             // Register pending operation
             const { uuid, allocationComplete } = this.#registerPending(bufnum, timeoutMs);
@@ -337,13 +365,17 @@ export class BufferManager {
             releaseLock();
             lockReleased = true;
 
+            // What the commit names: the payload's position as an OFFSET from
+            // the assets area base (dsp_api.h: offsets, never addresses), past the
+            // guard frames this side laid before it, and the payload's bytes.
+            // The base is known here and nowhere else, so this is the one
+            // place it is subtracted; every sender reads these fields.
+            const laneOffset = allocatedPtr - this.#clockwork.assets().offset;
             return {
                 ptr: allocatedPtr,
-                // What /b_allocPtr carries: the position as an OFFSET from the
-                // inbox base, never an address (dsp_api.h). The base is known
-                // here and nowhere else, so this is the one place it is
-                // subtracted; every sender reads this field.
-                laneOffset: allocatedPtr - this.#clockwork.inbox().offset,
+                laneOffset,
+                payloadOffset: laneOffset + this.GUARD_BEFORE * numChannels * 4,
+                byteCount: numFrames * numChannels * 4,
                 uuid,
                 allocationComplete: managedCompletion,
                 numFrames,
@@ -387,33 +419,39 @@ export class BufferManager {
         return this.#executeBufferOperationWithHash(bufnum, 60000, decoded, decoded.sourceInfo);
     }
 
-    async prepareEmpty(params) {
-        const { bufnum, numFrames, numChannels = 1, sampleRate = null } = params;
+    /**
+     * Frames for a buffer that already exists (/b_read, /b_readChannel):
+     * decoded here, staged in the assets area with no guard frames, for the engine
+     * to copy into the buffer (/supersonic/buffer/read). The slot goes back
+     * when the engine answers, either way (handleBufferReadAnswered).
+     */
+    async prepareReadInto({ bufnum, path, bufStart = 0, startFrame = 0, numFrames = 0, channels = null }) {
         this.#validateBufferNumber(bufnum);
-
-        if (!Number.isFinite(numFrames) || numFrames <= 0) {
-            throw new Error(`/b_alloc requires a positive number of frames (got ${numFrames})`);
-        }
-
-        if (!Number.isFinite(numChannels) || numChannels <= 0) {
-            throw new Error(`/b_alloc requires a positive channel count (got ${numChannels})`);
-        }
-
-        const roundedFrames = Math.floor(numFrames);
-        const roundedChannels = Math.floor(numChannels);
-
-        const totalSamples = (roundedFrames * roundedChannels) +
-            ((this.GUARD_BEFORE + this.GUARD_AFTER) * roundedChannels);
-        const interleaved = new Float32Array(totalSamples);
-
-        const decoded = {
-            interleaved,
-            numFrames: roundedFrames,
-            numChannels: roundedChannels,
-            sampleRate: sampleRate || this.#audioContext.sampleRate
+        const decoded = await this.#fetchAndDecode({ source: path, startFrame, numFrames, channels, guards: false });
+        const ptr = await this.#allocAndWrite(decoded.interleaved);
+        const slots = this.#readSlots.get(bufnum) ?? [];
+        slots.push(ptr);
+        this.#readSlots.set(bufnum, slots);
+        return {
+            bufnum, bufStart,
+            laneOffset: ptr - this.#clockwork.assets().offset,
+            numFrames: decoded.numFrames, numChannels: decoded.numChannels, sampleRate: decoded.sampleRate,
         };
+    }
 
-        return this.#executeBufferOperationWithHash(bufnum, 5000, decoded, null);
+    /**
+     * A buffer's frames out (/b_write): the engine copies them into the
+     * returns (/supersonic/buffer/publish) and handleBufferPublished takes
+     * them from there. One at a time: the returns area is one slot here.
+     */
+    async prepareWrite({ bufnum, path, numFrames = -1, startFrame = 0 }) {
+        this.#validateBufferNumber(bufnum);
+        const previous = this.#writeLock;
+        let release;
+        this.#writeLock = new Promise((r) => { release = r; });
+        await previous;
+        this.#writePending = { bufnum, path, release };
+        return { bufnum, startFrame, numFrames };
     }
 
     #normalizeChannels(requestedChannels, fileChannels) {
@@ -472,7 +510,7 @@ export class BufferManager {
      *
      * What stays here is everything about WHAT the bytes are: decoding,
      * interleaving, guard frames, the bufnum table. `ptr` came from this
-     * class's own allocator over its slice of the INBOX — the lane the client
+     * class's own allocator over its slice of the ASSETS — the lane the client
      * writes and the guest reads. The guest reads these frames IN PLACE for as
      * long as the buffer lives, which the lane's contract allows and which is
      * why nothing copies them anywhere.
@@ -480,24 +518,24 @@ export class BufferManager {
      * THE POINTER IS ABSOLUTE AND THIS CALL IS RELATIVE, so it is converted
      * here. The allocator hands out addresses into the whole SharedArrayBuffer
      * because that is what /b_allocPtr sends the guest — the guest
-     * dereferences it. writeInbox takes an offset from the base of the region
+     * dereferences it. writeAssets takes an offset from the base of the region
      * instead, so that a caller cannot name memory outside it. Passing the
      * absolute address straight through made every buffer write fail its
      * range check with a number 58MB too large.
      */
     async #writeBufferData(ptr, data) {
-        const base = this.#clockwork.inbox().offset;
-        await this.#clockwork.writeInbox(ptr - base, data);
+        const base = this.#clockwork.assets().offset;
+        await this.#clockwork.writeAssets(ptr - base, data);
     }
 
     #createPendingOperation(uuid, bufnum, timeoutMs) {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
-                this.#pendingBufferOps.delete(uuid);
+                this.#pendingBufferOps.delete(bufnum);
                 reject(new Error(`Buffer ${bufnum} allocation timeout (${timeoutMs}ms)`));
             }, timeoutMs);
 
-            this.#pendingBufferOps.set(uuid, { resolve, reject, timeout });
+            this.#pendingBufferOps.set(bufnum, { uuid, resolve, reject, timeout });
         });
     }
 
@@ -541,7 +579,7 @@ export class BufferManager {
                 ? { ptr: previousEntry.ptr, size: previousEntry.size }
                 : null,
             // postMessage mode: keep source info for recovery (re-load from path)
-            // SAB mode: data persists in SharedArrayBuffer, only need /b_allocPtr
+            // SAB mode: the frames persist in the SharedArrayBuffer; a reload re-commits them
             source: metadata.source || null
         };
         this.#allocatedBuffers.set(bufnum, entry);
@@ -610,61 +648,71 @@ export class BufferManager {
         }
     }
 
-    /**
-     * Handle /buffer/freed notification from scsynth
-     * Called by SuperSonic when /buffer/freed OSC message is received
-     * @param {Array} args - [bufnum, freedPtr]
-     */
-    handleBufferFreed(args) {
-        // args may contain BigInt (OSC 'h' type) — coerce to Number for pointer comparison
-        const bufnum = typeof args[0] === 'bigint' ? Number(args[0]) : args[0];
-        const freedPtr = typeof args[1] === 'bigint' ? Number(args[1]) : args[1];
+    /** /clockwork/asset/committed id: the engine bound the buffer to the slot. */
+    handleAssetCommitted(args) {
+        const bufnum = Number(args[0]);
+        const pending = this.#pendingBufferOps.get(bufnum);
+        if (!pending) return;
+        clearTimeout(pending.timeout);
+        this.#pendingBufferOps.delete(bufnum);
+        pending.resolve({ bufnum });
+    }
 
-        const bufferInfo = this.#allocatedBuffers.get(bufnum);
-
-        if (!bufferInfo) {
-            if (typeof freedPtr === 'number' && freedPtr !== 0) {
-                this.#bufferPool.free(freedPtr);
-            }
-            return;
-        }
-
-        if (typeof freedPtr === 'number' && freedPtr === bufferInfo.ptr) {
-            this.#bufferPool.free(bufferInfo.ptr);
-            this.#allocatedBuffers.delete(bufnum);
-            return;
-        }
-
-        if (
-            typeof freedPtr === 'number' &&
-            bufferInfo.previousAllocation &&
-            bufferInfo.previousAllocation.ptr === freedPtr
-        ) {
-            this.#bufferPool.free(freedPtr);
-            bufferInfo.previousAllocation = null;
-            return;
-        }
-
-        // Fallback: free whichever pointer we're tracking and clear the entry
-        this.#bufferPool.free(bufferInfo.ptr);
-        this.#allocatedBuffers.delete(bufnum);
+    /** /clockwork/asset/refused id reason: the commit was not honoured; the slot goes back. */
+    handleAssetRefused(args) {
+        const bufnum = Number(args[0]);
+        const pending = this.#pendingBufferOps.get(bufnum);
+        if (!pending) return;
+        clearTimeout(pending.timeout);
+        this.#pendingBufferOps.delete(bufnum);
+        pending.reject(new Error(`buffer ${bufnum}: ${args[1] ?? "the engine refused the asset"}`));
     }
 
     /**
-     * Handle /buffer/allocated notification from scsynth
-     * Called by SuperSonic when /buffer/allocated OSC message is received
-     * @param {Array} args - [uuid, bufnum]
+     * /clockwork/asset/released id: the guest let go of the slot — a /b_free,
+     * or the old frames of a buffer being replaced, which go before the new
+     * ones are committed.
      */
-    handleBufferAllocated(args) {
-        const uuid = args[0];  // UUID string
-        const bufnum = args[1]; // Buffer number
+    handleAssetReleased(args) {
+        const bufnum = Number(args[0]);
+        const entry = this.#allocatedBuffers.get(bufnum);
+        if (!entry) return;
+        if (entry.pendingToken && entry.previousAllocation?.ptr) {
+            this.#bufferPool.free(entry.previousAllocation.ptr);
+            entry.previousAllocation = null;
+            return;
+        }
+        this.#bufferPool.free(entry.ptr);
+        this.#allocatedBuffers.delete(bufnum);
+    }
 
-        // Find and resolve the pending operation
-        const pending = this.#pendingBufferOps.get(uuid);
-        if (pending) {
-            clearTimeout(pending.timeout);
-            pending.resolve({ bufnum });
-            this.#pendingBufferOps.delete(uuid);
+    /** /done or /fail for /supersonic/buffer/read: the staged frames are the engine's no longer. */
+    handleBufferReadAnswered(bufnum) {
+        const slots = this.#readSlots.get(bufnum);
+        if (!slots?.length) return;
+        this.#bufferPool.free(slots.shift());
+        if (!slots.length) this.#readSlots.delete(bufnum);
+    }
+
+    /**
+     * /supersonic/buffer/published bufnum channels frames rate: the frames
+     * of a /b_write are in the returns area. Encoded here as a 32-bit float WAV and
+     * handed to the product (onBufferWritten), since a browser has no path to
+     * write to.
+     */
+    async handleBufferPublished(args) {
+        const p = this.#writePending;
+        if (!p) return;
+        this.#writePending = null;
+        const [bufnum, channels, frames, rate] = args.map(Number);
+        try {
+            const out = await this.#clockwork.readReturns(0, frames * channels * 4);
+            const u8 = out instanceof Uint8Array ? out : new Uint8Array(out);
+            const samples = new Float32Array(u8.buffer.slice(u8.byteOffset, u8.byteOffset + frames * channels * 4));
+            const blob = encodeFloatWav(samples, channels, rate);
+            this.#onBufferWritten?.({ bufnum, path: p.path, blob, numFrames: frames, numChannels: channels, sampleRate: rate });
+        } finally {
+            p.release();
         }
     }
 
@@ -744,7 +792,7 @@ export class BufferManager {
 
     /**
      * Get all allocated buffers for recovery
-     * SAB mode: returns info needed to re-send /b_allocPtr (data persists in SAB)
+     * SAB mode: returns what a re-commit needs (the frames persist in the SharedArrayBuffer)
      * postMessage mode: returns source info for re-loading (WASM memory destroyed)
      * @returns {Array<{bufnum, ptr, numFrames, numChannels, sampleRate, source?}>}
      */
@@ -752,10 +800,13 @@ export class BufferManager {
         const buffers = [];
         for (const [bufnum, entry] of this.#allocatedBuffers.entries()) {
             if (!entry || !entry.ptr) continue;
+            const laneOffset = entry.ptr - this.#clockwork.assets().offset;
             buffers.push({
                 bufnum,
                 ptr: entry.ptr,
-                laneOffset: entry.ptr - this.#clockwork.inbox().offset,
+                laneOffset,
+                payloadOffset: laneOffset + this.GUARD_BEFORE * (entry.numChannels || 1) * 4,
+                byteCount: (entry.numFrames || 0) * (entry.numChannels || 1) * 4,
                 numFrames: entry.numFrames,
                 numChannels: entry.numChannels,
                 sampleRate: entry.sampleRate,

@@ -104,6 +104,7 @@ add_library(scsynth STATIC
     scsynth_options.cpp
     buffer_commands.cpp
     piano_wavetable.cpp
+    scsynth_tables.cpp
     node_tree.cpp
     ${SCSYNTH_SERVER_SOURCES}
     ${SCSYNTH_COMMON_SOURCES}

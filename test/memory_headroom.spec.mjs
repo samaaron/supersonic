@@ -56,8 +56,8 @@ test.describe("WASM memory headroom", () => {
       }
       named.sort((a, b) => b.end - a.end);
       return {
-        ringBufferBase: sonic.ringBufferBase,
-        staticEnd: sonic.ringBufferBase + end,
+        arenaBase: sonic.arenaBase,
+        staticEnd: sonic.arenaBase + end,
         guestMemoryOffset: MemoryLayout.guestMemoryOffset,
         wasmHeapSize: MemoryLayout.wasmHeapSize,
         ringBufferReserved: MemoryLayout.ringBufferReserved,
@@ -70,7 +70,7 @@ test.describe("WASM memory headroom", () => {
     const MIN_MALLOC_MARGIN = m.memArenaSize + STACK_BYTES + SLACK_BYTES;  // 35MB
     const mb = (n) => (n / 1048576).toFixed(2) + "MB";
     console.log(
-      `\n  static data ends at   ${mb(m.staticEnd)} (base ${mb(m.ringBufferBase)})` +
+      `\n  static data ends at   ${mb(m.staticEnd)} (base ${mb(m.arenaBase)})` +
       `\n  guest region starts   ${mb(m.guestMemoryOffset)} (wasmHeapSize ${mb(m.wasmHeapSize)} + reserved ${mb(m.ringBufferReserved)})` +
       `\n  malloc margin         ${mb(margin)}  (need ${mb(MIN_MALLOC_MARGIN)})` +
       `\n  largest regions       ${m.largest.map((r) => r.name).join(", ")}`

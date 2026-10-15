@@ -120,8 +120,8 @@ enum {
 #ifdef CLOCKWORK_GUEST
     cmd_b_allocPtr = 66,
     cmd_supersonic_piano_wavetable = 67,
-    cmd_supersonic_buffer_read = 68,      // frames from the inbox lane into a buffer
-    cmd_supersonic_buffer_publish = 69,   // a buffer's frames into the outbox lane
+    cmd_supersonic_buffer_read = 68,      // frames from the assets area lane into a buffer
+    cmd_supersonic_buffer_publish = 69,   // a buffer's frames into the returns area lane
 
     NUMBER_OF_COMMANDS = 70
 #else

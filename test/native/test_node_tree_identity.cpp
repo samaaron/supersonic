@@ -58,9 +58,9 @@ TEST_CASE("node tree: a client finds the window's identity in the arena table",
     REQUIRE(w != nullptr);
     CHECK(w->geom[CLOCKWORK_GEOM_WINDOW_MAGIC]   == NODE_TREE_WINDOW_MAGIC);
     CHECK(w->geom[CLOCKWORK_GEOM_WINDOW_VERSION] == NODE_TREE_WINDOW_VERSION);
-    // The window is a published contract, in the guest's published run.
-    CHECK(clockwork_arena_published(h, CLOCKWORK_ARENA_GUEST_WINDOW));
-    CHECK(w->offset + w->bytes <= h->guest_published_end);
+    // The window is public, in the guest-public area.
+    CHECK(clockwork_arena_public(h, CLOCKWORK_ARENA_GUEST_WINDOW));
+    CHECK(clockwork_arena_area_of(h, w) == CLOCKWORK_AREA_GUEST_PUBLIC);
     // And the record behind it is the node tree: its version word, the one
     // the host watches, is where the layout says it is.
     const auto* tree = reinterpret_cast<const NodeTreeHeader*>(client.get_base() + w->offset);

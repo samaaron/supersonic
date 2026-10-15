@@ -15,6 +15,7 @@
  * hand the engine memory it did not allocate.
  */
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 
 #include "synth/include/plugin_interface/SC_SndBuf.h"
@@ -37,16 +38,24 @@ typedef struct {
 uint32_t supersonic_buffer_guard_before(void);
 uint32_t supersonic_buffer_guard_after(void);
 
-// Where the guest's inbox is and how big (scsynth_dsp.cpp, set at dsp_new).
+// Where the guest's assets is and how big (scsynth_dsp.cpp, set at dsp_new).
 // /b_allocPtr names a sample by offset from here.
-const uint8_t* supersonic_inbox_base(void);
-uint32_t       supersonic_inbox_bytes(void);
-// Non-zero when `ptr` lies inside the inbox: a range the client owns, which
+const uint8_t* supersonic_assets_base(void);
+uint32_t       supersonic_assets_bytes(void);
+// Non-zero when `ptr` lies inside the assets area: a range the client owns, which
 // no free on this side may touch.
-int            supersonic_inbox_contains(const void* ptr);
-// The outbox likewise: the lane the guest writes and a client reads in place.
-uint8_t*       supersonic_outbox_base(void);
-uint32_t       supersonic_outbox_bytes(void);
+int            supersonic_assets_contains(const void* ptr);
+// The returns area likewise: the lane the guest writes and a client reads in place.
+uint8_t*       supersonic_returns_base(void);
+uint32_t       supersonic_returns_bytes(void);
+
+// The guest's heap (scsynth_dsp.cpp): clockwork's heap when there is a host,
+// nova's aligned malloc when there is none. Everything the server makes while
+// sound plays — a buffer's samples, a synth definition's tables, the piano
+// wavetable — is kept here and never with new or malloc, which clockwork keeps
+// off the audio thread. 16-aligned; NULL for 0 bytes, or when the heap is out.
+void*          supersonic_guest_alloc_bytes(size_t bytes);
+void           supersonic_guest_free_bytes(void* ptr);
 
 // Set buffer data from pre-allocated memory.
 // When hasGuardSamples is true (WASM/JS path), the data pointer includes

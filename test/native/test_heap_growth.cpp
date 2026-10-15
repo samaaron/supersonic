@@ -1,107 +1,118 @@
 /*
- * test_heap_growth.cpp — Tests for dynamic heap growth in native mode
+ * test_heap_growth.cpp — the guest's pool never grows.
  *
- * Validates that the clockwork_heap grows on demand when the initial
- * allocation is exhausted, and that freed memory is reclaimable.
+ * clockwork's allocator over the guest's bulk memory (clockwork_pool.h): a
+ * span that fills answers NULL rather than growing or reaching malloc, so
+ * what a guest declared is what it has. Exercised directly here, then
+ * through the engine with a buffer well inside the profile's default span.
+ * (Until 2026-10-15 the pool could grow once into a spare block; these were
+ * its tests.)
  */
 #include "EngineFixture.h"
-#include "clockwork_heap.h"
+#include "clockwork_pool.h"
+#include "memory_profile.h"
+#include <cstdlib>
 #include <cstring>
+#include <vector>
 
-// ── Direct heap tests (bypass engine, test the allocator directly) ──────────
+// ── Direct pool tests (bypass engine, test the allocator directly) ──────────
 
-TEST_CASE("clockwork_heap grows when initial pool is exhausted", "[heap][growth]") {
-    // Destroy any existing heap from prior tests, then create a tiny one
-    clockwork_heap_destroy();
-    clockwork_heap_init(256 * 1024);  // 256KB
+namespace {
+// A span of the guest's: 16-aligned, as the engine's would be.
+struct Span {
+    std::vector<unsigned char> bytes;
+    void* base;
+    explicit Span(size_t n) : bytes(n + 16) {
+        base = reinterpret_cast<void*>((reinterpret_cast<uintptr_t>(bytes.data()) + 15) & ~uintptr_t(15));
+    }
+};
+}
 
-    REQUIRE(clockwork_heap_total_allocated() > 0);
-    REQUIRE(clockwork_heap_growth_count() == 0);
+TEST_CASE("the guest's pool serves from its span and refuses what the span cannot hold", "[heap][growth]") {
+    clockwork_pool_teardown();
+    Span span(256 * 1024);
+    clockwork_pool_boot(span.base, 256 * 1024);
+    REQUIRE(clockwork_pool_holds(span.base));
 
-    // Allocate more than the 256KB pool
-    void* p = clockwork_heap_alloc(512 * 1024);  // 512KB
+    void* p = clockwork_pool_alloc(64 * 1024);
     REQUIRE(p != nullptr);
+    CHECK(clockwork_pool_holds(p));
+    // More than the span: refused, never grown, never malloc'd.
+    CHECK(clockwork_pool_alloc(512 * 1024) == nullptr);
+    CHECK(clockwork_pool_used_bytes() >= 64 * 1024);
 
-    CHECK(clockwork_heap_growth_count() > 0);
-    CHECK(clockwork_heap_total_allocated() > 256 * 1024);
-
-    clockwork_heap_free(p);
-    clockwork_heap_destroy();
+    clockwork_pool_free(p);
+    clockwork_pool_teardown();
 }
 
-TEST_CASE("clockwork_heap supports multiple growth events", "[heap][growth]") {
-    clockwork_heap_destroy();
-    clockwork_heap_init(64 * 1024);  // 64KB — very small
+TEST_CASE("the guest's pool fills to its span and then refuses", "[heap][growth]") {
+    clockwork_pool_teardown();
+    Span span(1024 * 1024);
+    clockwork_pool_boot(span.base, 1024 * 1024);
 
-    // Allocate several chunks that each exceed the initial pool
-    void* ptrs[5];
-    for (int i = 0; i < 5; i++) {
-        ptrs[i] = clockwork_heap_alloc(128 * 1024);  // 128KB each
-        REQUIRE(ptrs[i] != nullptr);
+    std::vector<void*> taken;
+    for (;;) {
+        void* p = clockwork_pool_alloc(64 * 1024);
+        if (!p) break;
+        std::memset(p, 0xAB, 64 * 1024);
+        taken.push_back(p);
+        REQUIRE(taken.size() < 64);   // the span is finite
     }
+    CHECK(taken.size() >= 14);
+    CHECK(clockwork_pool_alloc(64 * 1024) == nullptr);
 
-    CHECK(clockwork_heap_growth_count() >= 1);
-
-    // All allocations are usable
-    for (int i = 0; i < 5; i++) {
-        std::memset(ptrs[i], 0xAB, 128 * 1024);
-    }
-
-    for (int i = 0; i < 5; i++) {
-        clockwork_heap_free(ptrs[i]);
-    }
-    clockwork_heap_destroy();
+    for (void* p : taken) clockwork_pool_free(p);
+    // Everything back: the span holds its full count again.
+    void* again = clockwork_pool_alloc(64 * 1024);
+    CHECK(again != nullptr);
+    clockwork_pool_free(again);
+    clockwork_pool_teardown();
 }
 
-TEST_CASE("clockwork_heap freed memory is reusable", "[heap][growth]") {
-    clockwork_heap_destroy();
-    clockwork_heap_init(256 * 1024);  // 256KB
+TEST_CASE("the guest's pool reuses freed memory", "[heap][growth]") {
+    clockwork_pool_teardown();
+    Span span(256 * 1024);
+    clockwork_pool_boot(span.base, 256 * 1024);
 
-    // Allocate and free a large chunk
-    void* p1 = clockwork_heap_alloc(512 * 1024);
+    void* p1 = clockwork_pool_alloc(128 * 1024);
     REQUIRE(p1 != nullptr);
-    size_t growthAfterAlloc = clockwork_heap_growth_count();
+    const size_t used = clockwork_pool_used_bytes();
+    clockwork_pool_free(p1);
+    CHECK(clockwork_pool_used_bytes() < used);
 
-    clockwork_heap_free(p1);
-
-    // Reallocate same size — should succeed (may or may not need another growth
-    // depending on AllocPool's free-list coalescing across areas)
-    void* p2 = clockwork_heap_alloc(512 * 1024);
+    void* p2 = clockwork_pool_alloc(128 * 1024);
     REQUIRE(p2 != nullptr);
-
-    clockwork_heap_free(p2);
-    clockwork_heap_destroy();
+    CHECK(p2 == p1);   // the freed block, back at the head of its size class
+    clockwork_pool_free(p2);
+    clockwork_pool_teardown();
 }
 
-TEST_CASE("clockwork_heap destroy cleans up growth areas", "[heap][growth]") {
-    clockwork_heap_destroy();
-    clockwork_heap_init(64 * 1024);
+TEST_CASE("teardown forgets the pool", "[heap][growth]") {
+    clockwork_pool_teardown();
+    Span span(64 * 1024);
+    clockwork_pool_boot(span.base, 64 * 1024);
 
-    // Trigger growth
-    void* p = clockwork_heap_alloc(256 * 1024);
+    void* p = clockwork_pool_alloc(16 * 1024);
     REQUIRE(p != nullptr);
-    REQUIRE(clockwork_heap_growth_count() > 0);
+    clockwork_pool_free(p);
+    clockwork_pool_teardown();
 
-    clockwork_heap_free(p);
-    clockwork_heap_destroy();
+    CHECK(clockwork_pool_used_bytes() == 0);
+    CHECK(!clockwork_pool_holds(span.base));
+    CHECK(clockwork_pool_alloc(16) == nullptr);   // no pool
 
-    // After destroy, stats should be zeroed
-    CHECK(clockwork_heap_total_allocated() == 0);
-    CHECK(clockwork_heap_growth_count() == 0);
-
-    // Re-init should work cleanly
-    clockwork_heap_init(256 * 1024);
-    REQUIRE(clockwork_heap_total_allocated() > 0);
-    REQUIRE(clockwork_heap_growth_count() == 0);
-    clockwork_heap_destroy();
+    // Boot again cleanly.
+    clockwork_pool_boot(span.base, 64 * 1024);
+    REQUIRE(clockwork_pool_holds(span.base));
+    clockwork_pool_teardown();
 }
 
-// ── Engine integration test (uses the default 64MB heap) ────────────────────
+// ── Engine integration test (the profile's default bulk memory) ─────────────
 
-TEST_CASE("engine buffer allocation works with growable heap", "[heap][growth]") {
+TEST_CASE("engine buffer allocation works from the guest's bulk memory", "[heap][growth]") {
     EngineFixture fx;
 
-    // Allocate a large buffer — exercises the clockwork_heap path
+    // Allocate a large buffer — exercises the pool path
     fx.send(osc_test::message("/b_alloc", 0, 1024 * 1024, 2));  // 1M frames × 2ch = 8MB
     OscReply alloc;
     REQUIRE(fx.waitForReply("/done", alloc));

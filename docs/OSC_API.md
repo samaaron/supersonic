@@ -690,14 +690,14 @@ To the notify targets, after every change:
 
 ## Assets
 
-Hosts: **S W**. N answers, but gives a client no way to write the inbox.
+Hosts: **S W**. N answers, but gives a client no way to write the assets area.
 
 `→ /clockwork/asset/commit i:id i:kind i:offset i:bytes i:channels i:frames f:rate`
 
-Hands scsynth bytes the client wrote into the inbox lane at
+Hands scsynth bytes the client wrote into the assets area lane at
 `offset`…`offset + bytes`. SuperSonic's scsynth takes `id` as the buffer
-number. On S the inbox is in the shared-memory segment, sized by
-`--inbox-mb` (default 512); on W it is in the module's memory.
+number. On S the assets area is in the shared-memory segment, sized by
+`--assets-mb` (default 512); on W it is in the module's memory.
 
 | `kind` | |
 |---|---|
@@ -707,7 +707,7 @@ number. On S the inbox is in the shared-memory segment, sized by
 | ← | |
 |---|---|
 | `/clockwork/asset/committed i:id` | scsynth has it. |
-| `/clockwork/asset/refused i:id s:reason` | e.g. `range runs past the inbox`, `id is still held; release it first`, `the guest refused it`. |
+| `/clockwork/asset/refused i:id s:reason` | e.g. `range runs past the assets area`, `id is still held; release it first`, `the guest refused it`. |
 | `/clockwork/asset/released i:id` | Later, to the committing client: scsynth let it go (a `/b_free`, or a rebuild). The range may be reused. |
 
 ---
@@ -737,9 +737,9 @@ scsynth answers these itself, on every host.
 
 | | |
 |---|---|
-| `← /supersonic/buffer/allocated s:uuid i:bufnum` | After a `/b_allocPtr`. |
-| `← /supersonic/buffer/freed i:bufnum h:pointer` | A buffer's memory was freed. |
+| `← /clockwork/asset/committed i:bufnum` | A buffer was bound to the frames the client committed (`/b_allocRead`, `/b_allocReadChannel`, `/b_allocFile`, `loadSample()`). |
+| `← /clockwork/asset/released i:bufnum` | The guest let go of a committed buffer's frames: a `/b_free`, or a replacement. |
 | `← /supersonic/synthdef/loaded s:name` | Per definition after a `/d_recv`. W only. |
-| `→ /supersonic/buffer/read i:bufnum i:bufOffset i:inboxOffset i:frames i:channels f:rate` | Copies interleaved frames from the inbox into an allocated buffer. `/done` or `/fail`. |
-| `→ /supersonic/buffer/publish i:bufnum i:bufOffset i:frames i:outboxOffset` | Copies a buffer's frames into the outbox (`frames < 0`: to the end). `← /supersonic/buffer/published i:bufnum i:channels i:frames f:rate`, or `/fail`. |
+| `→ /supersonic/buffer/read i:bufnum i:bufOffset i:assetsOffset i:frames i:channels f:rate` | Copies interleaved frames from the assets area into an allocated buffer. `/done` or `/fail`. |
+| `→ /supersonic/buffer/publish i:bufnum i:bufOffset i:frames i:returnsOffset` | Copies a buffer's frames into the returns area (`frames < 0`: to the end). `← /supersonic/buffer/published i:bufnum i:channels i:frames f:rate`, or `/fail`. |
 | `→ /supersonic/piano/wavetable [i:bufnum]` | The piano UGen plays from channel 0 of `bufnum`; none, or -1, takes the table away. `/done` or `/fail`. |

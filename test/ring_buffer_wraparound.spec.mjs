@@ -72,7 +72,7 @@ test.describe("Ring Buffer Wrap-around", () => {
         // near the buffer boundary, then send messages with long synthdef
         // names that will cross the boundary.
 
-        // The IN_BUFFER_SIZE is typically around 16KB-64KB.
+        // The IN_RING_SIZE is typically around 16KB-64KB.
         // We need to fill it enough to trigger wrap-around.
 
         const FILL_ROUNDS = 50;  // Number of fill rounds

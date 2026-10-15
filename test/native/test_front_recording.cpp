@@ -104,7 +104,7 @@ struct Rig {
             if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
         });
         ClockworkRegion taps {};
-        REQUIRE(clockwork_client_region(fx.engine().egressClient(), CLOCKWORK_REGION_RAW_SCOPE, &taps) == CLOCKWORK_OK);
+        REQUIRE(clockwork_client_region(fx.engine().egressClient(), CLOCKWORK_REGION_SCOPE, &taps) == CLOCKWORK_OK);
         slot0 = static_cast<shm_audio_buffer*>(taps.base);
         REQUIRE(slot0->enabled.load() == 1);   // formatted at boot: the tap is live before the first block
     }

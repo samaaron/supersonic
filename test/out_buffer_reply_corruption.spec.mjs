@@ -55,7 +55,7 @@ test.describe("OUT Buffer Reply Corruption", () => {
       // Strategy: create + free synths in rapid bursts to flood the
       // OUT buffer with /n_go + /n_end replies.
       //
-      // OUT_BUFFER_SIZE = 131072 (128KB)
+      // RT_OUT_RING_SIZE = 131072 (128KB)
       // Each /n_end reply ≈ 60 bytes after UUID expansion
       // ~2000 replies fills the buffer once; we want 3-4 wraps.
 

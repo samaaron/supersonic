@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { parseHeader, parseHeapHeadroom, render } = await import(join(ROOT, 'scripts/gen-scsynth-options.mjs'));
+const { parseHeader, parseHeapHeadroom, parsePoolOverhead, parseTablesBytes, render } = await import(join(ROOT, 'scripts/gen-scsynth-options.mjs'));
 const { scsynthOptionSchema } = await import(join(ROOT, 'js/lib/scsynth_options_schema.js'));
 const { defaultScsynthOptions, encodeScsynthOptions, validateScsynthOptions, guestOptionNames,
         scsynthHeapBytes } = await import(join(ROOT, 'js/scsynth_options.js'));
@@ -23,6 +23,8 @@ const { defaultScsynthOptions, encodeScsynthOptions, validateScsynthOptions, gue
 const header = readFileSync(join(ROOT, 'dsp/scsynth/scsynth_options.h'), 'utf8');
 const fromHeader = parseHeader(header);
 const headroom = parseHeapHeadroom(header);
+const overhead = parsePoolOverhead(header);
+const tables = parseTablesBytes(header);
 
 test.describe('scsynth options schema', () => {
   test('the header lists options', () => {
@@ -35,19 +37,24 @@ test.describe('scsynth options schema', () => {
 
   test('the generated module is what the header says (run scripts/gen-scsynth-options.mjs)', () => {
     const committed = readFileSync(join(ROOT, 'js/lib/scsynth_options_schema.js'), 'utf8');
-    expect(committed).toBe(render(fromHeader, headroom));
+    expect(committed).toBe(render(fromHeader, headroom, overhead, tables));
     expect(scsynthOptionSchema.map((o) => o.name)).toEqual(fromHeader.map((o) => o.name));
   });
 
-  // The heap scsynth's pool comes out of is sized by every host with one sum
-  // (scsynth_heap_bytes in the header): the native host from -m, this client
-  // for its arena. Regression: the two kept their own figures, and only the
-  // web sized for the pool at all — a native 128 MB pool met a 64 MB heap.
-  test('the client sizes the heap with the header\'s sum', () => {
+  // The engine's memory scsynth's two spans come out of is sized by the
+  // header's sum (scsynth_heap_bytes: the fast memory the tables and the pool
+  // need, plus the bulk memory's floor), the same figures the guest asks
+  // clockwork for on every host through dsp_memory_bytes and
+  // dsp_memory_bulk_bytes, plus what the engine takes beside them. Regression:
+  // the two sides kept their own figures, and only the web sized for the pool
+  // at all — a native 128 MB pool met a 64 MB heap.
+  test('the client sizes the arena with the header\'s sum', () => {
     expect(headroom).toBeGreaterThan(0);
-    expect(scsynthHeapBytes(131072)).toBe(131072 * 1024 + headroom);
+    expect(overhead).toBeGreaterThan(0);
+    expect(tables).toBeGreaterThan(0);
+    expect(scsynthHeapBytes(131072)).toBe(tables + 131072 * 1024 + overhead + headroom);
     expect(scsynthHeapBytes(defaultScsynthOptions.realTimeMemorySize))
-      .toBe(defaultScsynthOptions.realTimeMemorySize * 1024 + headroom);
+      .toBe(tables + defaultScsynthOptions.realTimeMemorySize * 1024 + overhead + headroom);
     const client = readFileSync(join(ROOT, 'js/supersonic.js'), 'utf8');
     expect(client).toContain('scsynthHeapBytes(');
     expect(client).not.toContain('RT_ARENA_HEADROOM');

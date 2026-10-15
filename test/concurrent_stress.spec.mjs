@@ -1432,7 +1432,7 @@ test.describe("Memory Stability", () => {
 
       // Check buffer constants are still valid (extract numeric values only)
       const bc = sonic.bufferConstants;
-      const inBufferSize = bc?.IN_BUFFER_SIZE;
+      const inBufferSize = bc?.IN_RING_SIZE;
       const messageMagic = bc?.MESSAGE_MAGIC;
 
       // Check node tree is still readable

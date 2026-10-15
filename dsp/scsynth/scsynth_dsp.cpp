@@ -245,8 +245,8 @@ const DspInfo kInfo = {
     /* name                    */ "scsynth",
     /* version                 */ "3.14.1",
     /* holds_schedule          */ 0,          // clockwork holds timed messages for us
-    /* arena_bytes_wanted      */ 0,          // no claim of our own: the host's arena is used when it holds the RT pool, else the heap (SC_World.cpp)
-    /* arena_bulk_bytes_wanted */ 0,
+    /* memory_bytes_wanted      */ 0,          // nothing static: the pool's size is in the options (dsp_memory_bytes), and SC_World.cpp carves it
+    /* memory_bulk_bytes_wanted */ 0,
     /* wants_events            */ 0,          // a client relays a keyboard to us
     // What our window is: the node tree mirror, so a client reading the
     // window by hand can check it is ours, and which layout, from the
@@ -261,16 +261,29 @@ extern "C" {
 
 const DspInfo* dsp_describe(void) { return &kInfo; }
 
-// The heap scsynth will take from: its real-time pool and the rest of its
-// allocations, by the sum the web client uses too (scsynth_heap_bytes). A
-// config it will refuse makes no claim: dsp_new refuses it, with its line.
-uint64_t dsp_heap_bytes(const void* guest_config, uint32_t guest_config_bytes) {
+// The fast memory scsynth will lay out by hand: its tables and its real-time
+// pool, from -m. A config it will refuse makes no claim: dsp_new refuses it,
+// with its line.
+uint64_t dsp_memory_bytes(const void* guest_config, uint32_t guest_config_bytes) {
     ScsynthOptions so;
     char refused[256];
     if (scsynth_options_parse(static_cast<const char*>(guest_config), guest_config_bytes, &so,
                               refused, sizeof(refused)) != 0)
         return 0;
-    return scsynth_heap_bytes(so.realTimeMemorySize);
+    return scsynth_memory_bytes(so.realTimeMemorySize);
+}
+
+// The bulk memory scsynth will allocate from as it runs, beyond the pool: the
+// World's tables, synth definitions, the buffers /b_alloc makes
+// (scsynth_options.h). The host gives at least this, or its own default when
+// that is larger.
+uint64_t dsp_memory_bulk_bytes(const void* guest_config, uint32_t guest_config_bytes) {
+    ScsynthOptions so;
+    char refused[256];
+    if (scsynth_options_parse(static_cast<const char*>(guest_config), guest_config_bytes, &so,
+                              refused, sizeof(refused)) != 0)
+        return 0;
+    return SCSYNTH_HEAP_HEADROOM_BYTES;
 }
 
 /*
@@ -289,8 +302,8 @@ static DspHost g_host{};
 extern "C" void supersonic_flush_schedule(void) {
     if (g_host.flush_schedule) g_host.flush_schedule(g_host.ctx);
 }
-// The guest's arena (DspConfig::arena): the host placed it for the guest's hot
-// state, and the real-time pool is carved from it when it holds one.
+// The guest's working memory (DspConfig::memory): clockwork reserved it for
+// the pool (dsp_memory_bytes), and the pool is carved from it when it fits.
 static void*    g_arena       = nullptr;
 static uint32_t g_arena_bytes = 0;
 
@@ -306,7 +319,7 @@ extern "C" void* supersonic_guest_alloc_bytes(size_t bytes) {
     return nova::malloc_aligned(bytes);   // a host with no heap: the system's
 }
 
-extern "C" const void* supersonic_guest_arena(uint32_t* bytes) {
+extern "C" const void* supersonic_guest_memory(uint32_t* bytes) {
     if (bytes) *bytes = g_arena ? g_arena_bytes : 0;
     return g_arena;
 }
@@ -374,34 +387,34 @@ extern "C" const ClockworkClockState* supersonic_scsynth_session_clock() {
 }
 
 /*
- * The inbox, for /b_allocPtr. A client names a sample's position as an OFFSET
- * from the inbox base — dsp_api.h: offsets, not pointers, in any message that
+ * The assets area, for /b_allocPtr. A client names a sample's position as an OFFSET
+ * from the assets area base — dsp_api.h: offsets, not pointers, in any message that
  * names a position in a lane — and the guest adds the base it was given at
  * dsp_new. On the web the sum is the address the client already had; natively
  * the engine maps the lane wherever it likes, and only this sum is right.
  */
-static const uint8_t* g_inbox_base  = nullptr;
-static uint32_t       g_inbox_bytes = 0;
-static uint8_t*       g_outbox_base  = nullptr;
-static uint32_t       g_outbox_bytes = 0;
-extern "C" uint8_t* supersonic_outbox_base(void)  { return g_outbox_base; }
+static const uint8_t* g_assets_base  = nullptr;
+static uint32_t       g_assets_bytes = 0;
+static uint8_t*       g_returns_base  = nullptr;
+static uint32_t       g_returns_bytes = 0;
+extern "C" uint8_t* supersonic_returns_base(void)  { return g_returns_base; }
 
-extern "C" uint32_t supersonic_outbox_bytes(void) { return g_outbox_base ? g_outbox_bytes : 0; }
+extern "C" uint32_t supersonic_returns_bytes(void) { return g_returns_base ? g_returns_bytes : 0; }
 
-extern "C" const uint8_t* supersonic_inbox_base(void)  { return g_inbox_base; }
-extern "C" uint32_t       supersonic_inbox_bytes(void) {
+extern "C" const uint8_t* supersonic_assets_base(void)  { return g_assets_base; }
+extern "C" uint32_t       supersonic_assets_bytes(void) {
 #if defined(__EMSCRIPTEN__)
-    // On the web the inbox is the LAST region and grows by growing the memory
+    // On the web the assets area is the LAST region and grows by growing the memory
     // (memory_layout.js), so its size is "from its base to the end of the
     // memory" — measured now, because the number handed over at dsp_new was
     // the size at boot and a sample pool has grown past it since. Nothing
     // tells a guest a lane grew; this is how it does not need telling.
-    if (!g_inbox_base) return 0;
+    if (!g_assets_base) return 0;
     const uint64_t end = (uint64_t)__builtin_wasm_memory_size(0) * 65536u;
-    const uint64_t base = (uint64_t)(uintptr_t)g_inbox_base;
+    const uint64_t base = (uint64_t)(uintptr_t)g_assets_base;
     return end > base ? (uint32_t)(end - base) : 0u;
 #else
-    return g_inbox_bytes;
+    return g_assets_bytes;
 #endif
 }
 
@@ -412,7 +425,7 @@ extern "C" double supersonic_scsynth_block_ntp() {
 }
 
 /*
- * Whether a pointer lies in the inbox. A buffer that points INTO THE INBOX was
+ * Whether a pointer lies in the assets area. A buffer that points INTO THE ASSETS was
  * never allocated by anyone on this side: the client wrote the sample there
  * and /b_allocPtr pointed the buffer at it in place. Freeing such a buffer
  * means the engine is done with the range — it does not mean the memory is
@@ -421,17 +434,17 @@ extern "C" double supersonic_scsynth_block_ntp() {
  * performs asks this first: the host-routed one below, and scsynth's own
  * sc_free, which World_Cleanup and a re-alloc reach directly.
  */
-extern "C" int supersonic_inbox_contains(const void* ptr) {
-    const uint8_t* base  = g_inbox_base;
+extern "C" int supersonic_assets_contains(const void* ptr) {
+    const uint8_t* base  = g_assets_base;
     const uint8_t* p     = static_cast<const uint8_t*>(ptr);
     if (!base || !p) return 0;
-    const uint64_t bytes = supersonic_inbox_bytes();
+    const uint64_t bytes = supersonic_assets_bytes();
     return (p >= base && p < base + bytes) ? 1 : 0;
 }
 
 void supersonic_guest_free_bytes(void* ptr) {
     if (!ptr) return;
-    if (supersonic_inbox_contains(ptr)) return;   // the client's range, not ours
+    if (supersonic_assets_contains(ptr)) return;   // the client's range, not ours
     if (g_host.alloc_bytes) {
         if (g_host.free_bytes) g_host.free_bytes(g_host.ctx, ptr);
         return;
@@ -440,7 +453,7 @@ void supersonic_guest_free_bytes(void* ptr) {
 }
 
 // A buffer bound to an ASSET is letting go: its bytes are the client's, in
-// the inbox, and the client reclaims them when clockwork tells it the asset
+// the assets area, and the client reclaims them when clockwork tells it the asset
 // is released (dsp_api.h, "Assets"). A buffer whose data came from /b_allocPtr
 // (the web client's spelling) is not an asset clockwork knows; the release
 // is then nothing, and that client hears /supersonic/buffer/freed as before.
@@ -452,16 +465,22 @@ extern "C" void supersonic_guest_release_buffer(int bufnum) {
 
 struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** err) {
     if (!config) { if (err) *err = "no DspConfig"; return nullptr; }
-    auto* d = new (std::nothrow) ScsynthDsp;
-    if (!d) { if (err) *err = "out of memory"; return nullptr; }
+    // The host's doors first: the instance itself is made in the guest's
+    // memory (guest_heap.h), reached through them. Nothing of an instance
+    // is on the system allocator, so a web reload — where the old engine is
+    // gone rather than torn down — leaves nothing of it behind.
+    if (host) g_host = *host;
+    void* mem = supersonic_guest_alloc_bytes(sizeof(ScsynthDsp));
+    if (!mem) { if (err) *err = "out of memory: the guest's bulk memory cannot hold the instance"; return nullptr; }
+    auto* d = new (mem) ScsynthDsp;
     d->config = *config;
-    if (host) { d->host = *host; g_host = *host; }
-    g_arena       = config->arena;
-    g_arena_bytes = config->arena_bytes;
-    g_inbox_base  = static_cast<const uint8_t*>(config->inbox);
-    g_inbox_bytes = config->inbox_bytes;
-    g_outbox_base  = static_cast<uint8_t*>(config->outbox);
-    g_outbox_bytes = config->outbox_bytes;
+    if (host) d->host = *host;
+    g_arena       = config->memory;
+    g_arena_bytes = config->memory_bytes;
+    g_assets_base  = static_cast<const uint8_t*>(config->assets);
+    g_assets_bytes = config->assets_bytes;
+    g_returns_base  = static_cast<uint8_t*>(config->returns);
+    g_returns_bytes = config->returns_bytes;
 
     WorldOptions options;
     // Externally driven: clockwork owns the device and the clock, so the
@@ -495,7 +514,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
                               config->guest_config_bytes, &so,
                               optionsErr, sizeof(optionsErr)) != 0) {
         supersonic_guest_log(optionsErr, (uint32_t)std::strlen(optionsErr));
-        delete d;
+        d->~ScsynthDsp(); supersonic_guest_free_bytes(d);
         if (err) *err = optionsErr;
         return nullptr;
     }
@@ -540,7 +559,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     const char* engineErr = nullptr;
     d->world = EngineCore_New(&options, &engineErr);
     if (!d->world) {
-        delete d;
+        d->~ScsynthDsp(); supersonic_guest_free_bytes(d);
         if (err) *err = engineErr ? engineErr : "EngineCore_New failed";
         return nullptr;
     }
@@ -613,7 +632,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
 }
 
 // An asset is a sample: interleaved float frames the client decoded into the
-// inbox, keyed by buffer number. Bind the buffer to them where they lie. A
+// assets, keyed by buffer number. Bind the buffer to them where they lie. A
 // buffer that already holds something must be freed first — the audio thread
 // cannot give heap memory back here, and the client's own /b_free is the
 // honest way to ask.
@@ -625,7 +644,7 @@ int dsp_asset(struct Dsp* dsp, const ClockworkAsset* asset) {
     const int bufnum = (int)asset->id;
     if (bufnum < 0 || bufnum >= (int)w->mNumSndBufs) return 3;
     SndBuf* nrt = World_GetNRTBuf(w, bufnum);
-    if (nrt && nrt->data && !supersonic_inbox_contains(nrt->data)) return 4;  // occupied by heap data: /b_free it first
+    if (nrt && nrt->data && !supersonic_assets_contains(nrt->data)) return 4;  // occupied by heap data: /b_free it first
     if (asset->frames == 0 || asset->channels == 0 || !(asset->sample_rate > 0.f)) return 5;
     if (buffer_set_data(w, bufnum, (float*)asset->bytes, (int)asset->frames, (int)asset->channels,
                         (double)asset->sample_rate, false) != 0) return 6;
@@ -638,7 +657,8 @@ void dsp_free(struct Dsp* dsp) {
     if (g_dsp == d) g_dsp = nullptr;
     if (d->world) World_Cleanup(d->world, true);
     supersonic_node_tree_unbind();
-    delete d;
+    d->~ScsynthDsp();
+    supersonic_guest_free_bytes(d);
 }
 
 void dsp_process(struct Dsp* dsp,

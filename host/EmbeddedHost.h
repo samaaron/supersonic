@@ -12,7 +12,7 @@
  *   supersonic::EmbeddedHost host;
  *   ClockworkEngine::Config cfg;            // the device, the guest's options
  *   cfg.udpPort = 57110;                    // > 0: a shared-memory segment for scopes and metrics (nothing is bound)
- *   cfg.inboxBytes = size_t(512) << 20;     // where samples are staged: hold the largest you will load (address space only)
+ *   cfg.assetsBytes = size_t(512) << 20;     // where samples are staged: hold the largest you will load (address space only)
  *   host.boot(cfg, { onMessage, onLog }, &err);
  *   host.loadDefinitions("/path/to/synthdefs", &why);
  *   host.send(bytes, n);                    // any OSC message or bundle, as to scsynth over UDP
@@ -92,7 +92,7 @@ public:
     // One OSC packet for the engine: the front first (a file verb, a recording
     // verb), else the engine's ingress. False when refused: no engine, a ring
     // momentarily full (try again), or a packet too large for the ring (bulk
-    // belongs in the inbox).
+    // belongs in the assets area).
     bool send(const uint8_t* data, uint32_t size);
 
     // Every definition in `dir`, as scsynth's -D: blocks until the engine has

@@ -26,10 +26,21 @@ const long kSineSize = 8192;
 const long kSineMask = kSineSize - 1;
 const double kSinePhaseScale = kSineSize / (2.0 * 3.1415926535897932384626433832795);
 
+#ifdef CLOCKWORK_GUEST
+// In the guest's working memory, placed by scsynth_tables_place (scsynth_tables.h) on every World_New;
+// null until then, and FillTables fills nothing while they are.
+extern float32* gSine;
+extern float32* gPMSine;
+extern float32* gInvSine;
+extern float32* gSineWavetable;
+// Point the four at `base` and fill them; the floats taken.
+size_t samp_tables_place(float32* base);
+#else
 extern float32 gSine[kSineSize + 1];
 extern float32 gPMSine[kSineSize + 1];
 extern float32 gInvSine[kSineSize + 1];
 extern float32 gSineWavetable[2 * kSineSize];
+#endif
 
 void SignalAsWavetable(float32* signal, float32* wavetable, long inSize);
 void WavetableAsSignal(float32* wavetable, float32* signal, long inSize);

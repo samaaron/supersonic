@@ -8,7 +8,7 @@
  * Sonic Pi's spider says /b_allocRead bufnum path start frames and waits for
  * /done "/b_allocRead" bufnum, or /fail "/b_allocRead" why bufnum. The front
  * sits between the socket and the engine, decodes the file on a thread of its
- * own, stages the frames in the inbox lane with the guest's guard frames,
+ * own, stages the frames in the assets area lane with the guest's guard frames,
  * commits them as an asset, and answers in scsynth's words. The engine's own
  * asset replies for those buffers stop at the front; the spider never learns
  * a lane exists.
@@ -705,7 +705,7 @@ TEST_CASE("front: /b_readChannel and /b_allocReadChannel keep the channels named
     CHECK(fail.parsed().argInt(2) == 7);
 }
 
-TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded here from the outbox",
+TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded here from the returns area",
           "[front][load_sample]") {
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     const std::string path = samplePath("bd_haus.flac");
@@ -713,8 +713,8 @@ TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded 
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, path)));
     REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
-    const uint32_t outboxWhole = rig.front.outboxFreeBytes();
-    REQUIRE(outboxWhole > 0);
+    const uint32_t returnsWhole = rig.front.returnsFreeBytes();
+    REQUIRE(returnsWhole > 0);
 
     struct Case { const char* header; const char* sample; const char* ext; float tolerance; };
     const Case cases[] = {
@@ -746,7 +746,7 @@ TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded 
                 worst = std::max(worst, std::abs(back.samples[i] - file.samples[i]));
             CHECK(worst <= c.tolerance);
             std::remove(out.c_str());
-            CHECK(rig.front.outboxFreeBytes() == outboxWhole);
+            CHECK(rig.front.returnsFreeBytes() == returnsWhole);
         }
     }
 

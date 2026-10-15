@@ -50,7 +50,22 @@ export function parseHeapHeadroom(src) {
   return Number(m[1]);
 }
 
-export function render(options, heapHeadroom) {
+// SCSYNTH_POOL_OVERHEAD_BYTES: what the pool's own bookkeeping adds to the
+// working memory scsynth asks for (scsynth_memory_bytes in the header).
+export function parsePoolOverhead(src) {
+  const m = src.match(/#define SCSYNTH_POOL_OVERHEAD_BYTES\s+(\d+)u?\b/);
+  if (!m) throw new Error(`${HEADER}: no SCSYNTH_POOL_OVERHEAD_BYTES literal`);
+  return Number(m[1]);
+}
+
+// SCSYNTH_TABLES_BYTES: the lookup tables at the start of the working memory
+// (scsynth_tables.cpp), the first term of scsynth_memory_bytes.
+export function parseTablesBytes(src) {
+  const m = src.match(/#define SCSYNTH_TABLES_BYTES\s+(\d+)u?\b/);
+  if (!m) throw new Error(`${HEADER}: no SCSYNTH_TABLES_BYTES literal`);
+  return Number(m[1]);
+}
+export function render(options, heapHeadroom, poolOverhead = 0, tablesBytes = 0) {
   const lines = options.map((o) =>
     `  { name: ${JSON.stringify(o.name)}, flag: ${JSON.stringify(o.flag)}, ` +
     `default: ${o.default}, min: ${o.min}, max: ${o.max}, doc: ${JSON.stringify(o.doc)} },`);
@@ -69,12 +84,18 @@ export default scsynthOptionSchema;
 // What a host adds to the real-time pool (realTimeMemorySize KB) when it sizes
 // the heap scsynth allocates from — SCSYNTH_HEAP_HEADROOM_BYTES.
 export const scsynthHeapHeadroomBytes = ${heapHeadroom};
+// What the pool's own bookkeeping adds to the working memory scsynth asks for
+// (dsp_memory_bytes, by scsynth_memory_bytes) — SCSYNTH_POOL_OVERHEAD_BYTES.
+export const scsynthPoolOverheadBytes = ${poolOverhead};
+// The lookup tables at the start of the working memory, before the pool
+// (scsynth_tables.cpp) — SCSYNTH_TABLES_BYTES.
+export const scsynthTablesBytes = ${tablesBytes};
 `;
 }
 
 const main = () => {
   const src = readFileSync(HEADER, "utf8");
-  const text = render(parseHeader(src), parseHeapHeadroom(src));
+  const text = render(parseHeader(src), parseHeapHeadroom(src), parsePoolOverhead(src), parseTablesBytes(src));
   if (process.argv.includes("--check")) {
     let current = "";
     try { current = readFileSync(MODULE, "utf8"); } catch {}

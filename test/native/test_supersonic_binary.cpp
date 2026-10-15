@@ -174,7 +174,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
     Process p;
     p.start({ "--headless", "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort),
-              "--max-connections", "4", "-B", "127.0.0.1", "--inbox-mb", "32" });
+              "--max-connections", "4", "-B", "127.0.0.1", "--assets-mb", "32" });
 
     Client c;
     REQUIRE(c.connectWithin(tcpPort, 20000));
@@ -209,9 +209,9 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
         if (!shm) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     REQUIRE(shm != nullptr);
-    ClockworkRegion inbox {};
-    REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_INBOX, &inbox) == CLOCKWORK_OK);
-    CHECK(inbox.bytes == 32u * 1024u * 1024u);
+    ClockworkRegion assets {};
+    REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_ASSETS, &assets) == CLOCKWORK_OK);
+    CHECK(assets.bytes == 32u * 1024u * 1024u);
 
     // A session recording through the process: the front holds the guest's
     // tap, the guest feeds it, the file is written here — with a synth
@@ -220,7 +220,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     // wall clock's: a loaded runner renders a fraction of a sleep.
     {
         ClockworkRegion taps {};
-        REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_RAW_SCOPE, &taps) == CLOCKWORK_OK);
+        REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_SCOPE, &taps) == CLOCKWORK_OK);
         const auto* out = static_cast<const shm_audio_buffer*>(taps.base);
         REQUIRE(out->enabled.load() == 1);
         const auto written = [out] { return out->write_position.load(std::memory_order_acquire); };

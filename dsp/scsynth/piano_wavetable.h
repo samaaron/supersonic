@@ -5,7 +5,7 @@
  *
  * MdaPiano plays from a sample table that no longer ships inside the binary.
  * The table arrives the way any sample does — a file through /b_allocRead
- * natively, a decoded blob through the inbox and /b_allocPtr on the web —
+ * natively, a decoded blob through the assets area and /b_allocPtr on the web —
  * and this verb hands the plugin channel 0 of that buffer, converted to the
  * 16-bit integers it reads. One verb, one path, on both platforms; the buffer
  * can be freed afterwards, the plugin keeps its own copy.

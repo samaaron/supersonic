@@ -119,6 +119,22 @@ static fftwf_plan precompiledBackwardPlansInPlace[SC_FFT_LOG2_ABSOLUTE_MAXSIZE_P
 #define pi 3.1415926535898f
 #define twopi 6.28318530717952646f
 
+#ifdef CLOCKWORK_GUEST
+// The windows and cosine tables for every size up to SC_FFT_MAXSIZE live in the
+// guest's working memory, placed by scfft_tables_place (scsynth_tables.cpp)
+// on every World_New and filled then. Upstream mallocs each one at load,
+// which put ~576 KB of tables in malloc with nothing to say what they were.
+// A size past SC_FFT_MAXSIZE (up to the absolute maximum) is still built on
+// demand with malloc, as upstream does. The layout is SC_fftlib.h's
+// (scfft_tables_floats, scfft_window_offset, scfft_cos_offset).
+namespace {
+constexpr int kLastLog2 = SC_FFT_LOG2_MAXSIZE;
+float* gFftWindowStore = nullptr;   // the sine (Welch) and Hann windows, every size end to end, one run per type
+float* gFftCosStore = nullptr;      // the cosine quarter-tables, every size end to end
+bool gFftTablesBuilt = false;       // for this placement
+} // namespace
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
 
@@ -127,7 +143,11 @@ static float* create_cosTable(int log2n);
 static float* create_cosTable(int log2n) {
     int size = 1 << log2n;
     int size2 = size / 4 + 1;
+#ifdef CLOCKWORK_GUEST
+    float* win = (gFftCosStore && log2n <= kLastLog2) ? gFftCosStore + scfft_cos_offset(log2n) : (float*)nova::malloc_aligned(size2 * sizeof(float));
+#else
     float* win = (float*)nova::malloc_aligned(size2 * sizeof(float));
+#endif
     if (win == NULL)
         return NULL;
 
@@ -143,7 +163,11 @@ static float* create_cosTable(int log2n) {
 static inline float* scfft_create_fftwindow(int wintype, int log2n) {
     int size = 1 << log2n;
 
+#ifdef CLOCKWORK_GUEST
+    float* win = (gFftWindowStore && log2n <= kLastLog2) ? gFftWindowStore + wintype * scfft_window_floats() + scfft_window_offset(log2n) : (float*)nova::malloc_aligned(size * sizeof(float));
+#else
     float* win = (float*)nova::malloc_aligned(size * sizeof(float));
+#endif
 
     if (!win)
         return NULL;
@@ -173,10 +197,9 @@ static void scfft_ensurewindow(unsigned short log2_fullsize, unsigned short log2
 
 static bool scfft_global_initialization(void) {
 #ifdef CLOCKWORK_GUEST
-    // Idempotency guard — safe to call when static constructor already ran
-    static bool initialized = false;
-    if (initialized) return false;
-    initialized = true;
+    // Nothing until the store is placed (the static constructor runs before any is); once per placement after.
+    if (!gFftWindowStore || gFftTablesBuilt) return false;
+    gFftTablesBuilt = true;
 #endif
 
     for (int wintype = 0; wintype < 2; ++wintype) {
@@ -239,6 +262,14 @@ static bool dummy = scfft_global_initialization();
 // Explicit entry point for builds where static constructors may not run.
 extern "C" void InitializeFFTTables() {
     scfft_global_initialization();
+}
+
+size_t scfft_tables_place(float* base) {
+    gFftWindowStore = base;
+    gFftCosStore = base + 2 * scfft_window_floats();
+    gFftTablesBuilt = false;
+    scfft_global_initialization();
+    return scfft_tables_floats();
 }
 #endif // CLOCKWORK_GUEST
 

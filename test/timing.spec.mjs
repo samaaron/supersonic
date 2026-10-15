@@ -125,12 +125,12 @@ test.describe('Timing and Drift', () => {
 
       // Read raw values from SAB — same fields WASM reads
       const sharedBuffer = sonic.sharedBuffer;
-      const ringBufferBase = sonic.ringBufferBase;
+      const arenaBase = sonic.arenaBase;
       const bc = sonic.bufferConstants;
 
-      const ntpStartView = new Float64Array(sharedBuffer, ringBufferBase + bc.NTP_START_TIME_START, 1);
-      const driftView = new Int32Array(sharedBuffer, ringBufferBase + bc.DRIFT_OFFSET_START, 1);
-      const globalView = new Int32Array(sharedBuffer, ringBufferBase + bc.GLOBAL_OFFSET_START, 1);
+      const ntpStartView = new Float64Array(sharedBuffer, arenaBase + bc.NTP_START_TIME_START, 1);
+      const driftView = new Int32Array(sharedBuffer, arenaBase + bc.DRIFT_OFFSET_START, 1);
+      const globalView = new Int32Array(sharedBuffer, arenaBase + bc.GLOBAL_OFFSET_START, 1);
 
       const ntpStart = ntpStartView[0];
       const rawDrift = Atomics.load(driftView, 0);

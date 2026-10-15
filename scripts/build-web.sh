@@ -84,6 +84,11 @@ emcmake cmake -B "$BUILD_DIR" -S "$ROOT" \
     > "$BUILD_DIR.configure.log" 2>&1 || { cat "$BUILD_DIR.configure.log"; exit 1; }
 cmake --build "$BUILD_DIR" --parallel
 
+# The linker's map, reduced to the symbols that name static memory, for the
+# dev tools (clockwork/scripts/static-map.mjs): scsynth-nrt.symbols.json
+# beside the wasm.
+[ -f "$OUT/scsynth-nrt.map" ] && node "$CLOCKWORK/scripts/static-map.mjs" "$OUT/scsynth-nrt.map"
+
 # ── The main-thread subsystems (MIDI, gamepad) ───────────────────────────────
 # Rust cores compiled to wasm-bindgen modules for the browser. They are
 # clockwork's — its js/lib/{midi,gamepad}_manager.js import their glue by

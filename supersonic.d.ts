@@ -1047,7 +1047,7 @@ export interface OscChannelMetrics {
 export interface OscChannelSABTransferable {
   mode: 'sab';
   sharedBuffer: SharedArrayBuffer;
-  ringBufferBase: number;
+  arenaBase: number;
   bufferConstants: Record<string, number>;
   controlIndices: Record<string, number>;
   sourceId: number;
@@ -1400,7 +1400,7 @@ export class SuperSonic {
   get bufferConstants(): Record<string, number> | null;
 
   /** Ring buffer base offset in SharedArrayBuffer. Internal. */
-  get ringBufferBase(): number;
+  get arenaBase(): number;
 
   /** The SharedArrayBuffer (SAB mode) or null (postMessage mode). Internal. */
   get sharedBuffer(): SharedArrayBuffer | null;
@@ -1748,13 +1748,19 @@ export class SuperSonic {
 
   // ── Buffer commands ────────────────────────────────────────────────
 
-  /** Async. Allocate an empty buffer. Queued and rewritten to /b_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`. Note: completion messages are not supported (dropped during rewrite). */
-  send(address: '/b_alloc', bufnum: number, numFrames: number, numChannels?: number, sampleRate?: number): void;
-  /** Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
+  /** Allocate an empty buffer, from the engine's heap, as on every platform. Replies with `/done /b_alloc bufnum`; a completion message is honoured. */
+  send(address: '/b_alloc', bufnum: number, numFrames: number, numChannels?: number, completionMessage?: Uint8Array | ArrayBuffer): void;
+  /** Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL, decoded, staged in the assets area and committed as an asset. Replies with `/clockwork/asset/committed bufnum`. */
   send(address: '/b_allocRead', bufnum: number, path: string, startFrame?: number, numFrames?: number): void;
-  /** Async. Allocate a buffer and read specific channels from an audio file. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
+  /** Async. Allocate a buffer and read specific channels from an audio file. As /b_allocRead. Replies with `/clockwork/asset/committed bufnum`. */
   send(address: '/b_allocReadChannel', bufnum: number, path: string, startFrame: number, numFrames: number, ...channels: number[]): void;
-  /** Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`. */
+  /** Async. Read an audio file into a buffer that exists. The frames are decoded here and the engine copies them in. Replies with `/done /supersonic/buffer/read bufnum`. `leaveOpen` is not available. */
+  send(address: '/b_read', bufnum: number, path: string, startFrame?: number, numFrames?: number, bufStartFrame?: number, leaveOpen?: number): void;
+  /** Async. As /b_read, with channel selection. */
+  send(address: '/b_readChannel', bufnum: number, path: string, startFrame: number, numFrames: number, bufStartFrame: number, leaveOpen: number, ...channels: number[]): void;
+  /** Async. Write a buffer's frames out: the engine publishes them and a 32-bit float WAV is handed to `'buffer:written'` as `{ bufnum, path, blob }`, since a browser has no path to write to. */
+  send(address: '/b_write', bufnum: number, path: string, headerFormat: string, sampleFormat: string, numFrames?: number, startFrame?: number, leaveOpen?: number): void;
+  /** Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Decoded, staged and committed as an asset. Replies with `/clockwork/asset/committed bufnum`. */
   send(address: '/b_allocFile', bufnum: number, data: Uint8Array | ArrayBuffer): void;
   /** Async. Free a buffer. Optional completionMessage is an encoded OSC message executed after freeing. Replies with `/done /b_free bufnum`. */
   send(address: '/b_free', bufnum: number, completionMessage?: Uint8Array | ArrayBuffer): void;
@@ -1798,10 +1804,11 @@ export class SuperSonic {
    * commands; this one takes any other address, and the multi-range forms of
    * commands like `/n_setn`, `/b_fill` and `/c_getn`.
    *
-   * Sent at once, except buffer allocation (`/b_alloc`, `/b_allocRead`,
-   * `/b_allocReadChannel`, `/b_allocFile`): those are queued, in the order
-   * written, while their material is fetched and decoded, then reach the
-   * engine as `/b_allocPtr`. A queued command that fails is reported on
+   * Sent at once, except the file verbs (`/b_allocRead`, `/b_allocReadChannel`,
+   * `/b_allocFile`, `/b_read`, `/b_readChannel`, `/b_write`): those are
+   * queued, in the order written, while their material is fetched and
+   * decoded, then reach the engine as an asset commit, a buffer read or a
+   * buffer publish. A queued command that fails is reported on
    * `'error'`. {@link sync} waits for the queue before its barrier.
    *
    * Nothing is refused here: a command the browser cannot serve (a file-path

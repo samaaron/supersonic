@@ -5,7 +5,7 @@
  * sends its commands through. The native server sends every command through
  * it, and so does the NIF.
  *
- * The engine has no files. A sample is decoded by a CLIENT into the inbox
+ * The engine has no files. A sample is decoded by a CLIENT into the assets area
  * lane and handed over as an asset (/clockwork/asset/commit, keyed by buffer
  * number; clockwork/src/dsp_api.h). A sender on the socket that still says
  * /b_allocRead — Sonic Pi's spider, any scsynth client — is talking to
@@ -21,7 +21,7 @@
  *                                       (the guest copies into the buffer)
  *   /b_write                            /b_query → /supersonic/buffer/publish
  *                                       (the guest puts the frames in the
- *                                       outbox) → encode here
+ *                                       returns) → encode here
  *   /d_load, /d_loadDir                 read the files → one /d_recv each,
  *                                       paced so a block parses a few
  *   /clockwork/record/start, /stop      the master tap (audio slot 0) pulled
@@ -101,7 +101,7 @@ public:
     // The lanes as this front carves them: size, and what is not held.
     uint32_t laneBytes();
     uint32_t laneFreeBytes();
-    uint32_t outboxFreeBytes();
+    uint32_t returnsFreeBytes();
     // The session recording, if one is running.
     bool     recording() const { return mRecorder.recording(); }
     uint64_t recordingFramesLost() const { return mRecorder.framesLost(); }
@@ -135,7 +135,7 @@ private:
         uint32_t             token;
         int32_t              bufnum;
         std::string          cmd;         // the verb the asker used
-        uint32_t             slot;        // lane (Commit, ReadInto) or outbox (WritePublish)
+        uint32_t             slot;        // lane (Commit, ReadInto) or returns (WritePublish)
         std::vector<uint8_t> completion;
         Job                  job;         // Write: carried through to the encode
     };
@@ -190,8 +190,8 @@ private:
     bool                    mStop = false;
 
     std::mutex                    mMut;        // everything below
-    ClockworkAssetPool*           mPool = nullptr;      // over the inbox
-    ClockworkAssetPool*           mOutPool = nullptr;   // over the outbox
+    ClockworkAssetPool*           mPool = nullptr;      // over the assets area
+    ClockworkAssetPool*           mOutPool = nullptr;   // over the returns area
     uint32_t                      mPoolBytes = 0, mOutPoolBytes = 0;
     std::map<int32_t, uint32_t>   mLive;       // bufnum → lane slot the guest holds
     std::deque<Pending>           mPending;    // in send order

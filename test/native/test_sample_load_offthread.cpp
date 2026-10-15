@@ -9,7 +9,7 @@
  * heard as a glitch on every sample not yet loaded (Sonic Pi, 2026-09-07).
  *
  * The fix is where the decoding happens, not how the guest threads: the
- * CLIENT decodes into the inbox lane and hands the slot over as an asset
+ * CLIENT decodes into the assets area lane and hands the slot over as an asset
  * (SampleLane.h), and the audio thread only binds a pointer. The audio
  * thread here is the test thread (manualAudioPump), so each block's duration
  * is measured directly; the bar is the file's own decode time, measured on
@@ -78,14 +78,14 @@ double decodeMillis(const std::string& path) {
 TEST_CASE("a sample enters through the lane: the engine is handed the frames, never the file",
           "[load_sample]") {
     // What keeps the decode out of every block, without a clock: the CLIENT decodes and stages the frames in the
-    // inbox lane, and the engine is sent a commit naming the slot — no path, nothing to read. That the engine could
+    // assets lane, and the engine is sent a commit naming the slot — no path, nothing to read. That the engine could
     // not read one if it were sent it is test_supersonic_front.cpp's "the engine itself reads no files". Here: the
     // whole file arrives, at its length, bound from the lane, and goes back to the client on /b_free.
     const std::string path = writeBigWav(15.0);
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     EngineFixture fx(cfg);
-    REQUIRE(fx.engine().guestInboxBytes() >= 6u * 1024u * 1024u);
+    REQUIRE(fx.engine().guestAssetsBytes() >= 6u * 1024u * 1024u);
 
     const sample_lane::Staged st = sample_lane::stage(fx, 0, path);
     REQUIRE(st.ok);
@@ -134,7 +134,7 @@ TEST_CASE("benchmark: no audio block carries a lane sample's decode",
         ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
         cfg.manualAudioPump = true;   // this thread IS the audio thread
         EngineFixture fx(cfg);
-        REQUIRE(fx.engine().guestInboxBytes() >= 6u * 1024u * 1024u);
+        REQUIRE(fx.engine().guestAssetsBytes() >= 6u * 1024u * 1024u);
 
         // Render blocks one at a time, timing each. The client's work — decode,
         // free, stage — happens between blocks on this thread and is not timed;

@@ -20,7 +20,7 @@
 #include <numeric>
 
 extern "C" {
-    extern uint8_t ring_buffer_storage[];
+    extern uint8_t arena_storage[];
 }
 
 // Sanitizer builds (ASAN/TSAN) render several times slower, so the render-
@@ -118,7 +118,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     constexpr double FIRST_DELAY_SEC  = 0.200;   // first bundle at +200ms
     constexpr double RELEASE_SEC      = 0.020;    // 20ms release — silent well before next
 
-    auto* capture = reinterpret_cast<shm_audio_buffer*>(ring_buffer_storage + SHM_AUDIO_START) + CLOCKWORK_TAP_OUT;
+    auto* capture = reinterpret_cast<shm_audio_buffer*>(arena_storage + SCOPE_START) + CLOCKWORK_TAP_OUT;
     REQUIRE(capture->enabled.load(std::memory_order_acquire) == 1);
     const uint32_t channels = capture->channels;
     uint32_t sampleRate = capture->sample_rate;
@@ -223,7 +223,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
 // Distribution of bundle spacing jitter.
 //
 // 100 bundles at 50ms intervals = 5 seconds of audio, which fits the
-// test build's 10-second ring (CMake sets CLOCKWORK_SHM_AUDIO_SECONDS
+// test build's 10-second ring (CMake sets CLOCKWORK_SCOPE_SECONDS
 // to 10 when BUILD_TESTS=ON). 100 samples gives a stable p99 alongside
 // mean / stddev / p50 / p90 / max. A spike in p99 means live-coders
 // feel occasional flams even when the mean is fine.
@@ -256,7 +256,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     constexpr double FIRST_DELAY_SEC = 0.200;
     constexpr double RELEASE_SEC     = 0.012;   // 12ms — silent ~38ms before next
 
-    auto* capture = reinterpret_cast<shm_audio_buffer*>(ring_buffer_storage + SHM_AUDIO_START) + CLOCKWORK_TAP_OUT;
+    auto* capture = reinterpret_cast<shm_audio_buffer*>(arena_storage + SCOPE_START) + CLOCKWORK_TAP_OUT;
     REQUIRE(capture->enabled.load(std::memory_order_acquire) == 1);
     const uint32_t channels = capture->channels;
     uint32_t sampleRate = capture->sample_rate;

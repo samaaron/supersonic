@@ -1178,9 +1178,9 @@ test.describe("Buffer Commands", () => {
       await sonic.send("/b_alloc", 0, 44100, 2); // Stereo buffer
       await sonic.sync(1);
 
-      // SuperSonic rewrites /b_alloc to /b_allocPtr (JS manages buffer memory)
+      // /b_alloc is the engine's own, from its heap, as on every platform
       const doneMsg = messages.find(
-        (m) => m[0] === "/done" && m[1] === "/b_allocPtr"
+        (m) => m[0] === "/done" && m[1] === "/b_alloc"
       );
 
       // Query buffer info

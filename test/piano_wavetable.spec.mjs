@@ -3,7 +3,7 @@
 /*
  * /supersonic/piano/wavetable on the web: the same verb, fed the same way a
  * sample is. The table is loaded as a buffer through loadSample — a decoded
- * blob in the inbox, /b_allocPtr — and the verb points MdaPiano at it. On the
+ * blob in the assets area, /b_allocPtr — and the verb points MdaPiano at it. On the
  * SAB transport the output is captured to show the piano silent before and
  * sounding after.
  */
@@ -44,8 +44,7 @@ test("the table is loaded like a sample and the verb answers /done", async ({ pa
 
     // Too short: refused.
     const fail = waitFor("/fail", (m) => m[1] === "/supersonic/piano/wavetable");
-    // The client library rewrites /b_alloc into /b_allocPtr over the inbox,
-    // so the /done names that verb.
+    // /b_alloc is the engine's own; the /done names it and the buffer.
     sonic.send("/b_alloc", 31, 1000, 1);
     await waitFor("/done", (m) => m[2] === 31);
     sonic.send("/supersonic/piano/wavetable", 31);

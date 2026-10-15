@@ -99,25 +99,40 @@ uint32_t                 scsynth_option_count(void);
 const ScsynthOptionInfo* scsynth_option_info(uint32_t index);
 
 /*
- * THE HEAP A HOST GIVES THIS GUEST. scsynth takes its real-time pool — and
- * everything else it allocates: the World's tables, synth definitions, the
- * buffers /b_alloc makes — from the host's heap (DspHost::alloc_bytes). The
- * host takes that heap once per build and never grows it on the audio
- * thread, so it has to be sized for the pool these options ask for, and only
- * a host that reads the options can: clockwork never does.
+ * THE MEMORY A HOST GIVES THIS GUEST: two spans (dsp_api.h). scsynth lays
+ * its tables and its real-time pool out by hand in the fast one
+ * (DspConfig::memory), sized by dsp_memory_bytes from these options.
+ * Everything else it allocates — the World's tables, synth definitions, the
+ * buffers /b_alloc makes — comes from the bulk one (DspConfig::memory_bulk,
+ * through DspHost::alloc_bytes), sized by dsp_memory_bulk_bytes: a floor
+ * the host may raise. Only a host that reads the options can do the first
+ * sum, and clockwork never does, so both are written once, here.
  *
- *   heap = realTimeMemorySize * 1024 + SCSYNTH_HEAP_HEADROOM_BYTES
+ *   memory = SCSYNTH_TABLES_BYTES + realTimeMemorySize * 1024 + SCSYNTH_POOL_OVERHEAD_BYTES
+ *   bulk   = SCSYNTH_HEAP_HEADROOM_BYTES
  *
- * The headroom is the rest of what scsynth takes from the same heap, and the
- * pool's own bookkeeping. Every host does this sum — the native one from -m
- * (host/EngineHost.cpp), the web client for the arena its heap comes out of
- * (js/supersonic.js, through the generated schema) — so it is written once,
- * here. A plain literal, so scripts/gen-scsynth-options.mjs can read it.
+ * The tables are scsynth's lookup tables — the sine tables, the polar LUTs,
+ * the FFT windows and cosine tables (scsynth_tables.cpp) — built at the
+ * start of the working memory on every World_New, so the guest's fixed state
+ * is its fast memory and nothing of it is a global or a malloc. The web
+ * client sizes the engine's memory, which both spans come out of, as their
+ * sum plus what the engine takes beside them (js/supersonic.js, through the
+ * generated schema and clockwork's memory_layout.js). Plain literals, so
+ * scripts/gen-scsynth-options.mjs can read them.
  */
-#define SCSYNTH_HEAP_HEADROOM_BYTES 16777216u   /* 16 MB */
+#define SCSYNTH_HEAP_HEADROOM_BYTES 16777216u   /* 16 MB: the bulk span's floor */
+#define SCSYNTH_POOL_OVERHEAD_BYTES 4096u       /* the pool's area header and alignment (kAreaOverhead), rounded up */
+#define SCSYNTH_TABLES_BYTES        819200u     /* the lookup tables, 800 KB: scsynth_tables.cpp checks the layout fits */
 
+/* The working memory these options ask for: the tables, then the pool. */
+static inline uint64_t scsynth_memory_bytes(uint32_t real_time_memory_kb) {
+    return SCSYNTH_TABLES_BYTES + (uint64_t)real_time_memory_kb * 1024u + SCSYNTH_POOL_OVERHEAD_BYTES;
+}
+
+/* Both spans together: what the guest asks of the engine's memory, before
+   what the engine takes beside them. */
 static inline uint64_t scsynth_heap_bytes(uint32_t real_time_memory_kb) {
-    return (uint64_t)real_time_memory_kb * 1024u + SCSYNTH_HEAP_HEADROOM_BYTES;
+    return scsynth_memory_bytes(real_time_memory_kb) + SCSYNTH_HEAP_HEADROOM_BYTES;
 }
 
 #ifdef __cplusplus

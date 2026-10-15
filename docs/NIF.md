@@ -79,7 +79,7 @@ stops the engine, and sends the outcome to the process that called:
 - `{clockwork_started, {error, already_running}}`: an engine is already running
 - `{clockwork_started, {error, Reason}}`: `Reason` is a charlist saying why
   nothing is running: an option the NIF cannot read, one scsynth refuses (it
-  names the line), or a heap the system cannot provide
+  names the line), or a memory span the system cannot provide
 - `{clockwork_stopped, ok}`: also sent when nothing was running
 
 `send_osc/1` takes one OSC message or bundle per call. `{error, full}` means

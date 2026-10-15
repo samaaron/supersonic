@@ -78,7 +78,7 @@
 // =============================================================================
 
 // From audio_processor.cpp
-extern "C" int  supersonic_inbox_contains(const void* ptr);
+extern "C" int  supersonic_assets_contains(const void* ptr);
 extern "C" void supersonic_guest_release_buffer(int bufnum);
 extern "C" {
 }
@@ -358,7 +358,7 @@ bool BufAllocCmd::Stage3() {
 }
 
 void BufAllocCmd::Stage4() {
-    if (supersonic_inbox_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
+    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
     else zfree(mFreeData);
     SendDoneWithIntValue("/b_alloc", mBufIndex);
 }
@@ -421,7 +421,7 @@ bool BufGenCmd::Stage3() {
 }
 
 void BufGenCmd::Stage4() {
-    if (supersonic_inbox_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
+    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
     else zfree(mFreeData);
     SendDoneWithIntValue("/b_gen", mBufIndex);
 }
@@ -468,9 +468,9 @@ bool BufFreeCmd::Stage3() {
 }
 
 void BufFreeCmd::Stage4() {
-    // Notify host to free the buffer memory.
-    // WASM: JS returns memory to the SAB pool.
-    // Native: SupersonicEngine intercepts and calls zfree().
+    // Hand the memory back: a heap block to the host's allocator, an asset
+    // to the client that committed it, which hears /clockwork/asset/released
+    // and reclaims its slot. The same on every platform.
     if (mFreeData) {
         /*
          * Hand the block back to whoever allocated it, by CALL not by message.
@@ -483,24 +483,10 @@ void BufFreeCmd::Stage4() {
          * exactly like a message that was not for you.
          */
         supersonic_guest_free_bytes(mFreeData);
-        // …and if the bytes were an asset in the inbox, that is what lets go
+        // …and if the bytes were an asset in the assets area, that is what lets go
         // of it: the client hears /clockwork/asset/released and reclaims.
-        if (supersonic_inbox_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
+        if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
 
-        // The notification still goes out: the web client reads the buffer
-        // number to keep its own pool bookkeeping straight, which is the
-        // client's concern and not the host's.
-        small_scpacket packet;
-        packet.adds("/supersonic/buffer/freed");
-        packet.maketags(3);
-        packet.addtag(',');
-        packet.addtag('i');  // buffer number
-        packet.addtag('h');  // data pointer as int64 (safe on both 32-bit WASM and 64-bit native)
-        packet.addi(mBufIndex);
-        packet.addii(static_cast<int64>(reinterpret_cast<uintptr_t>(mFreeData)));
-
-        ReplyAddress reply = mReplyAddress;
-        SendReply(&reply, packet.data(), packet.size());
     }
     SendDoneWithIntValue("/b_free", mBufIndex);
 }
@@ -575,7 +561,7 @@ void BufAllocReadCmd::CallDestructor() { this->~BufAllocReadCmd(); }
 
 bool BufAllocReadCmd::Stage2() {
     // NOT ANSWERED HERE — see the note at the top of this file.
-    SendFailureWithIntValue(&mReplyAddress, "/b_allocRead", "the engine does not read files: decode into the inbox and commit it as an asset (/clockwork/asset/commit), or send /b_allocPtr\n", mBufIndex);
+    SendFailureWithIntValue(&mReplyAddress, "/b_allocRead", "the engine does not read files: decode into the assets area and commit it as an asset (/clockwork/asset/commit), or send /b_allocPtr\n", mBufIndex);
     return false;
 }
 
@@ -589,7 +575,7 @@ bool BufAllocReadCmd::Stage3() {
 }
 
 void BufAllocReadCmd::Stage4() {
-    if (supersonic_inbox_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
+    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
     else zfree(mFreeData);
     SendDoneWithIntValue("/b_allocRead", mBufIndex);
 }
@@ -632,7 +618,7 @@ void BufReadCmd::CallDestructor() { this->~BufReadCmd(); }
 
 bool BufReadCmd::Stage2() {
     // NOT ANSWERED HERE — see the note at the top of this file.
-    SendFailureWithIntValue(&mReplyAddress, "/b_read", "the engine does not read files: a client decodes into the inbox and sends /supersonic/buffer/read\n", mBufIndex);
+    SendFailureWithIntValue(&mReplyAddress, "/b_read", "the engine does not read files: a client decodes into the assets area and sends /supersonic/buffer/read\n", mBufIndex);
     return false;
 }
 
@@ -730,7 +716,7 @@ void BufAllocReadChannelCmd::CallDestructor() { this->~BufAllocReadChannelCmd();
 
 bool BufAllocReadChannelCmd::Stage2() {
     // NOT ANSWERED HERE — see the note at the top of this file.
-    SendFailureWithIntValue(&mReplyAddress, "/b_allocReadChannel", "the engine does not read files: decode into the inbox and commit it as an asset (/clockwork/asset/commit), or send /b_allocPtr\n", mBufIndex);
+    SendFailureWithIntValue(&mReplyAddress, "/b_allocReadChannel", "the engine does not read files: decode into the assets area and commit it as an asset (/clockwork/asset/commit), or send /b_allocPtr\n", mBufIndex);
     return false;
 }
 
@@ -744,7 +730,7 @@ bool BufAllocReadChannelCmd::Stage3() {
 }
 
 void BufAllocReadChannelCmd::Stage4() {
-    if (supersonic_inbox_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
+    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
     else zfree(mFreeData);
     SendDoneWithIntValue("/b_allocReadChannel", mBufIndex);
 }
@@ -789,7 +775,7 @@ void BufReadChannelCmd::CallDestructor() { this->~BufReadChannelCmd(); }
 
 bool BufReadChannelCmd::Stage2() {
     // NOT ANSWERED HERE — see the note at the top of this file.
-    SendFailureWithIntValue(&mReplyAddress, "/b_readChannel", "the engine does not read files: a client decodes into the inbox and sends /supersonic/buffer/read\n", mBufIndex);
+    SendFailureWithIntValue(&mReplyAddress, "/b_readChannel", "the engine does not read files: a client decodes into the assets area and sends /supersonic/buffer/read\n", mBufIndex);
     return false;
 }
 
@@ -843,7 +829,7 @@ void BufWriteCmd::CallDestructor() { this->~BufWriteCmd(); }
 
 bool BufWriteCmd::Stage2() {
     // NOT ANSWERED HERE — see the note at the top of this file.
-    SendFailureWithIntValue(&mReplyAddress, "/b_write", "the engine does not write files: /supersonic/buffer/publish puts the frames in the outbox for a client to encode\n", mBufIndex);
+    SendFailureWithIntValue(&mReplyAddress, "/b_write", "the engine does not write files: /supersonic/buffer/publish puts the frames in the returns area for a client to encode\n", mBufIndex);
     return false;
 }
 

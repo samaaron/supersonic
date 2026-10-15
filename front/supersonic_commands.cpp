@@ -266,8 +266,8 @@ void Commands::run() {
 }
 
 bool Commands::ensurePools() {
-    const uint32_t in = mEngine.guestInboxBytes(), out = mEngine.guestOutboxBytes();
-    if (!mEngine.guestInbox() || in == 0) return false;
+    const uint32_t in = mEngine.guestAssetsBytes(), out = mEngine.guestReturnsBytes();
+    if (!mEngine.guestAssets() || in == 0) return false;
     if (!mPool || mPoolBytes != in) {
         if (mPool) clockwork_asset_pool_close(mPool);   // a different lane: start over
         mPool = clockwork_asset_pool_open(in);
@@ -324,11 +324,11 @@ void Commands::loadSample(const Job& job) {
     {
         std::lock_guard<std::mutex> lock(mMut);
         if (!ensurePools()) {
-            sendFail(job.token, cmd, "the engine has no inbox lane to load into", job.bufnum);
+            sendFail(job.token, cmd, "the engine has no assets lane to load into", job.bufnum);
             return;
         }
         if (slotBytes64 > 0xFFFFFFFFull || clockwork_asset_pool_alloc(mPool, need, &slot) != 0) {
-            sendFail(job.token, cmd, "inbox lane full: " + std::to_string(slotBytes64) + " bytes needed, "
+            sendFail(job.token, cmd, "assets lane full: " + std::to_string(slotBytes64) + " bytes needed, "
                      + std::to_string(clockwork_asset_pool_free_bytes(mPool)) + " free", job.bufnum);
             return;
         }
@@ -342,7 +342,7 @@ void Commands::loadSample(const Job& job) {
         mPending.push_back(std::move(p));
     }
 
-    auto* lane = const_cast<uint8_t*>(mEngine.guestInbox());
+    auto* lane = const_cast<uint8_t*>(mEngine.guestAssets());
     const uint32_t payload = slot + static_cast<uint32_t>(guardBefore * frameBytes);
     if (alloc) std::memset(lane + slot, 0, static_cast<size_t>(slotBytes64));
     if (!fr.samples.empty()) std::memcpy(lane + payload, fr.samples.data(), fr.samples.size() * sizeof(float));
@@ -388,7 +388,7 @@ void Commands::startWrite(const Job& job) {
     {
         std::lock_guard<std::mutex> lock(mMut);
         if (!ensurePools() || !mOutPool) {
-            sendFail(job.token, "/b_write", "the engine has no outbox lane to publish into", job.bufnum);
+            sendFail(job.token, "/b_write", "the engine has no returns lane to publish into", job.bufnum);
             return;
         }
         Pending p { Pending::WriteQuery, job.token, job.bufnum, "/b_write", 0, job.completion, carried };
@@ -400,7 +400,7 @@ void Commands::startWrite(const Job& job) {
     mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), job.token);
 }
 
-// /b_write, last half: the frames are in the outbox; encode them to the file.
+// /b_write, last half: the frames are in the returns area; encode them to the file.
 void Commands::encode(const Job& job) {
     ClockworkAudioWriterConfig cfg {};
     cfg.struct_bytes = sizeof cfg;
@@ -413,7 +413,7 @@ void Commands::encode(const Job& job) {
     ClockworkAudioWriter* w = clockwork_audio_writer_open(job.path.c_str(), &cfg, &st);
     if (w) {
         if (job.outFrames > 0) {
-            const auto* frames = reinterpret_cast<const float*>(mEngine.guestOutbox() + job.outSlot);
+            const auto* frames = reinterpret_cast<const float*>(mEngine.guestReturns() + job.outSlot);
             st = clockwork_audio_writer_write(w, frames, job.outFrames);
         }
         const ClockworkStatus closed = clockwork_audio_writer_close(w, nullptr, nullptr);
@@ -650,7 +650,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
     }
 
     // /b_info for a /b_write in flight: now the range is known, ask the guest
-    // to publish it into the outbox.
+    // to publish it into the returns area.
     if (kind == Info) {
         Pending p;
         uint32_t slot = 0;
@@ -672,7 +672,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
             if (n > 0) {
                 const uint64_t bytes = static_cast<uint64_t>(n) * p.job.outChannels * sizeof(float);
                 if (!mOutPool || bytes > 0xFFFFFFFFull || clockwork_asset_pool_alloc(mOutPool, static_cast<uint32_t>(bytes), &slot) != 0) {
-                    sendFail(token, "/b_write", "outbox lane full: " + std::to_string(bytes) + " bytes needed", id);
+                    sendFail(token, "/b_write", "returns lane full: " + std::to_string(bytes) + " bytes needed", id);
                     return true;
                 }
                 p.job.outSlot = slot;
@@ -854,7 +854,7 @@ uint32_t Commands::laneFreeBytes() {
     return ensurePools() ? clockwork_asset_pool_free_bytes(mPool) : 0;
 }
 
-uint32_t Commands::outboxFreeBytes() {
+uint32_t Commands::returnsFreeBytes() {
     std::lock_guard<std::mutex> lock(mMut);
     return (ensurePools() && mOutPool) ? clockwork_asset_pool_free_bytes(mOutPool) : 0;
 }

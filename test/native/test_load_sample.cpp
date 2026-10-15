@@ -1,5 +1,5 @@
 /*
- * test_load_sample.cpp — samples, loaded by the CLIENT into the inbox lane
+ * test_load_sample.cpp — samples, loaded by the CLIENT into the assets area lane
  * and handed over as assets (SampleLane.h), then /b_read and /b_write.
  *
  * The engine does not read files any more: a client decodes and commits, as
@@ -503,7 +503,7 @@ TEST_CASE("/b_free on already-freed buffer does not crash", "[load_sample]") {
 
 // =============================================================================
 // 14. Shutdown race — /b_free then immediate engine destroy
-// Exercises the race between BufFreeCmd::Stage4's /supersonic/buffer/freed
+// Exercises the race between BufFreeCmd::Stage4's /clockwork/asset/released
 // notification (async via ring buffer) and World_Cleanup's free_alig().
 // If there's a double-free, this will SIGSEGV.
 // =============================================================================
@@ -521,7 +521,7 @@ TEST_CASE("/b_free then immediate shutdown does not crash", "[load_sample]") {
         // Send /b_free but do NOT wait for /done — destroy engine immediately
         fx.send(osc_test::message("/b_free", 0));
         // EngineFixture destructor runs here — tears down engine while
-        // /supersonic/buffer/freed may still be in the OUT ring buffer
+        // /clockwork/asset/released may still be in the OUT ring buffer
     }
 
     // If we got here without SIGSEGV, the shutdown race is safe
@@ -655,7 +655,7 @@ TEST_CASE("/supersonic/buffer/read: frames from the lane into an allocated buffe
     REQUIRE(fx.waitForDone("/b_alloc"));
 
     // The client's part: file frames [100, 600) laid out in the lane.
-    auto* lane = const_cast<uint8_t*>(fx.engine().guestInbox());
+    auto* lane = const_cast<uint8_t*>(fx.engine().guestAssets());
     const uint32_t off = 4096;
     std::memcpy(lane + off, file.samples.data() + (size_t)100 * ch, (size_t)500 * ch * sizeof(float));
 
@@ -706,13 +706,13 @@ TEST_CASE("/supersonic/buffer/read: a channel mismatch, a range outside the lane
         CHECK(fail.parsed().argInt(2) == bufnum);
     };
     refused(4, 0, 0, 10, 1, "Channel mismatch");
-    refused(4, 0, (int32_t)fx.engine().guestInboxBytes() - 8, 10, 2, "not inside the inbox");
-    refused(4, 0, -16, 10, 2, "not inside the inbox");
+    refused(4, 0, (int32_t)fx.engine().guestAssetsBytes() - 8, 10, 2, "not inside the assets area");
+    refused(4, 0, -16, 10, 2, "not inside the assets area");
     refused(5, 0, 0, 10, 2, "not allocated");
     fx.send(osc_test::message("/b_free", 4));
 }
 
-TEST_CASE("/supersonic/buffer/publish: the buffer's frames land in the outbox, and the reply says what did",
+TEST_CASE("/supersonic/buffer/publish: the buffer's frames land in the returns area, and the reply says what did",
           "[load_sample][lane]") {
     if (!sampleExists("bd_haus.flac")) { SKIP("Sample not found"); }
     const std::string path = std::string(CLOCKWORK_SAMPLES_DIR) + "/bd_haus.flac";
@@ -720,7 +720,7 @@ TEST_CASE("/supersonic/buffer/publish: the buffer's frames land in the outbox, a
     const int32_t ch = (int32_t)file.info.channels;
     EngineFixture fx;
     REQUIRE(tryAllocRead(fx, 0, "bd_haus.flac"));
-    REQUIRE(fx.engine().guestOutbox() != nullptr);
+    REQUIRE(fx.engine().guestReturns() != nullptr);
 
     fx.clearReplies();
     {
@@ -734,7 +734,7 @@ TEST_CASE("/supersonic/buffer/publish: the buffer's frames land in the outbox, a
     CHECK(pub.parsed().argInt(1) == ch);
     CHECK(pub.parsed().argInt(2) == 50);
     CHECK(pub.parsed().argFloat(3) == (float)file.info.sample_rate);
-    const auto* out = reinterpret_cast<const float*>(fx.engine().guestOutbox() + 8192);
+    const auto* out = reinterpret_cast<const float*>(fx.engine().guestReturns() + 8192);
     for (int32_t i = 0; i < 50 * ch; ++i)
         CHECK(out[i] == Catch::Approx(file.samples[100 * ch + i]).margin(1e-6f));
 
@@ -748,11 +748,11 @@ TEST_CASE("/supersonic/buffer/publish: the buffer's frames land in the outbox, a
     REQUIRE(fx.waitForReply("/supersonic/buffer/published", pub));
     CHECK(pub.parsed().argInt(2) == 10);
 
-    // A range outside the outbox, and a buffer with nothing in it, are refused.
+    // A range outside the returns area, and a buffer with nothing in it, are refused.
     fx.clearReplies();
     {
         osc_test::Builder b;
-        b.begin("/supersonic/buffer/publish") << int32_t{0} << int32_t{0} << int32_t{50} << (int32_t)(fx.engine().guestOutboxBytes() - 8);
+        b.begin("/supersonic/buffer/publish") << int32_t{0} << int32_t{0} << int32_t{50} << (int32_t)(fx.engine().guestReturnsBytes() - 8);
         fx.send(b.end());
     }
     OscReply fail;

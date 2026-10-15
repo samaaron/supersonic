@@ -111,8 +111,9 @@ scsynth reads it. The log says what was loaded. `-D 0` loads nothing.
 
 A value the engine cannot take — out of range, or not a whole number — is
 refused with a log line naming it. The process stays up, but no synth runs.
-`-m` also sizes the heap the engine takes at boot: the pool plus 16 MB, or the
-build's own heap size when that is larger.
+`-m` also sizes the memory the engine gives scsynth at boot: the pool in its
+fast memory, and 16 MB of bulk memory for buffers and definitions, or the
+build's own default when that is larger.
 
 ### Other
 
@@ -120,7 +121,7 @@ build's own heap size when that is larger.
 |---|---|---|
 | `--default-bpm <bpm>` | 120 | The tempo the clock opens at. |
 | `--app-name <name>` | SuperSonic | The name the operating system shows: PipeWire nodes, ALSA sequencer MIDI clients, macOS aggregate devices, Link peers. |
-| `--inbox-mb <MB>` | 512 | The lane loaded samples live in, 1–3072. Address space, not memory: pages are committed as they are written. A load that does not fit fails with "inbox lane full". |
+| `--assets-mb <MB>` | 512 | The lane loaded samples live in, 1–3072. Address space, not memory: pages are committed as they are written. A load that does not fit fails with "assets lane full". |
 | `-v` | | Print the version and exit. |
 | `-h`, `--help` | | Print the options and exit. |
 
@@ -204,7 +205,7 @@ itself, not through the server, so nothing the server answers on the engine's
 behalf is answered there: the file commands (`/b_allocRead`, `/d_load`, ...)
 are refused with what to do instead, and `/clockwork/record/*`,
 `/clockwork/summary` and `/quit` are not available. A peer loads definitions
-with `/d_recv` and samples through the inbox (`/clockwork/asset/commit`), as the
+with `/d_recv` and samples through the assets area (`/clockwork/asset/commit`), as the
 web client does.
 
 ### Files

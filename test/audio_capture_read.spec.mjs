@@ -38,15 +38,15 @@ function makeCapture({ capacity, channels, wpos, sampleRate = 48000 }) {
 
   const cap = new AudioCapture({
     sharedBuffer: sab,
-    ringBufferBase: 0,
-    // SHM_AUDIO_SLOT_SIZE is required even at slot 0: #slotOffset() computes
-    // slot * SHM_AUDIO_SLOT_SIZE, and 0 * undefined is NaN, not 0. A NaN
+    arenaBase: 0,
+    // SCOPE_SLOT_SIZE is required even at slot 0: #slotOffset() computes
+    // slot * SCOPE_SLOT_SIZE, and 0 * undefined is NaN, not 0. A NaN
     // byteOffset does not throw — ToIndex(NaN) is 0 — so the view would
     // silently start on the header and read it back as float samples.
     bufferConstants: {
-      SHM_AUDIO_START: 0,
-      SHM_AUDIO_HEADER_SIZE: HEADER_BYTES,
-      SHM_AUDIO_SLOT_SIZE: HEADER_BYTES + dataFloats * 4,
+      SCOPE_START: 0,
+      SCOPE_HEADER_SIZE: HEADER_BYTES,
+      SCOPE_SLOT_SIZE: HEADER_BYTES + dataFloats * 4,
     },
   });
   return cap;

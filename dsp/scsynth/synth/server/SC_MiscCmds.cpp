@@ -181,72 +181,19 @@ SCErr meth_b_zero(World* inWorld, int inSize, char* inData, ReplyAddress* inRepl
     return kSCErr_None;
 }
 
-// /b_allocPtr bufnum inboxOffset numFrames numChannels sampleRate uuid [completion]
-// Point a buffer at a sample the client wrote into the inbox, in place: no copy.
-// inboxOffset is measured from the inbox base, on every platform, and the range
-// carries the guard frames the client laid around the audio.
+// A sample reaches a buffer as an ASSET (clockwork dsp_api.h): the client
+// writes the frames into the assets area and commits them, and dsp_asset binds the
+// buffer to them where they lie (buffer_commands.cpp). There is no verb for
+// it here; /b_allocPtr, the web client's own spelling of the hand-off, went
+// with the one binding on every platform.
 #include "buffer_commands.h"
 #include "piano_wavetable.h"
 
-SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply);
-SCErr meth_b_allocPtr(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
-    sc_msg_iter msg(inSize, inData);
-
-    int bufnum = msg.geti();
-    int inboxOffset = msg.geti();  // an OFFSET from the inbox base, never an address
-    int numFrames = msg.geti();
-    int numChannels = msg.geti();
-    float sampleRate = msg.getf();
-    const char* uuid = msg.gets();  // UUID for correlation
-
-    // The sample lives in the inbox — the lane the client writes and this
-    // engine reads in place — and the client names it by offset, because an
-    // address would be right on the web (one linear memory) and wrong natively
-    // (the engine maps the lane wherever it likes) without ever faulting.
-    // The range is [guard][audio][guard], sized from one definition of the
-    // guard layout, and a range that does not fit the lane is refused rather
-    // than read.
-    const uint8_t* inbox = supersonic_inbox_base();
-    const uint64_t frames = (uint64_t)supersonic_buffer_guard_before()
-                          + (uint64_t)(numFrames > 0 ? numFrames : 0)
-                          + (uint64_t)supersonic_buffer_guard_after();
-    const uint64_t bytes  = frames * (uint64_t)(numChannels > 0 ? numChannels : 0) * sizeof(float);
-    if (!inbox || inboxOffset < 0 || numFrames <= 0 || numChannels <= 0
-        || (uint64_t)inboxOffset + bytes > (uint64_t)supersonic_inbox_bytes()) {
-        SendFailureWithIntValue(inReply, "/b_allocPtr", "range is not inside the inbox", bufnum);
-        return kSCErr_None;
-    }
-    float* data = reinterpret_cast<float*>(const_cast<uint8_t*>(inbox) + inboxOffset);
-
-    // Call buffer_set_data to configure the buffer (with guard samples)
-    int result = buffer_set_data(inWorld, bufnum, data, numFrames, numChannels, sampleRate, true);
-
-    if (result == 0) {
-        SendDoneWithIntValue(inReply, "/b_allocPtr", bufnum);
-
-        // Send internal message for host to track buffer allocation
-        small_scpacket packet;
-        packet.adds("/supersonic/buffer/allocated");
-        packet.maketags(3);
-        packet.addtag(',');
-        packet.addtag('s');  // UUID string
-        packet.addtag('i');  // buffer number
-        packet.adds(uuid);
-        packet.addi(bufnum);
-
-        SendReply(inReply, packet.data(), packet.size());
-    } else {
-        SendFailureWithIntValue(inReply, "/b_allocPtr", "Buffer allocation failed", bufnum);
-    }
-
-    return kSCErr_None;
-}
-
-// /supersonic/buffer/read bufnum bufOffset inboxOffset numFrames numChannels sampleRate
+// /supersonic/buffer/read bufnum bufOffset assetsOffset numFrames numChannels sampleRate
 //
-// Frames from the inbox lane into an ALLOCATED buffer, in place of what
+// Frames from the assets area lane into an ALLOCATED buffer, in place of what
 // /b_read did with a file: the client decoded them (clockwork_audio_file.h
-// is a client API) and laid them out at inboxOffset, interleaved, with no
+// is a client API) and laid them out at assetsOffset, interleaved, with no
 // guard frames — the buffer keeps its own. Clamped to the buffer's end, as
 // /b_read clamped; refused when the channel counts differ, as /b_read
 // refused; the rate, if given, becomes the buffer's, as /b_read set it.
@@ -256,7 +203,7 @@ SCErr meth_supersonic_buffer_read(World* inWorld, int inSize, char* inData, Repl
     sc_msg_iter msg(inSize, inData);
     const int bufnum      = msg.geti();
     const int bufOffset   = msg.geti();
-    const int inboxOffset = msg.geti();
+    const int assetsOffset = msg.geti();
     const int numFrames   = msg.geti();
     const int numChannels = msg.geti();
     const float rate      = msg.getf();
@@ -277,17 +224,17 @@ SCErr meth_supersonic_buffer_read(World* inWorld, int inSize, char* inData, Repl
         SendFailureWithIntValue(inReply, kName, str, bufnum);
         return kSCErr_None;
     }
-    const uint8_t* inbox = supersonic_inbox_base();
+    const uint8_t* assets = supersonic_assets_base();
     const uint64_t bytes = (uint64_t)(numFrames > 0 ? numFrames : 0) * (uint64_t)numChannels * sizeof(float);
-    if (!inbox || inboxOffset < 0 || numFrames < 0
-        || (uint64_t)inboxOffset + bytes > (uint64_t)supersonic_inbox_bytes()) {
-        SendFailureWithIntValue(inReply, kName, "range is not inside the inbox", bufnum);
+    if (!assets || assetsOffset < 0 || numFrames < 0
+        || (uint64_t)assetsOffset + bytes > (uint64_t)supersonic_assets_bytes()) {
+        SendFailureWithIntValue(inReply, kName, "range is not inside the assets area", bufnum);
         return kSCErr_None;
     }
     const int framesToEnd = buf->frames - (bufOffset < 0 ? 0 : bufOffset);
     const int n = framesToEnd <= 0 ? 0 : (numFrames < framesToEnd ? numFrames : framesToEnd);
     if (n > 0 && bufOffset >= 0)
-        memcpy(buf->data + (size_t)bufOffset * buf->channels, inbox + inboxOffset,
+        memcpy(buf->data + (size_t)bufOffset * buf->channels, assets + assetsOffset,
                (size_t)n * buf->channels * sizeof(float));
     if (rate > 0.f) {
         buf->samplerate = rate;
@@ -298,9 +245,9 @@ SCErr meth_supersonic_buffer_read(World* inWorld, int inSize, char* inData, Repl
     return kSCErr_None;
 }
 
-// /supersonic/buffer/publish bufnum bufOffset numFrames outboxOffset
+// /supersonic/buffer/publish bufnum bufOffset numFrames returnsOffset
 //
-// A buffer's frames into the outbox lane, for a client to encode — in place
+// A buffer's frames into the returns area lane, for a client to encode — in place
 // of what /b_write did with a file. Clamped to the buffer's end (numFrames
 // < 0: to the end), as /b_write clamped. The reply says what landed:
 // /supersonic/buffer/published bufnum channels frames rate.
@@ -311,7 +258,7 @@ SCErr meth_supersonic_buffer_publish(World* inWorld, int inSize, char* inData, R
     const int bufnum       = msg.geti();
     const int bufOffset    = msg.geti();
     const int numFrames    = msg.geti(-1);
-    const int outboxOffset = msg.geti();
+    const int returnsOffset = msg.geti();
 
     if (bufnum < 0 || (uint32)bufnum >= inWorld->mNumSndBufs) {
         SendFailureWithIntValue(inReply, kName, "buffer number out of range", bufnum);
@@ -326,14 +273,14 @@ SCErr meth_supersonic_buffer_publish(World* inWorld, int inSize, char* inData, R
     int framesToEnd = buf->frames - start;
     if (framesToEnd < 0) framesToEnd = 0;
     const int n = numFrames < 0 || numFrames > framesToEnd ? framesToEnd : numFrames;
-    uint8_t* outbox = supersonic_outbox_base();
+    uint8_t* returns = supersonic_returns_base();
     const uint64_t bytes = (uint64_t)n * (uint64_t)buf->channels * sizeof(float);
-    if (!outbox || outboxOffset < 0 || (uint64_t)outboxOffset + bytes > (uint64_t)supersonic_outbox_bytes()) {
-        SendFailureWithIntValue(inReply, kName, "range is not inside the outbox", bufnum);
+    if (!returns || returnsOffset < 0 || (uint64_t)returnsOffset + bytes > (uint64_t)supersonic_returns_bytes()) {
+        SendFailureWithIntValue(inReply, kName, "range is not inside the returns area", bufnum);
         return kSCErr_None;
     }
     if (n > 0)
-        memcpy(outbox + outboxOffset, buf->data + (size_t)start * buf->channels, (size_t)bytes);
+        memcpy(returns + returnsOffset, buf->data + (size_t)start * buf->channels, (size_t)bytes);
 
     small_scpacket packet;
     packet.adds("/supersonic/buffer/published");
@@ -2073,7 +2020,6 @@ void initMiscCommands() {
 
     NEW_COMMAND(b_alloc);
     NEW_COMMAND(b_allocRead);
-    NEW_COMMAND(b_allocPtr);
     NEW_COMMAND(b_allocReadChannel);
 
     NEW_COMMAND(b_read);
@@ -2095,7 +2041,6 @@ void initMiscCommands() {
     NEW_COMMAND(b_fill);
     NEW_COMMAND(b_gen);
 
-    NEW_COMMAND(b_allocPtr);
     // The guest's own verbs, implemented beside the guest (piano_wavetable.cpp).
     NewCommand("supersonic/piano/wavetable", cmd_supersonic_piano_wavetable, supersonic_meth_piano_wavetable);
     NewCommand("supersonic/buffer/read", cmd_supersonic_buffer_read, meth_supersonic_buffer_read);

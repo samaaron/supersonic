@@ -20,7 +20,7 @@
  * here and consumed here (supersonic.js), and they are listed below so a
  * caller who knows scsynth's options finds them under the names they expect.
  */
-import { scsynthOptionSchema, scsynthHeapHeadroomBytes } from "./lib/scsynth_options_schema.js";
+import { scsynthOptionSchema, scsynthHeapHeadroomBytes, scsynthPoolOverheadBytes, scsynthTablesBytes } from "./lib/scsynth_options_schema.js";
 
 const guestDefaults = Object.fromEntries(scsynthOptionSchema.map((o) => [o.name, o.default]));
 
@@ -52,14 +52,21 @@ export default defaultScsynthOptions;
 export const guestOptionNames = Object.freeze(scsynthOptionSchema.map((o) => o.name));
 
 /**
- * The heap scsynth allocates from, for a real-time pool of `realTimeMemorySize`
- * KB: the pool and the headroom the rest of scsynth takes beside it. The same
- * sum every host does (scsynth_heap_bytes in dsp/scsynth/scsynth_options.h —
- * the native host sizes clockwork's heap with it from -m), with the headroom
- * taken from the generated schema rather than a figure of this file's own.
+ * What scsynth asks of the engine's memory for a real-time pool of
+ * `realTimeMemorySize` KB: its fast memory, where the tables and the pool are
+ * laid out (what dsp_memory_bytes asks for), and its bulk memory, the floor
+ * the rest of scsynth allocates from beside it (what dsp_memory_bulk_bytes
+ * asks for). The same sum as scsynth_heap_bytes in
+ * dsp/scsynth/scsynth_options.h, with both figures taken from the generated
+ * schema rather than figures of this file's own. The client adds what the
+ * engine takes beside the two (MemoryLayout.engineOverhead) when it sizes
+ * memArenaSize.
  */
+export function scsynthMemoryBytes(realTimeMemorySize) {
+  return scsynthTablesBytes + realTimeMemorySize * 1024 + scsynthPoolOverheadBytes;
+}
 export function scsynthHeapBytes(realTimeMemorySize) {
-  return realTimeMemorySize * 1024 + scsynthHeapHeadroomBytes;
+  return scsynthMemoryBytes(realTimeMemorySize) + scsynthHeapHeadroomBytes;
 }
 
 /*

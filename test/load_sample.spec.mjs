@@ -1230,25 +1230,31 @@ test.describe("SuperSonic sample info and content hashing", () => {
     expect(result.hashFull).not.toBe(result.hashPartial);
   });
 
-  test("prepareEmpty (/b_alloc) produces a hash", async ({ page, sonicConfig }) => {
+  test("an empty buffer (/b_alloc) is the engine's: queried from it, and not among the client's samples", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       try {
         await sonic.init();
+        const messages = [];
+        sonic.on("in", (m) => messages.push(m));
         await sonic.send("/b_alloc", 0, 4096, 1);
         await sonic.sync(1);
-
+        await sonic.send("/b_query", 0);
+        await sonic.sync(2);
+        const info = messages.find((m) => m[0] === "/b_info" && m[1] === 0);
+        const done = messages.find((m) => m[0] === "/done" && m[1] === "/b_alloc" && m[2] === 0);
         const buffers = sonic.getLoadedBuffers();
-        const buf0 = buffers.find(b => b.bufnum === 0);
-        return { success: true, hash: buf0?.hash };
+        return { success: true, frames: info?.[2], channels: info?.[3], done: !!done, listed: buffers.some((b) => b.bufnum === 0) };
       } catch (err) {
         return { success: false, error: err.message };
       }
     }, sonicConfig);
 
     expect(result.success).toBe(true);
-    expect(typeof result.hash).toBe("string");
-    expect(result.hash.length).toBe(64);
+    expect(result.done).toBe(true);
+    expect(result.frames).toBe(4096);
+    expect(result.channels).toBe(1);
+    expect(result.listed).toBe(false);
   });
 
   test("sampleInfo returns full metadata for a filename", async ({ page, sonicConfig }) => {
@@ -1359,7 +1365,7 @@ test.describe("SuperSonic sample info and content hashing", () => {
     expect(result.after).toBe(0);
   });
 
-  test("sampleInfo does not send /b_allocPtr", async ({ page, sonicConfig }) => {
+  test("sampleInfo commits no asset", async ({ page, sonicConfig }) => {
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       try {
@@ -1371,7 +1377,7 @@ test.describe("SuperSonic sample info and content hashing", () => {
         await sonic.sampleInfo("bd_haus.flac");
         await new Promise(r => setTimeout(r, 200));
 
-        const allocMessages = messages.filter(m => m[0] === "/b_allocPtr" || m[0] === "/buffer/allocated");
+        const allocMessages = messages.filter(m => m[0] === "/clockwork/asset/commit" || m[0] === "/clockwork/asset/committed");
         return { success: true, allocMessages: allocMessages.length };
       } catch (err) {
         return { success: false, error: err.message };

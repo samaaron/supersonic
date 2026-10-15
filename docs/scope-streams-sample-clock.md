@@ -25,7 +25,7 @@ windows and latency alignment without per-widget reconstruction.
 A 32-byte region in the clockwork block of the arena, after the clock state
 (`SAMPLE_CLOCK_START` in `clockwork/src/shared_memory.h`). A reader finds it
 through the arena's table of contents, as the entry
-`CLOCKWORK_ARENA_SAMPLE_CLOCK` (`clockwork/src/clockwork_arena.h`):
+`CLOCKWORK_ARENA_CLOCKWORK_SAMPLE_CLOCK` (`clockwork/src/clockwork_arena.h`):
 
 ```
 [0..3]   u32 seq        seqlock: odd = writer mid-update
@@ -54,7 +54,7 @@ also usable for recording markers and visual sync.
 
 The scope region's slots change from `header + 3 × region` to a
 `shm_audio_buffer`-shaped ring (own struct so scope ring size is an
-independent memory_profile knob, `SHM_TAP_RING_FRAMES`). Its size per host
+independent memory_profile knob, `TAP_RING_FRAMES`). Its size per host
 (`clockwork/src/memory_profile.h`):
 
 - **Native:** 131072 frames, ≈ 2.7 s at 48 kHz (16384 up to v0.89.0). A
@@ -106,7 +106,7 @@ address.
 - `shm_tap_stream_reader` (shm_tap_stream.hpp): `valid/channels/
   capacity_frames`, `write_position()`, `base_engine_frames()`, and
   `copy_window(end_cursor, frames, out, &used_channels)` — zero-fills what
-  the ring no longer holds and stays `SHM_TAP_READ_MARGIN_FRAMES` clear of
+  the ring no longer holds and stays `TAP_READ_MARGIN_FRAMES` clear of
   the writer.
 - `sample_clock_view` from `shm_segment_client::get_sample_clock()`
   (`clockwork/src/shm_segment.hpp`): seqlock-consistent `{engine_frames,

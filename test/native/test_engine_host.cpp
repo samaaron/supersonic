@@ -55,7 +55,7 @@ TEST_CASE("host args: the scsynth-shaped flags land in the engine's config", "[h
                               "-B", "127.0.0.1", "-b", "2048", "-n", "4096", "-i", "0", "-o", "2",
                               "-S", "44100", "-w", "128", "-c", "8192",
                               "--default-bpm", "60", "--app-name", "Probe", "--audio-driver", "CoreAudio",
-                              "--max-connections", "16", "--inbox-mb", "64", "--headless",
+                              "--max-connections", "16", "--assets-mb", "64", "--headless",
                               "-D", "0", "-R", "0", "-l", "1" }, &err, &ok);
     INFO(err);
     REQUIRE(ok);
@@ -76,7 +76,7 @@ TEST_CASE("host args: the scsynth-shaped flags land in the engine's config", "[h
     CHECK(o.cfg.appName == "Probe");
     CHECK(o.cfg.audioDriver == "CoreAudio");
     CHECK(o.maxConnections == 16);
-    CHECK(o.cfg.inboxBytes == 64u * 1024u * 1024u);
+    CHECK(o.cfg.assetsBytes == 64u * 1024u * 1024u);
     CHECK(o.cfg.headless);
     CHECK(o.headless);
     // scsynth's own flags that mean nothing here are accepted, not warned about.
@@ -92,7 +92,7 @@ TEST_CASE("host args: defaults, and what the host derives", "[host][args]") {
     CHECK(o.cfg.sampleRate == 48000);
     CHECK(o.cfg.bufferSize == 0);
     CHECK(o.cfg.callbackWatchdog);
-    CHECK(o.cfg.inboxBytes == 512u * 1024u * 1024u);   // address space, not memory
+    CHECK(o.cfg.assetsBytes == 512u * 1024u * 1024u);   // address space, not memory
     CHECK(o.maxConnections == 4);
     CHECK_FALSE(o.headless);
     CHECK(o.desiredInputChannels == ClockworkEngine::kAutoChannelCount);
@@ -104,9 +104,9 @@ TEST_CASE("host args: defaults, and what the host derives", "[host][args]") {
     CHECK(none.shmEndpoint.empty());
 
     // Clamps: a thread bomb and a lane past the header's reach are both refused quietly.
-    const Options big = parse({ "--max-connections", "99999", "--inbox-mb", "99999" });
+    const Options big = parse({ "--max-connections", "99999", "--assets-mb", "99999" });
     CHECK(big.maxConnections == 1024);
-    CHECK(big.cfg.inboxBytes == 3072u * 1024u * 1024u);
+    CHECK(big.cfg.assetsBytes == 3072u * 1024u * 1024u);
 }
 
 TEST_CASE("host args: an unknown flag is reported, not silently applied", "[host][args]") {
@@ -156,7 +156,7 @@ TEST_CASE("host args: -H names the devices, scsynth's way", "[host][args]") {
 TEST_CASE("host args: a flag missing its value, or a number that is not one, stops the boot", "[host][args]") {
     for (const auto& args : std::vector<std::vector<std::string>>{
              { "-u" }, { "-u", "abc" }, { "-S", "48k" }, { "-i", "two" }, { "-Z" },
-             { "--tcp" }, { "--tcp", "x" }, { "--max-connections", "many" }, { "--inbox-mb" },
+             { "--tcp" }, { "--tcp", "x" }, { "--max-connections", "many" }, { "--assets-mb" },
              { "--default-bpm", "fast" }, { "-m" }, { "-H" } }) {
         std::string err;
         bool ok = true;
@@ -239,7 +239,7 @@ TEST_CASE("host usage: every flag the parser knows is in the help text", "[host]
     CHECK(u.find("Probe") != std::string::npos);
     for (const char* flag : { "-u", "-S", "-Z", "-z", "-i", "-o", "-n", "-b", "-a", "-c", "-m", "-w", "-B", "-H",
                               "--default-bpm", "--app-name", "--audio-driver", "--tcp", "--uds", "--uds-dgram",
-                              "--pipe", "--shm-commands", "--max-connections", "--inbox-mb", "--shm-endpoint",
+                              "--pipe", "--shm-commands", "--max-connections", "--assets-mb", "--shm-endpoint",
                               "--headless", "--list-devices" })
         CHECK(u.find(flag) != std::string::npos);
 }

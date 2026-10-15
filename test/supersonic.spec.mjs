@@ -1085,8 +1085,8 @@ test.describe("Node Tree Layout", () => {
           // Clockwork publishes the WINDOW — where it is and how big. What a
           // node entry is, and so how many fit, is this guest's business.
           bufferConstants: {
-            SHM_WINDOW_START: bc.SHM_WINDOW_START,
-            SHM_WINDOW_SIZE: bc.SHM_WINDOW_SIZE,
+            GUEST_WINDOW_START: bc.GUEST_WINDOW_START,
+            GUEST_WINDOW_SIZE: bc.GUEST_WINDOW_SIZE,
           },
         };
       } catch (err) {
@@ -1097,12 +1097,12 @@ test.describe("Node Tree Layout", () => {
     expect(result.success).toBe(true);
 
     // The window is where clockwork says it is.
-    expect(result.bufferConstants.SHM_WINDOW_START).toBeGreaterThan(0);
+    expect(result.bufferConstants.GUEST_WINDOW_START).toBeGreaterThan(0);
     // Capacity is DERIVED from the window and the entry, with the parser's own
     // constants rather than literals: the same sum node_tree.h does for
     // NODE_TREE_MIRROR_MAX_NODES, so a change to either side moves both.
     const capacity = Math.floor(
-      (result.bufferConstants.SHM_WINDOW_SIZE - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
+      (result.bufferConstants.GUEST_WINDOW_SIZE - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
     expect(NODE_TREE_ENTRY_SIZE % 8).toBe(0);
     expect(capacity).toBe(1024);
 
@@ -1149,8 +1149,8 @@ test.describe("SuperSonic (SAB-only)", () => {
         // Direct memory access (SAB-only). The node tree is what this guest
         // publishes in clockwork's WINDOW, so it starts where the window does.
         const bc = sonic.bufferConstants;
-        const ringBufferBase = sonic.ringBufferBase;
-        const treeBase = ringBufferBase + bc.SHM_WINDOW_START;
+        const arenaBase = sonic.arenaBase;
+        const treeBase = arenaBase + bc.GUEST_WINDOW_START;
         const treeView = new Int32Array(sonic.sharedBuffer, treeBase, 20);
         const first20 = Array.from(treeView);
 

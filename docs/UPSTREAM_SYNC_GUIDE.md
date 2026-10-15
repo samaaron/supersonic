@@ -1075,7 +1075,7 @@ grep -rn "CLOCKWORK_GUEST" dsp/scsynth/synth/
 Current `CLOCKWORK_GUEST` sites in upstream files:
 
 - **SC_Constants.h**: `constexpr` constants (upstream uses runtime `const` with `std::acos` etc.)
-- **SC_World.cpp**: `InitializeSynthTables`/`InitializeFFTTables` declarations and calls in `World_New`; the guest's doors to the host (`supersonic_guest_*` in `scsynth_dsp.cpp`) and `sc_malloc`/`sc_free` on the host's heap
+- **SC_World.cpp**: `InitializeSynthTables`/`InitializeFFTTables` declarations and calls in `World_New`; the guest's doors to the host (`supersonic_guest_*` in `scsynth_dsp.cpp`) and `sc_malloc`/`sc_free` on the guest's bulk memory
 - **SC_fftlib.cpp**: idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
 - **Samp.cpp**: idempotency guard in `FillTables`, `InitializeSynthTables` entry point
 - **SC_InterfaceTable.h**: `DefineSimpleUnit` macro (without trailing semicolon)

@@ -110,8 +110,8 @@ Audio bus channels (default: 1024).
 Control bus channels (default: 16384).
 .TP
 .BI \-m " size"
-Real-time memory pool in KB (default: 8192). The engine's heap is sized to
-hold it.
+Real-time memory pool in KB (default: 8192). The engine sizes scsynth's
+memory to hold it.
 .TP
 .BI \-r " num"
 Random number generators (default: 64).
@@ -136,8 +136,8 @@ Name published to the operating system's audio and MIDI registries: PipeWire
 nodes, ALSA sequencer clients, macOS aggregate devices and Link peers
 (default: SuperSonic).
 .TP
-.BI \-\-inbox\-mb " n"
-The inbox lane, where loaded samples and other assets live, in MB
+.BI \-\-assets\-mb " n"
+The assets area lane, where loaded samples and other assets live, in MB
 (default: 512; 1\-3072). Address space, not memory: pages are committed as
 they are written.
 .TP

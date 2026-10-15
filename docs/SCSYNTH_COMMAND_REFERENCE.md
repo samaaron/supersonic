@@ -841,9 +841,9 @@ Allocate a buffer.
 | sampleRate | float | Sample rate (optional, default: server rate) |
 
 **Async:** Yes
-**Reply:** `/done /b_alloc bufnum` natively. On the web, `/done /b_allocPtr bufnum`: the client rewrites `/b_alloc` to `/b_allocPtr`
+**Reply:** `/done /b_alloc bufnum`, on every platform: the buffer comes from scsynth's own memory.
 
-On the web the client drops the completion message and passes the sample rate on. Natively the completion message runs, and the buffer always takes the server's sample rate.
+The completion message runs, and the buffer takes the server's sample rate.
 
 ```javascript
 // Allocate mono buffer with 44100 frames
@@ -859,7 +859,7 @@ supersonic.send("/b_alloc", 1, 44100, 2);
 
 Allocate a buffer and read an audio file into it. The engine itself reads no files, so this is served in front of it:
 
-- **Web:** the client fetches the path over HTTP (a bare file name through the configured `sampleBaseURL`), decodes it, and sends `/b_allocPtr` in its place.
+- **Web:** the client fetches the path over HTTP (a bare file name through the configured `sampleBaseURL`), decodes it, stages the frames in the assets area and commits them as an asset in its place.
 - **Native server:** the server's front reads and decodes the file.
 - **NIF:** fails.
 
@@ -871,7 +871,7 @@ Allocate a buffer and read an audio file into it. The engine itself reads no fil
 | numFrames  | int    | Number of frames to read (0 = all)            |
 
 **Async:** Yes
-**Reply:** `/done /b_allocRead bufnum` on the native server; `/done /b_allocPtr bufnum` on the web
+**Reply:** `/done /b_allocRead bufnum` on the native server; `/clockwork/asset/committed bufnum` on the web
 
 ```javascript
 supersonic.send("/b_allocRead", 0, "kick.wav");
@@ -895,7 +895,7 @@ Allocate a buffer and read specific channels from an audio file. Like `/b_allocR
 | channels   | int... | Channel indices to read (0-indexed)           |
 
 **Async:** Yes
-**Reply:** `/done /b_allocReadChannel bufnum` on the native server; `/done /b_allocPtr bufnum` on the web
+**Reply:** `/done /b_allocReadChannel bufnum` on the native server; `/clockwork/asset/committed bufnum` on the web
 
 ```javascript
 // Read only the left channel from a stereo file
@@ -1360,7 +1360,7 @@ supersonic.send("/b_allocFile", 0, fileBytes);
 
 This is useful when you want to send sample data directly via OSC without needing a URL - for example, when embedding audio data.
 
-**Reply:** `/done /b_allocPtr bufnum` (the client rewrites `/b_allocFile` to `/b_allocPtr`)
+**Reply:** `/clockwork/asset/committed bufnum` (the client decodes the bytes and commits them as an asset)
 
 ---
 

@@ -4,7 +4,7 @@
  * SampleLane.h — a sample, loaded the way a CLIENT loads one.
  *
  * The engine does not read files. A client decodes (clockwork_audio_file.h),
- * carves a slot in the inbox lane (clockwork_asset_pool.h), lays the frames
+ * carves a slot in the assets area lane (clockwork_asset_pool.h), lays the frames
  * out with scsynth's guard frames around them, and hands the slot over as an
  * asset keyed by buffer number (/clockwork/asset/commit; dsp_api.h). That is
  * what the web client does in JavaScript and what SuperSonic's socket front
@@ -29,7 +29,7 @@
 namespace sample_lane {
 
 // One pool per engine instance, keyed on the fixture's generation (not its
-// inbox address, which a fresh engine may well inherit from the last one): a
+// assets address, which a fresh engine may well inherit from the last one): a
 // new engine gets a new pool, and a slot the guest has released is handed
 // back when its notification is seen.
 struct LanePool {
@@ -43,7 +43,7 @@ inline LanePool& poolFor(EngineFixture& fx) {
     if (lp.generation != fx.generation() || !lp.pool) {
         if (lp.pool) clockwork_asset_pool_close(lp.pool);
         lp.generation = fx.generation();
-        lp.pool = clockwork_asset_pool_open(fx.engine().guestInboxBytes());
+        lp.pool = clockwork_asset_pool_open(fx.engine().guestAssetsBytes());
         lp.held.clear();
     }
     // Reclaim what the guest has let go of since we last looked.
@@ -92,7 +92,7 @@ inline Staged stage(EngineFixture& fx, int32_t bufnum, const std::string& path,
     const uint32_t slotBytes   = slotFrames * (uint32_t)ch * sizeof(float);
     uint32_t slot = 0;
     if (clockwork_asset_pool_alloc(lp.pool, slotBytes, &slot) != 0) { clockwork_audio_free(decoded); return out; }
-    auto* lane = const_cast<uint8_t*>(fx.engine().guestInbox());
+    auto* lane = const_cast<uint8_t*>(fx.engine().guestAssets());
     std::memset(lane + slot, 0, slotBytes);
     const uint32_t payload = slot + guardBefore * (uint32_t)ch * sizeof(float);
     std::memcpy(lane + payload, decoded + (size_t)startFrame * ch,

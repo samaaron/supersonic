@@ -12,10 +12,10 @@
  * the fixture (EngineFixture::routedReplies), never by a callback over a test's locals.
  *
  * TWO WAYS A SAMPLE ARRIVES, ONE PLACE IT IS DECODED. The client decodes the
- * file (clockwork_audio_file.h), lays the frames out in the INBOX with the
+ * file (clockwork_audio_file.h), lays the frames out in the ASSETS with the
  * guard frames the interpolators read past, and either commits the slot as an
  * asset keyed by buffer number (/clockwork/asset/commit — SampleLane.h) or
- * names the offset with /b_allocPtr. The engine reads no files: /b_allocRead
+ * commits the offset as an asset. The engine reads no files: /b_allocRead
  * is refused, and the refusal, like every other answer, goes to whoever asked.
  * These cases exercise all three, natively, with a real file.
  */
@@ -57,93 +57,30 @@ osc_test::Packet allocRead(int32_t buf, const std::string& path) {
 
 } // namespace
 
-TEST_CASE("/b_allocPtr: a sample handed over through the inbox is answered to the asker",
-          "[load_sample][origin][lane]") {
-    // SKIP, not a silent return: a case that quietly passes when the sample
-    // is absent asserts nothing and says so to nobody.
-    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
-
-    EngineFixture fx;
-
-    // The client's half: decode, then lay out [guard][audio][guard] where the
-    // engine will read it, with the guard layout from its one definition.
-    ClockworkAudioInfo info{};
-    info.struct_bytes = sizeof(info);
-    float* pcm = nullptr;
-    REQUIRE(clockwork_audio_decode_file(samplePath("bd_haus.flac").c_str(), &info, &pcm)
-            == CLOCKWORK_OK);
-    REQUIRE(pcm != nullptr);
-    REQUIRE(info.frames > 0);
-
-    uint8_t* inbox = const_cast<uint8_t*>(fx.engine().guestInbox());
-    const uint32_t inboxBytes = fx.engine().guestInboxBytes();
-    REQUIRE(inbox != nullptr);
-
-    const uint32_t gb = supersonic_buffer_guard_before();
-    const uint32_t ga = supersonic_buffer_guard_after();
-    const size_t   ch = info.channels;
-    const size_t   floats = (gb + info.frames + ga) * ch;
-    const size_t   bytes  = floats * sizeof(float);
-    if (bytes > inboxBytes) { clockwork_audio_free(pcm); SKIP("sample larger than this engine's inbox"); }
-
-    const uint32_t offset = 0;
-    float* dst = reinterpret_cast<float*>(inbox + offset);
-    std::memset(dst, 0, bytes);
-    std::memcpy(dst + gb * ch, pcm, info.frames * ch * sizeof(float));
-    clockwork_audio_free(pcm);
-
-
-    osc_test::Builder b;
-    auto& m = b.begin("/b_allocPtr");
-    m << int32_t{0} << static_cast<int32_t>(offset)
-      << static_cast<int32_t>(info.frames) << static_cast<int32_t>(info.channels)
-      << static_cast<float>(info.sample_rate) << "lane-test";
-    const auto msg = b.end();
-
-    // ingest(), not send(): the token is the whole point, and sendOSC has none.
-    fx.engine().ingest(msg.ptr(), msg.size(), kAsker);
-
-    OscReply done;
-    REQUIRE(fx.waitForReply("/done", done));
-
-    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
-    const auto seen = fx.routedReplies();
-    const RoutedReply* reply = nullptr;
-    for (const auto& r : seen)
-        if (r.address == "/done") { reply = &r; break; }
-    REQUIRE(reply != nullptr);
-    // Addressed to the asker, by the reply route. With the origin dropped this
-    // is {0, EGRESS_BROADCAST_NOTIFY} and the /done goes to the notify
-    // audience — which, with nobody subscribed, is nobody at all.
-    CHECK(reply->origin == kAsker);
-    CHECK(reply->route  == static_cast<uint32_t>(EGRESS_REPLY));
-}
-
-TEST_CASE("/b_allocPtr: a range that leaves the inbox is refused, to the asker",
+TEST_CASE("asset commit: a range that leaves the assets area is refused, to the asker",
           "[load_sample][origin][lane]") {
     // The offset is trusted by nobody. A range past the end of the lane would
     // be read as sample data from whatever lies beyond it, so it is refused —
     // and the refusal still has to reach the client that sent it.
     EngineFixture fx;
-    const uint32_t inboxBytes = fx.engine().guestInboxBytes();
-    REQUIRE(inboxBytes > 0);
-
+    const uint32_t assetsBytes = fx.engine().guestAssetsBytes();
+    REQUIRE(assetsBytes > 0);
 
     osc_test::Builder b;
-    auto& m = b.begin("/b_allocPtr");
-    // One frame short of the end would fit; the guard frames push it over.
-    m << int32_t{0} << static_cast<int32_t>(inboxBytes - sizeof(float))
-      << int32_t{1} << int32_t{1} << 44100.0f << "past-the-end";
+    auto& m = b.begin("/clockwork/asset/commit");
+    // One frame short of the end would fit; two frames run past it.
+    m << int32_t{0} << int32_t{1} << static_cast<int32_t>(assetsBytes - sizeof(float))
+      << int32_t{8} << int32_t{1} << int32_t{2} << 44100.0f;
     const auto msg = b.end();
     fx.engine().ingest(msg.ptr(), msg.size(), kAsker);
 
-    OscReply fail;
-    REQUIRE(fx.waitForReply("/fail", fail));
+    OscReply refused;
+    REQUIRE(fx.waitForReply("/clockwork/asset/refused", refused));
     // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
     const auto seen = fx.routedReplies();
     const RoutedReply* reply = nullptr;
     for (const auto& r : seen)
-        if (r.address == "/fail") { reply = &r; break; }
+        if (r.address == "/clockwork/asset/refused") { reply = &r; break; }
     REQUIRE(reply != nullptr);
     CHECK(reply->origin == kAsker);
     CHECK(reply->route  == static_cast<uint32_t>(EGRESS_REPLY));

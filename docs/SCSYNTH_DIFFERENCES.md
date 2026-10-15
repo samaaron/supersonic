@@ -124,9 +124,12 @@ engine's own `/fail` is the answer for the ones it cannot serve. (Until
 2026-09-13 the client refused these itself with a friendlier message; the
 engine's answer is the honest one, and `/error -1`/`-2` — quieting one
 bundle's failures — is a standard scsynth idiom the refusal forbade.) The
-exceptions are `/b_alloc`, `/b_allocRead`, `/b_allocReadChannel` and
-`/b_allocFile`, which the client rewrites to `/b_allocPtr` before they are
-sent.
+exceptions are the file verbs, which the client answers as the native front
+does: it fetches and decodes the file, stages the frames in the assets area, and
+sends the engine an asset commit (`/b_allocRead`, `/b_allocReadChannel`,
+`/b_allocFile`), a `/supersonic/buffer/read` (`/b_read`, `/b_readChannel`),
+or a `/supersonic/buffer/publish` (`/b_write`). `/b_alloc` is the engine's
+own on every platform: an empty buffer comes from its heap.
 
 ### Filesystem Commands
 
@@ -136,11 +139,11 @@ The engine has no files on any host. Each host deals with the file verbs differe
 |---------|-----|-----------------------|
 | `/d_load` | Refused with `/fail`: use `loadSynthDef()`, or `/d_recv` with the bytes | Reads the file and sends `/d_recv` |
 | `/d_loadDir` | Refused with `/fail`: use `loadSynthDefs()` | Reads each file and sends `/d_recv` |
-| `/b_read` | Fails: use `loadSample()` | Decodes the file |
-| `/b_readChannel` | Fails: use `loadSample()` | Decodes the file |
-| `/b_allocRead` | Rewritten to `/b_allocPtr`: the client fetches and decodes the file | Decodes the file |
-| `/b_allocReadChannel` | Rewritten to `/b_allocPtr`, with channel selection | Decodes the file |
-| `/b_write` | Fails | Encodes the file (`leaveOpen` is not available) |
+| `/b_read` | The client fetches and decodes the file; the engine copies the frames in. Replies `/done /supersonic/buffer/read bufnum` | Decodes the file |
+| `/b_readChannel` | As `/b_read`, with channel selection | Decodes the file |
+| `/b_allocRead` | The client fetches and decodes the file and commits it as an asset. Replies `/clockwork/asset/committed bufnum` | Decodes the file |
+| `/b_allocReadChannel` | As `/b_allocRead`, with channel selection | Decodes the file |
+| `/b_write` | The engine publishes the frames; the client hands a 32-bit float WAV to the product on `'buffer:written'` (`{ bufnum, path, blob }`). `leaveOpen` is not available | Encodes the file (`leaveOpen` is not available) |
 | `/b_close` | Fails | Fails |
 
 The native server and the NIF send every command through `supersonic::Commands` (`front/supersonic_commands.h`), which sits between their clients and the engine. It does the file work on a thread of its own and answers with scsynth's replies, such as `/done /b_allocRead bufnum`. On the web, the path given to `/b_allocRead` is fetched over HTTP, through `sampleBaseURL` when it is a bare file name.
@@ -211,7 +214,7 @@ const fileBytes = new Uint8Array(await response.arrayBuffer());
 supersonic.send("/b_allocFile", 0, fileBytes);
 ```
 
-Supports FLAC, WAV, OGG, MP3, and any format the browser's `decodeAudioData()` handles. The client decodes the file and sends `/b_allocPtr` in its place. The native server and the NIF have no `/b_allocFile`.
+Supports FLAC, WAV, OGG, MP3, and any format the browser's `decodeAudioData()` handles. The client decodes the file and commits it as an asset in its place. The native server and the NIF have no `/b_allocFile`.
 
 ### JavaScript API
 

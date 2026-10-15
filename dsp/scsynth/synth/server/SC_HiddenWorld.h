@@ -30,6 +30,7 @@
 #include "SC_World.h"
 #include "SC_Reply.h"
 #include "MsgFifo.h"
+#include "guest_heap.h"
 #include <map>
 #include <deque>
 #include <set>
@@ -89,11 +90,14 @@ struct NodeEndMsg {
 typedef MsgFifoNoFree<TriggerMsg, SC_TRIGGERS_FIFO_SIZE> TriggersFifo;
 typedef MsgFifoNoFree<NodeReplyMsg, SC_NODE_REPLY_FIFO_SIZE> NodeReplyFifo;
 typedef MsgFifoNoFree<NodeEndMsg, SC_NODE_ENDS_FIFO_SIZE> NodeEndsFifo;
-typedef HashTable<struct GraphDef, Malloc> GrafDefTable;
+// The instance's tables and client lists, in the guest's own memory
+// (guest_heap.h): upstream's are on the system allocator.
+typedef HashTable<struct GraphDef, GuestMalloc> GrafDefTable;
 
-typedef std::map<struct ReplyAddress, uint32> ClientIDDict;
-typedef std::deque<int> ClientIDs;
-typedef std::set<ReplyAddress> Clients;
+typedef std::map<struct ReplyAddress, uint32, std::less<struct ReplyAddress>,
+                 GuestAllocator<std::pair<const struct ReplyAddress, uint32>>> ClientIDDict;
+typedef std::deque<int, GuestAllocator<int>> ClientIDs;
+typedef std::set<ReplyAddress, std::less<ReplyAddress>, GuestAllocator<ReplyAddress>> Clients;
 
 struct HiddenWorld {
     class AllocPool* mAllocPool;

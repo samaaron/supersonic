@@ -51,10 +51,10 @@ test("GUEST_CONFIG_START is outside IN ring buffer", async ({ sonicPage, sonicCo
     await sonic.shutdown();
 
     return {
-      inBufferStart: bc.IN_BUFFER_START,
-      inBufferSize: bc.IN_BUFFER_SIZE,
+      inBufferStart: bc.IN_RING_START,
+      inBufferSize: bc.IN_RING_SIZE,
       worldOptionsStart: bc.GUEST_CONFIG_START,
-      totalBufferSize: bc.TOTAL_BUFFER_SIZE,
+      totalBufferSize: bc.ARENA_SIZE,
     };
   }, sonicConfig);
 
@@ -66,7 +66,7 @@ test("GUEST_CONFIG_START is outside IN ring buffer", async ({ sonicPage, sonicCo
   expect(result.worldOptionsStart + 72).toBeLessThanOrEqual(result.totalBufferSize);
 });
 
-test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPage, sonicConfig }) => {
+test("GUEST_CONFIG_START is consistent with ARENA_SIZE", async ({ sonicPage, sonicConfig }) => {
   const result = await sonicPage.evaluate(async (config) => {
     const sonic = new window.SuperSonic(config);
     await sonic.init();
@@ -77,40 +77,42 @@ test("GUEST_CONFIG_START is consistent with TOTAL_BUFFER_SIZE", async ({ sonicPa
     return {
       worldOptionsStart: bc.GUEST_CONFIG_START,
       worldOptionsSize: bc.GUEST_CONFIG_SIZE,
-      windowStart: bc.SHM_WINDOW_START,
-      windowSize: bc.SHM_WINDOW_SIZE,
-      scopeStart: bc.SHM_TAP_START,
-      scopeTotalSize: bc.SHM_TAP_TOTAL_SIZE,
+      windowStart: bc.GUEST_WINDOW_START,
+      windowSize: bc.GUEST_WINDOW_SIZE,
+      scopeStart: bc.TAPS_START,          // the taps: in clockwork's half, after the scope
+      scopeTotalSize: bc.TAPS_SIZE,
       sampleClockStart: bc.SAMPLE_CLOCK_START,
       sampleClockSize: bc.SAMPLE_CLOCK_SIZE,
       guestPersistStart: bc.GUEST_PERSIST_START,
       guestPersistSize: bc.GUEST_PERSIST_SIZE,
       channelMapStart: bc.CHANNEL_MAP_START,
       channelMapSize: bc.CHANNEL_MAP_SIZE,
-      nrtOutStart: bc.NRT_OUT_BUFFER_START,
-      nrtOutSize: bc.NRT_OUT_BUFFER_SIZE,
-      clockworkBlockSize: bc.CLOCKWORK_BLOCK_SIZE,
-      guestRegionStart: bc.GUEST_REGION_START,
-      totalBufferSize: bc.TOTAL_BUFFER_SIZE,
+      nrtOutStart: bc.NRT_OUT_RING_START,
+      nrtOutSize: bc.NRT_OUT_RING_SIZE,
+      clockworkBlockSize: bc.CLOCKWORK_HALF_SIZE,
+      guestRegionStart: bc.GUEST_HALF_START,
+      totalBufferSize: bc.ARENA_SIZE,
     };
   }, sonicConfig);
 
-  // The arena is two blocks (clockwork/js/lib/arena.js), each laid out
-  // published-first (clockwork/docs/ARENA.md). clockwork's block runs the
-  // regions any attached reader may follow — METRICS, ..., SAMPLE_CLOCK,
-  // CHANNEL_MAP, the audio taps — then its transport: CONTROL, and the rings,
-  // with the NRT-out ring at the end. The guest's block follows, opening with
-  // what the guest publishes — its WINDOW, then the TAPS — and then the
-  // guest's own: GUEST_CONFIG (the world options) and, closing the arena,
-  // GUEST_PERSIST. A region is APPENDED to the run it belongs to, so the
-  // seams pinned here are what this file follows when one is added.
-  expect(result.nrtOutStart + result.nrtOutSize).toBe(result.clockworkBlockSize);
+  // The arena is five areas in two halves (clockwork/docs/ARENA.md).
+  // clockwork's half: clockwork-state (METRICS, ..., SAMPLE_CLOCK,
+  // CHANNEL_MAP), clockwork-audio (the SCOPE, then the TAPS), then
+  // clockwork-transport (the ring cursors and the rings, the NRT-out ring at
+  // the end). The guest's half follows: guest-public is the WINDOW, and
+  // guest-private is GUEST_CONFIG (the world options) and, closing the arena,
+  // GUEST_PERSIST (to the 16-byte alignment of the arena's end). A region is
+  // APPENDED to the area it belongs to, so the seams pinned here are what
+  // this file follows when one is added.
+  expect(result.scopeStart + result.scopeTotalSize).toBeLessThanOrEqual(result.nrtOutStart);
+  expect(result.nrtOutStart + result.nrtOutSize).toBeLessThanOrEqual(result.clockworkBlockSize);
+  expect(result.clockworkBlockSize - (result.nrtOutStart + result.nrtOutSize)).toBeLessThan(16);
   expect(result.guestRegionStart).toBe(result.clockworkBlockSize);
   expect(result.windowStart).toBe(result.guestRegionStart);
-  expect(result.scopeStart).toBeGreaterThanOrEqual(result.windowStart + result.windowSize);
-  expect(result.worldOptionsStart).toBeGreaterThanOrEqual(result.scopeStart + result.scopeTotalSize);
+  expect(result.worldOptionsStart).toBeGreaterThanOrEqual(result.windowStart + result.windowSize);
   expect(result.guestPersistStart).toBeGreaterThanOrEqual(result.worldOptionsStart + result.worldOptionsSize);
-  expect(result.guestPersistStart + result.guestPersistSize).toBe(result.totalBufferSize);
+  expect(result.guestPersistStart + result.guestPersistSize).toBeLessThanOrEqual(result.totalBufferSize);
+  expect(result.totalBufferSize - (result.guestPersistStart + result.guestPersistSize)).toBeLessThan(16);
   expect(result.channelMapStart + result.channelMapSize)
     .toBeLessThanOrEqual(result.nrtOutStart);
   expect(result.sampleClockStart + result.sampleClockSize)

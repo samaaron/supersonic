@@ -4,7 +4,7 @@
  * buffer_commands.cpp — pointing a SndBuf at bytes the guest does not own.
  *
  * A sample arrives as an ASSET (clockwork dsp_api.h): the client decoded it
- * into the inbox lane and the audio thread handed us a pointer. This binds a
+ * into the assets area lane and the audio thread handed us a pointer. This binds a
  * buffer to that pointer — no copy — and unbinds it when the buffer is
  * freed. The same binding serves /b_allocPtr, the web client's spelling of
  * the same hand-off. Ported from SuperSonic's buffer_commands.cpp, which the

@@ -26,6 +26,7 @@
 */
 
 #include "node_tree.h"
+#include "guest_heap.h"
 #include "synth/server/SC_Group.h"     // For Node, Group structs
 #include "synth/server/SC_SynthDef.h"  // For NodeDef (mName access)
 
@@ -114,8 +115,8 @@ uint32_t next_pow2(uint32_t v) {
 }
 
 void release_indices() {
-    delete[] g_free_next; g_free_next = nullptr;
-    delete[] g_hash;      g_hash = nullptr;
+    guest_delete_array(g_free_next); g_free_next = nullptr;
+    guest_delete_array(g_hash);      g_hash = nullptr;
     g_hash_mask = 0;
     g_free_head = -1;
     g_capacity  = 0;
@@ -151,10 +152,11 @@ void supersonic_node_tree_bind(void* window, uint32_t bytes) {
         std::memset(&entries[i], 0, sizeof(NodeEntry));
         entries[i].id = -1;
     }
-    // Sized here, in dsp_new, which is the one place the guest may allocate.
-    g_free_next = new int32_t[g_capacity];
+    // Sized here, in dsp_new, which is the one place the guest may allocate,
+    // and in the guest's own memory (guest_heap.h).
+    g_free_next = guest_new_array<int32_t>(g_capacity);
     const uint32_t buckets = next_pow2(g_capacity * 2);
-    g_hash      = new HashEntry[buckets];
+    g_hash      = guest_new_array<HashEntry>(buckets);
     g_hash_mask = buckets - 1;
     NodeTree_InitIndices();
 }

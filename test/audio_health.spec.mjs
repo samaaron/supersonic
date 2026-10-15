@@ -32,7 +32,7 @@ test.describe('Audio Health Diagnostics', () => {
     expect(result.missing).toEqual([]);
   });
 
-  test('audio health metric offsets 62-66 are defined in schema', async ({ page }) => {
+  test('audio health metric offsets 66-70 are defined in schema', async ({ page }) => {
     const result = await page.evaluate(() => {
       const schema = window.SuperSonic.getMetricsSchema();
       return {
@@ -44,12 +44,13 @@ test.describe('Audio Health Diagnostics', () => {
       };
     });
 
-    // Offsets per js/lib/metrics_offsets.js (CTX_GLITCH_COUNT … CTX_AUDIO_HEALTH_PCT).
-    expect(result.glitchCount).toBe(62);
-    expect(result.glitchDurationMs).toBe(63);
-    expect(result.averageLatencyUs).toBe(64);
-    expect(result.maxLatencyUs).toBe(65);
-    expect(result.audioHealthPct).toBe(66);
+    // Offsets per js/lib/metrics_offsets.js (CTX_GLITCH_COUNT … CTX_AUDIO_HEALTH_PCT): the context's slots sit
+    // above the C++ struct's, and moved up again when the guest's malloc census took 58-59 and the program's 60-61.
+    expect(result.glitchCount).toBe(66);
+    expect(result.glitchDurationMs).toBe(67);
+    expect(result.averageLatencyUs).toBe(68);
+    expect(result.maxLatencyUs).toBe(69);
+    expect(result.audioHealthPct).toBe(70);
   });
 
   test('audioHealthPct is populated in metrics after boot', async ({ page, sonicConfig }) => {
@@ -62,12 +63,13 @@ test.describe('Audio Health Diagnostics', () => {
 
       const metrics = sonic.getMetrics();
       const arr = sonic.getMetricsArray();
+      const offset = window.SuperSonic.getMetricsSchema().metrics.audioHealthPct.offset;   // CTX_AUDIO_HEALTH_PCT
 
       await sonic.destroy();
 
       return {
         objectValue: metrics.audioHealthPct,
-        arrayValue: arr[66],  // audioHealthPct offset (CTX_AUDIO_HEALTH_PCT)
+        arrayValue: arr[offset],
       };
     }, sonicConfig);
 

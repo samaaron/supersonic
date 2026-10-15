@@ -99,6 +99,7 @@ scsynth with low latency inside a web page.
 
 | Member                                          | Description                                                                                                      |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| [`arenaBase`](#arenabase)                       | Ring buffer base offset in SharedArrayBuffer.                                                                    |
 | [`bufferConstants`](#bufferconstants)           | Buffer layout constants from the WASM build.                                                                     |
 | [`clock`](#clock)                               | Session-timeline service: tempo, beat origin, transport, NTP "now." See ClockworkClock for the full API surface. |
 | [`gamepad`](#gamepad)                           | The gamepad manager, when the gamepad option is on and it came up; otherwise null (gamepadError says why).       |
@@ -106,7 +107,6 @@ scsynth with low latency inside a web page.
 | [`midi`](#midi)                                 | The Web MIDI manager, when MIDI is enabled (the midi option, or enableMidi) and came up.                         |
 | [`midiError`](#midierror)                       | Why midi is null although MIDI was asked for: the error its start-up threw.                                      |
 | [`mode`](#mode)                                 | Active transport mode ('sab' or 'postMessage').                                                                  |
-| [`ringBufferBase`](#ringbufferbase)             | Ring buffer base offset in SharedArrayBuffer.                                                                    |
 | [`sharedBuffer`](#sharedbuffer)                 | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                                                     |
 | [`allocSample()`](#allocsample)                 | Allocate an empty buffer, as loadSample does for a file: resolves once the engine has it.                        |
 | [`enableMidi()`](#enablemidi)                   | Bring Web MIDI up after init.                                                                                    |
@@ -279,6 +279,18 @@ const sonic = new SuperSonic({
 
 #### Accessors
 
+##### arenaBase
+
+###### Get Signature
+
+> **get** **arenaBase**(): `number`
+
+Ring buffer base offset in SharedArrayBuffer. Internal.
+
+###### Returns
+
+`number`
+
 ##### audioContext
 
 ###### Get Signature
@@ -450,18 +462,6 @@ analyser.connect(sonic.audioContext.destination);
 | `numberOfOutputs` | `number`              | -                                                                |
 | `connect()`       | (...`args`) => `void` | -                                                                |
 | `disconnect()`    | (...`args`) => `void` | -                                                                |
-
-##### ringBufferBase
-
-###### Get Signature
-
-> **get** **ringBufferBase**(): `number`
-
-Ring buffer base offset in SharedArrayBuffer. Internal.
-
-###### Returns
-
-`number`
 
 ##### sharedBuffer
 
@@ -2002,19 +2002,19 @@ Send a command to a specific UGen instance within a synth. The command name and 
 
 ###### Call Signature
 
-> **send**(`address`, `bufnum`, `numFrames`, `numChannels?`, `sampleRate?`): `void`
+> **send**(`address`, `bufnum`, `numFrames`, `numChannels?`, `completionMessage?`): `void`
 
-Async. Allocate an empty buffer. Queued and rewritten to /b\_allocPtr internally. Use sync() after to ensure completion. Replies with `/done /b_allocPtr bufnum`. Note: completion messages are not supported (dropped during rewrite).
+Allocate an empty buffer, from scsynth's own memory, as on every platform. Replies with `/done /b_alloc bufnum`; a completion message is honoured.
 
 ###### Parameters
 
-| Parameter      | Type         |
-| -------------- | ------------ |
-| `address`      | `"/b_alloc"` |
-| `bufnum`       | `number`     |
-| `numFrames`    | `number`     |
-| `numChannels?` | `number`     |
-| `sampleRate?`  | `number`     |
+| Parameter            | Type                                             |
+| -------------------- | ------------------------------------------------ |
+| `address`            | `"/b_alloc"`                                     |
+| `bufnum`             | `number`                                         |
+| `numFrames`          | `number`                                         |
+| `numChannels?`       | `number`                                         |
+| `completionMessage?` | `ArrayBuffer` \| `Uint8Array`<`ArrayBufferLike`> |
 
 ###### Returns
 
@@ -2024,7 +2024,7 @@ Async. Allocate an empty buffer. Queued and rewritten to /b\_allocPtr internally
 
 > **send**(`address`, `bufnum`, `path`, `startFrame?`, `numFrames?`): `void`
 
-Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`.
+Async. Allocate a buffer and read an audio file into it. The path is fetched via the configured sampleBaseURL, decoded, staged in the assets area and committed as an asset. Replies with `/clockwork/asset/committed bufnum`.
 
 ###### Parameters
 
@@ -2044,7 +2044,7 @@ Async. Allocate a buffer and read an audio file into it. The path is fetched via
 
 > **send**(`address`, `bufnum`, `path`, `startFrame`, `numFrames`, ...`channels`): `void`
 
-Async. Allocate a buffer and read specific channels from an audio file. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`.
+Async. Allocate a buffer and read specific channels from an audio file. As /b\_allocRead. Replies with `/clockwork/asset/committed bufnum`.
 
 ###### Parameters
 
@@ -2063,9 +2063,77 @@ Async. Allocate a buffer and read specific channels from an audio file. Queued a
 
 ###### Call Signature
 
+> **send**(`address`, `bufnum`, `path`, `startFrame?`, `numFrames?`, `bufStartFrame?`, `leaveOpen?`): `void`
+
+Async. Read an audio file into a buffer that exists. The frames are decoded here and the engine copies them in. Replies with `/done /supersonic/buffer/read bufnum`. `leaveOpen` is not available.
+
+###### Parameters
+
+| Parameter        | Type        |
+| ---------------- | ----------- |
+| `address`        | `"/b_read"` |
+| `bufnum`         | `number`    |
+| `path`           | `string`    |
+| `startFrame?`    | `number`    |
+| `numFrames?`     | `number`    |
+| `bufStartFrame?` | `number`    |
+| `leaveOpen?`     | `number`    |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `path`, `startFrame`, `numFrames`, `bufStartFrame`, `leaveOpen`, ...`channels`): `void`
+
+Async. As /b\_read, with channel selection.
+
+###### Parameters
+
+| Parameter       | Type               |
+| --------------- | ------------------ |
+| `address`       | `"/b_readChannel"` |
+| `bufnum`        | `number`           |
+| `path`          | `string`           |
+| `startFrame`    | `number`           |
+| `numFrames`     | `number`           |
+| `bufStartFrame` | `number`           |
+| `leaveOpen`     | `number`           |
+| ...`channels`   | `number`\[]        |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
+> **send**(`address`, `bufnum`, `path`, `headerFormat`, `sampleFormat`, `numFrames?`, `startFrame?`, `leaveOpen?`): `void`
+
+Async. Write a buffer's frames out: the engine publishes them and a 32-bit float WAV is handed to `'buffer:written'` as `{ bufnum, path, blob }`, since a browser has no path to write to.
+
+###### Parameters
+
+| Parameter      | Type         |
+| -------------- | ------------ |
+| `address`      | `"/b_write"` |
+| `bufnum`       | `number`     |
+| `path`         | `string`     |
+| `headerFormat` | `string`     |
+| `sampleFormat` | `string`     |
+| `numFrames?`   | `number`     |
+| `startFrame?`  | `number`     |
+| `leaveOpen?`   | `number`     |
+
+###### Returns
+
+`void`
+
+###### Call Signature
+
 > **send**(`address`, `bufnum`, `data`): `void`
 
-Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Queued and rewritten internally. Replies with `/done /b_allocPtr bufnum`.
+Async. SuperSonic extension: allocate a buffer from inline audio file bytes (WAV, FLAC, OGG, etc.) without URL fetch. Decoded, staged and committed as an asset. Replies with `/clockwork/asset/committed bufnum`.
 
 ###### Parameters
 
@@ -2347,10 +2415,11 @@ automatically encoded to OSC format. The typed overloads cover scsynth's
 commands; this one takes any other address, and the multi-range forms of
 commands like `/n_setn`, `/b_fill` and `/c_getn`.
 
-Sent at once, except buffer allocation (`/b_alloc`, `/b_allocRead`,
-`/b_allocReadChannel`, `/b_allocFile`): those are queued, in the order
-written, while their material is fetched and decoded, then reach the
-engine as `/b_allocPtr`. A queued command that fails is reported on
+Sent at once, except the file verbs (`/b_allocRead`, `/b_allocReadChannel`,
+`/b_allocFile`, `/b_read`, `/b_readChannel`, `/b_write`): those are
+queued, in the order written, while their material is fetched and
+decoded, then reach the engine as an asset commit, a buffer read or a
+buffer publish. A queued command that fails is reported on
 `'error'`. [sync](#sync) waits for the queue before its barrier.
 
 Nothing is refused here: a command the browser cannot serve (a file-path
@@ -3542,10 +3611,10 @@ Transferable config for SAB mode OscChannel.
 
 | Property                                         | Type                         | Description                                                             |
 | ------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------- |
+| <a id="arenabase-1"></a> `arenaBase`             | `number`                     | -                                                                       |
 | <a id="bufferconstants-1"></a> `bufferConstants` | `Record`<`string`, `number`> | -                                                                       |
 | <a id="controlindices"></a> `controlIndices`     | `Record`<`string`, `number`> | -                                                                       |
 | <a id="mode-3"></a> `mode`                       | `"sab"`                      | -                                                                       |
-| <a id="ringbufferbase-1"></a> `ringBufferBase`   | `number`                     | -                                                                       |
 | <a id="sharedbuffer-1"></a> `sharedBuffer`       | `SharedArrayBuffer`          | -                                                                       |
 | <a id="sourceid-1"></a> `sourceId`               | `number`                     | -                                                                       |
 | <a id="wasmmemory"></a> `wasmMemory`             | `Memory`                     | The engine's memory: the receiving worker opens its own client over it. |

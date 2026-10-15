@@ -32,7 +32,7 @@ cfg.appName   = "My App";            // what the OS shows (PipeWire nodes, Link 
 cfg.defaultBpm = 60.0;
 cfg.hardwareDevice = "";             // "" = the default output; a device by name otherwise
 cfg.pluginBridgePath = bridgePath;   // where YOU put the plugin bridge (plugin builds); "" = beside the executable
-cfg.inboxBytes = size_t(512) << 20;  // the lane a sample is staged in on its way to the guest: it must hold
+cfg.assetsBytes = size_t(512) << 20;  // the lane a sample is staged in on its way to the guest: it must hold
                                      // the largest sample you will load, as floats. Address space, not memory
                                      // (pages commit as written); the default, 8 MB, is a few seconds of audio
 

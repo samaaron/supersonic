@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Sam Aaron
 /*
  * /supersonic/piano/wavetable — MdaPiano's sample table, handed over as a
- * buffer. The table arrives like any sample (here through the inbox lane,
+ * buffer. The table arrives like any sample (here through the assets area lane,
  * committed as an asset — SampleLane.h) and
  * the verb points the plugin at it. Without a table the piano is silent;
  * with one it sounds; a buffer too short to be a table is refused.

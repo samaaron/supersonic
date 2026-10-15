@@ -179,7 +179,7 @@ This is the web host. Natively, the socket or the NIF writes onto the same IN ri
 
 ### Sending OSC to scsynth
 
-1. **SuperSonic** receives OSC via `send()` or `sendOSC()`. On the web, `/b_alloc`, `/b_allocRead`, `/b_allocReadChannel` and `/b_allocFile` are rewritten to `/b_allocPtr` first: the client fetches and decodes the sample, and the engine is handed its place in memory.
+1. **SuperSonic** receives OSC via `send()` or `sendOSC()`. On the web, the file verbs (`/b_allocRead`, `/b_allocReadChannel`, `/b_allocFile`, `/b_read`, `/b_readChannel`, `/b_write`) are answered here first, as the native front answers them: the client fetches and decodes the sample, stages it in the assets area, and the engine is handed its place as an asset commit (or a buffer read, or a buffer publish). `/b_alloc` goes to the engine as sent.
 2. **OscChannel** sends the bytes on without looking at their time:
    - SAB mode: written to the IN ring buffer
    - PM mode: postMessage to the AudioWorklet, which writes it onto the same IN ring

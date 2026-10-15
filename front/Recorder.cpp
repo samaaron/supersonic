@@ -24,8 +24,8 @@ shm_audio_buffer* Recorder::masterSlot() {
     ClockworkClient* c = mEngine.egressClient();
     if (!c) return nullptr;
     ClockworkRegion taps {};
-    if (clockwork_client_region(c, CLOCKWORK_REGION_RAW_SCOPE, &taps) != CLOCKWORK_OK || !taps.base) return nullptr;
-    return static_cast<shm_audio_buffer*>(taps.base) + SHM_AUDIO_MASTER_SLOT;
+    if (clockwork_client_region(c, CLOCKWORK_REGION_SCOPE, &taps) != CLOCKWORK_OK || !taps.base) return nullptr;
+    return static_cast<shm_audio_buffer*>(taps.base) + SCOPE_MASTER_SLOT;
 }
 
 bool Recorder::start(const std::string& path, const std::string& header, int bits, std::string* err) {
@@ -40,7 +40,7 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
     uint32_t rate = live ? slot->sample_rate : 0;
     if (rate == 0) rate = static_cast<uint32_t>(mEngine.currentDevice().activeSampleRate + 0.5);
     if (rate == 0) rate = 48000;
-    mChannels = live && slot->channels > 0 && slot->channels <= SHM_AUDIO_CHANNELS ? slot->channels : SHM_AUDIO_CHANNELS;
+    mChannels = live && slot->channels > 0 && slot->channels <= SCOPE_CHANNELS ? slot->channels : SCOPE_CHANNELS;
 
     ClockworkAudioWriterConfig cfg {};
     cfg.struct_bytes = sizeof cfg;
@@ -95,7 +95,7 @@ void Recorder::run(shm_audio_buffer* slot, shm_audio_buffer_reader reader) {
     // tap has been flowing since boot, so that cursor is "now"; the one thing
     // that can move it backwards is a device restart, which re-formats the
     // slot (see pullOnce).
-    std::vector<float> buf(4096 * SHM_AUDIO_CHANNELS);
+    std::vector<float> buf(4096 * SCOPE_CHANNELS);
     auto pullOnce = [&] {
         // The counter went backwards: the slot was re-formatted under us (a
         // device restart). Everything since the reset is the recording's;

@@ -30,7 +30,7 @@ import { defaultScsynthOptions, validateScsynthOptions, encodeScsynthOptions, sc
  * Clockwork hands over one opaque region and never asks what is in it.
  * scsynth needs two things in there, so the split is decided HERE:
  *
- *   inbox().offset ───────── buffer pool  sample frames, grows
+ *   assets().offset ───────── buffer pool  sample frames, grows
  *
  * IT USED TO BE TWO. The front of the region was an RT arena for scsynth's
  * AllocPool, carved here and handed to the engine as a byte offset in a
@@ -71,15 +71,17 @@ function validateBufferCommand(address, args) {
 /*
  * The verbs that cannot reach the engine as sent.
  *
- * scsynth's allocate-from-a-file commands name a PATH, and the engine has no
- * filesystem — in a browser it never did. So they are answered on this side:
- * the material is fetched and decoded here, staged into our slice of guest
- * memory, and what actually reaches the engine is /b_allocPtr with an
- * address. Purely a product concern; clockwork forwards verbs it was never
- * asked to understand.
+ * scsynth's file commands name a PATH, and the engine has no filesystem — in
+ * a browser it never did. So they are answered on this side, as the native
+ * front answers them: the material is fetched and decoded here, staged in
+ * the assets area, and what reaches the engine is an asset commit (a buffer bound
+ * to the frames where they lie), a /supersonic/buffer/read (frames copied
+ * into a buffer it has), or a /supersonic/buffer/publish (frames out, for a
+ * WAV the product is handed). /b_alloc is the engine's own: an empty buffer
+ * comes from its heap, on every platform.
  */
 const BUFFER_ALLOC_COMMANDS = new Set([
-  "/b_alloc", "/b_allocRead", "/b_allocReadChannel", "/b_allocFile",
+  "/b_allocRead", "/b_allocReadChannel", "/b_allocFile", "/b_read", "/b_readChannel", "/b_write",
 ]);
 
 export { OscChannel } from "../clockwork/js/osc_channel.js";
@@ -167,28 +169,25 @@ export class SuperSonic extends Clockwork {
      * region moved and the side channel went; the sum did not change, and it
      * still belongs to the guest's client rather than to clockwork.
      *
-     * The sum is scsynth's (scsynthHeapBytes: the pool and the headroom for
-     * what else is taken from the same span — the rest of clockwork's heap,
-     * its spare growth area, the pool's area bookkeeping), and it is the one
-     * the native host sizes clockwork's heap with from -m, read from the same
-     * header, so the two cannot drift.
+     * The sum is scsynth's (scsynthHeapBytes: its fast memory, the tables and
+     * the pool, plus its bulk memory, the headroom it allocates buffers and
+     * definitions from — the two spans the guest declares to clockwork
+     * through dsp_memory_bytes and dsp_memory_bulk_bytes, read from the same
+     * header, so the two cannot drift), plus what the engine takes of the
+     * same block beside them (MemoryLayout.engineOverhead: the RT router's
+     * block, the spare the guest's pool may grow into, the headers).
      */
     const rtKB = scOpts.realTimeMemorySize ?? defaultScsynthOptions.realTimeMemorySize;
     memory.memArenaSize = memory.memArenaSize
-      ?? Math.max(MemoryLayout.memArenaSize, scsynthHeapBytes(rtKB));
-    // /b_allocPtr NAMES A SAMPLE'S POSITION AS AN OFFSET FROM THE INBOX BASE,
-    // never as an address: the guest adds the inbox pointer it was handed at
-    // dsp_new. The buffer manager computes that offset once (laneOffset) and
-    // every sender — here and the OSC rewriter — reads it, so there is one
-    // subtraction to get right. On the web the sum is the address this side
-    // already had; natively the engine maps the lane wherever it likes, and
-    // an address from here would name the wrong bytes without faulting
-    // (dsp_api.h: "OFFSETS, NOT POINTERS").
-    // THE SAMPLE POOL LIVES IN THE INBOX. It is bulk the client writes and the
-    // guest reads in place — /b_allocPtr points a buffer straight at it — which
-    // is what the inbox is for, and it is the region clockwork grows.
-    memory.inboxSize    = memory.inboxSize    ?? bufInit;
-    memory.maxInboxSize = memory.maxInboxSize ?? bufMax;
+      ?? Math.max(MemoryLayout.memArenaSize, scsynthHeapBytes(rtKB) + MemoryLayout.engineOverhead);
+    // THE SAMPLE POOL LIVES IN THE ASSETS. It is bulk the client writes and the
+    // guest reads in place — an asset commit binds a buffer straight to it —
+    // which is what the assets area is for, and it is the region clockwork grows. A
+    // commit names a sample's position as an OFFSET from the assets area base, never
+    // as an address (dsp_api.h: "OFFSETS, NOT POINTERS"); the buffer manager
+    // computes it once and every sender reads it.
+    memory.assetsSize    = memory.assetsSize    ?? bufInit;
+    memory.maxAssetsSize = memory.maxAssetsSize ?? bufMax;
 
     super({
       guestMetrics: scsynthProfile.metrics,
@@ -223,7 +222,7 @@ export class SuperSonic extends Clockwork {
       // Clockwork publishes the window's SIZE; how many nodes fit is this
       // guest's arithmetic, the same sum node_tree.h does for
       // NODE_TREE_MIRROR_MAX_NODES, in the same units.
-      const windowBytes = this.bufferConstants?.SHM_WINDOW_SIZE;
+      const windowBytes = this.bufferConstants?.GUEST_WINDOW_SIZE;
       if (!windowBytes) return;
       const mirrorMax = Math.floor((windowBytes - NODE_TREE_HEADER_SIZE) / NODE_TREE_ENTRY_SIZE);
       if (scOpts.maxNodes > mirrorMax) {
@@ -325,14 +324,14 @@ export class SuperSonic extends Clockwork {
   #buffers() {
     if (this.#bufferManager) return this.#bufferManager;
 
-    const pool = this.inbox();
+    const pool = this.assets();
     this.#bufferManager = new BufferManager({
       clockwork: this,
       mode: this.mode,
       audioContext: this.audioContext,
       sharedBuffer: this.sharedBuffer,
       wasmMemory: this.wasmMemory,
-      // The whole inbox: nothing is reserved ahead of the pool.
+      // The whole assets: nothing is reserved ahead of the pool.
       bufferPoolConfig: {
         start: pool.offset,
         size: this.#buffersInit,
@@ -344,6 +343,7 @@ export class SuperSonic extends Clockwork {
       sampleBaseURL: this.#sampleBaseURL,
       maxBuffers: this.#numBuffers,
       onBufferPoolGrowth: (info) => this.emit("buffer:pool:grown", info),
+      onBufferWritten: (info) => this.emit("buffer:written", info),
     });
 
     this.#rewriter = new OSCRewriter({
@@ -351,16 +351,20 @@ export class SuperSonic extends Clockwork {
       getDefaultSampleRate: () => this.audioContext?.sampleRate || 44100,
     });
 
-    // The engine answers an allocation on the egress rather than with /done, so the completion is picked out of the
+    // The engine answers an asset on the egress rather than with /done, so the completion is picked out of the
     // inbound stream. One listener per manager, taken off with it (shutdown): a listener left from an engine before
-    // would answer every allocation again.
+    // would answer every commit again.
     const manager = this.#bufferManager;
     this.#onBufferReply = ({ oscData }) => {
       let msg;
       try { msg = oscFast.decodePacket(oscData); } catch { return; }
       const [address, ...args] = msg;
-      if (address === "/supersonic/buffer/allocated") manager.handleBufferAllocated(args);
-      else if (address === "/supersonic/buffer/freed") manager.handleBufferFreed(args);
+      if (address === "/clockwork/asset/committed") manager.handleAssetCommitted(args);
+      else if (address === "/clockwork/asset/refused") manager.handleAssetRefused(args);
+      else if (address === "/clockwork/asset/released") manager.handleAssetReleased(args);
+      else if (address === "/done" && args[0] === "/supersonic/buffer/read") manager.handleBufferReadAnswered(Number(args[1]));
+      else if (address === "/fail" && args[0] === "/supersonic/buffer/read") manager.handleBufferReadAnswered(Number(args[2]));
+      else if (address === "/supersonic/buffer/published") manager.handleBufferPublished(args);
     };
     this.on("in:osc", this.#onBufferReply);
 
@@ -494,8 +498,9 @@ export class SuperSonic extends Clockwork {
           await this.loadSample(buf.bufnum, buf.source.path,
                                 buf.source.startFrame || 0, buf.source.numFrames || 0);
         } else {
-          await this.send("/b_allocPtr", buf.bufnum, buf.laneOffset, buf.numFrames,
-                          buf.numChannels, buf.sampleRate, crypto.randomUUID());
+          // the frames are still in the assets area: the rebuilt engine is bound to them again
+          await this.send("/clockwork/asset/commit", buf.bufnum, 1, buf.payloadOffset, buf.byteCount,
+                          buf.numChannels, buf.numFrames, buf.sampleRate);
         }
       } catch (e) {
         console.error(`[SuperSonic] buffer ${buf.bufnum} did not survive the reload:`, e);
@@ -570,8 +575,8 @@ export class SuperSonic extends Clockwork {
       throw new Error("loadSample source must be a path/URL, ArrayBuffer, TypedArray, or Blob");
     }
 
-    await this.send("/b_allocPtr", bufnum, info.laneOffset, info.numFrames,
-                    info.numChannels, info.sampleRate, info.uuid);
+    await this.send("/clockwork/asset/commit", bufnum, 1, info.payloadOffset, info.byteCount,
+                    info.numChannels, info.numFrames, info.sampleRate);
     await info.allocationComplete;
 
     const { numFrames: frames, numChannels: channels, sampleRate: sr } = info;
@@ -586,15 +591,16 @@ export class SuperSonic extends Clockwork {
     };
   }
 
-  /** Allocate an empty buffer: the same path, with no material to decode. */
+  /**
+   * Allocate an empty buffer: scsynth's own /b_alloc, from the engine's heap,
+   * as on every platform. Its rate is the engine's; `sampleRate` is accepted
+   * for the old signature and ignored, as scsynth ignores it.
+   */
   async allocSample(bufnum, numFrames, numChannels = 1, sampleRate = null) {
-    const buffers = this.#buffers();
-    const info = await buffers.prepareEmpty({ bufnum, numFrames, numChannels, sampleRate });
-    await this.send("/b_allocPtr", bufnum, info.laneOffset, info.numFrames,
-                    info.numChannels, info.sampleRate, info.uuid);
-    await info.allocationComplete;
-    return { bufnum, numFrames: info.numFrames, numChannels: info.numChannels,
-             sampleRate: info.sampleRate };
+    void sampleRate;
+    await this.request("/b_alloc", [bufnum, numFrames, numChannels],
+                       { reply: "/done", match: (m) => m[1] === "/b_alloc" && m[2] === bufnum });
+    return { bufnum, numFrames, numChannels, sampleRate: this.audioContext?.sampleRate ?? null };
   }
 
   /** What is loaded, for a client that wants to show it. */

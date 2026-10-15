@@ -21,6 +21,7 @@
 #pragma once
 
 #include "SC_SynthDef.h"
+#include "guest_heap.h"
 #include "HashTable.h"
 #include <filesystem>
 #include <string>
@@ -32,7 +33,9 @@ struct ParamSpec {
     int32 mNumChannels;
 };
 
-typedef HashTable<ParamSpec, Malloc> ParamSpecTable;
+// The table's storage from the guest's heap (guest_heap.h), where the rest
+// of a synth definition is kept: upstream's Malloc is the system's.
+typedef HashTable<ParamSpec, GuestMalloc> ParamSpecTable;
 
 /** \note Relevant scsynth code: `GraphDef_Read(World *, char*&, GraphDef*, int32)`
  *  \note Relevant supernova code: `sc_synthdef::prepare(void)`

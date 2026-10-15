@@ -38,6 +38,7 @@
 #include "SC_SequencedCommand.h"
 #include "SC_Errors.h"
 #include "SC_Filesystem.hpp"
+#include "buffer_commands.h"   // supersonic_guest_alloc_bytes: the guest's heap
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -71,14 +72,27 @@ namespace fs = std::filesystem;
 // - SynthDef v3 format support (per-definition size field)
 // - Unified GraphDef_Read/GraphDef_ReadVer1 into single version-aware reader
 // - Bounds checking on all buffer reads (prevents crashes on truncated data)
-// - malloc/calloc/free replaced with new/delete
+// - malloc/calloc/free replaced with the guest's heap (guest_new_array and the rest, below)
 // - unique_ptr for exception-safe GraphDef cleanup
-// - BufColorAllocator modernized with std::vector
+// - BufColorAllocator modernized with std::vector (over the guest's heap)
 // =============================================================================
 
-extern Malloc gMalloc;
-
 const size_t ERR_BUF_SIZE(256);
+
+// ── Where a synth definition is kept ─────────────────────────────────────────
+// Upstream makes a definition's parts with new and frees them with delete,
+// which is the system allocator. Here they come from the guest's heap
+// (guest_heap.h: guest_new, guest_new_array and their frees, over
+// supersonic_guest_alloc_bytes): a definition is read while sound plays, and
+// clockwork's rule is that nothing on the audio thread reaches malloc. The
+// heap being out is std::bad_alloc, as new would be: GraphDef_Recv catches
+// it and the definition is refused whole.
+//
+// The parser's scratch too (GuestAllocator): the index map calcParamSpecs
+// sorts and the two stacks of the buffer colouring were std::vectors on the
+// system allocator — three mallocs on the audio thread for every definition
+// loaded, measured by clockwork's census (2026-10-15), and the last ones
+// this path made.
 
 // Static error message storage for GraphDef parsing errors
 // Used to preserve error messages across exception boundaries in Emscripten/WASM
@@ -157,8 +171,8 @@ void UnitSpec_Read(UnitSpec* inUnitSpec, const char*& buffer, const char* end, i
     inUnitSpec->mNumInputs = readCount(buffer, end, version);
     inUnitSpec->mNumOutputs = readCount(buffer, end, version);
     inUnitSpec->mSpecialIndex = readInt16_be(buffer, end);
-    inUnitSpec->mInputSpec = new InputSpec[inUnitSpec->mNumInputs];
-    inUnitSpec->mOutputSpec = new OutputSpec[inUnitSpec->mNumOutputs];
+    inUnitSpec->mInputSpec = guest_new_array<InputSpec>(inUnitSpec->mNumInputs);
+    inUnitSpec->mOutputSpec = guest_new_array<OutputSpec>(inUnitSpec->mNumOutputs);
     for (uint32 i = 0; i < inUnitSpec->mNumInputs; ++i) {
         InputSpec_Read(inUnitSpec->mInputSpec + i, buffer, end, version);
     }
@@ -225,7 +239,7 @@ void GraphDef_ReadVariant(World* inWorld, const char*& buffer, const char* end, 
     ReadName(buffer, end, inVariant->mNodeDef.mName);
     inVariant->mNodeDef.mHash = Hash(inVariant->mNodeDef.mName);
 
-    inVariant->mInitialControlValues = new float32[inGraphDef->mNumControls];
+    inVariant->mInitialControlValues = guest_new_array<float32>(inGraphDef->mNumControls);
     for (uint32 i = 0; i < inGraphDef->mNumControls; ++i) {
         inVariant->mInitialControlValues[i] = readFloat_be(buffer, end);
     }
@@ -241,9 +255,9 @@ inline static void calcParamSpecs(GraphDef* graphDef, const char*& buffer, const
     uint32 numSpecs = graphDef->mNumParamSpecs;
     if (numSpecs > 0) {
         int hashTableSize = NEXTPOWEROFTWO(numSpecs);
-        graphDef->mParamSpecTable = new ParamSpecTable(&gMalloc, hashTableSize, false);
-        graphDef->mParamSpecs = new ParamSpec[numSpecs];
-        std::vector<IndexMap> tempMaps(numSpecs);
+        graphDef->mParamSpecTable = guest_new<ParamSpecTable>(&gGuestMalloc, hashTableSize, false);
+        graphDef->mParamSpecs = guest_new_array<ParamSpec>(numSpecs);
+        std::vector<IndexMap, GuestAllocator<IndexMap>> tempMaps(numSpecs);
 
         for (uint32 i = 0; i < numSpecs; ++i) {
             ParamSpec* paramSpec = &graphDef->mParamSpecs[i];
@@ -268,7 +282,7 @@ inline static void calcParamSpecs(GraphDef* graphDef, const char*& buffer, const
         paramSpec.mNumChannels = graphDef->mNumControls - tempMap.paramSpecIndex;
     } else {
         // empty table to eliminate test in Graph_SetControl
-        graphDef->mParamSpecTable = new ParamSpecTable(&gMalloc, 4, false);
+        graphDef->mParamSpecTable = guest_new<ParamSpecTable>(&gGuestMalloc, 4, false);
         graphDef->mParamSpecs = nullptr;
     }
 }
@@ -306,7 +320,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     // Use custom deleter for automatic cleanup in case an exception is thrown.
     auto deleter = [](GraphDef* def) { GraphDef_Free(def); };
     // value-initialize so that all members of GraphDef are initially set to zero!
-    std::unique_ptr<GraphDef, decltype(deleter)> graphDef(new GraphDef {}, deleter);
+    std::unique_ptr<GraphDef, decltype(deleter)> graphDef(guest_new<GraphDef>(), deleter);
 
     graphDef->mOriginal = graphDef.get();
 
@@ -317,14 +331,14 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     graphDef->mNodeDef.mHash = Hash(graphDef->mNodeDef.mName);
 
     graphDef->mNumConstants = readCount(buffer, end, inVersion);
-    graphDef->mConstants = new float32[graphDef->mNumConstants];
+    graphDef->mConstants = guest_new_array<float32>(graphDef->mNumConstants);
     for (uint32 i = 0; i < graphDef->mNumConstants; ++i) {
         graphDef->mConstants[i] = readFloat_be(buffer, end);
     }
     graphDef->mNumWires = graphDef->mNumConstants;
 
     graphDef->mNumControls = readCount(buffer, end, inVersion);
-    graphDef->mInitialControlValues = new float32[graphDef->mNumControls];
+    graphDef->mInitialControlValues = guest_new_array<float32>(graphDef->mNumControls);
     for (uint32 i = 0; i < graphDef->mNumControls; ++i) {
         graphDef->mInitialControlValues[i] = readFloat_be(buffer, end);
     }
@@ -333,7 +347,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     calcParamSpecs(graphDef.get(), buffer, end, inVersion);
 
     uint32 numUnitSpecs = readCount(buffer, end, inVersion);
-    graphDef->mUnitSpecs = new UnitSpec[numUnitSpecs];
+    graphDef->mUnitSpecs = guest_new_array<UnitSpec>(numUnitSpecs);
     graphDef->mNumCalcUnits = 0;
     graphDef->mNumUnitSpecs = 0;
     for (uint32 i = 0; i < numUnitSpecs; ++i) {
@@ -371,7 +385,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     if (inVersion >= 1) {
         uint16 numVariants = readInt16_be(buffer, end);
         if (numVariants > 0) {
-            graphDef->mVariants = new GraphDef[numVariants];
+            graphDef->mVariants = guest_new_array<GraphDef>(numVariants);
             for (uint32 i = 0; i < numVariants; ++i) {
                 GraphDef_ReadVariant(inWorld, buffer, end, graphDef.get(), graphDef->mVariants + i);
                 // increment mNumVariants after every successful call to GraphDef_ReadVariant()
@@ -579,8 +593,8 @@ GraphDef* GraphDef_LoadDir(World* inWorld, const fs::path& dirname, GraphDef* in
 
 void UnitSpec_Free(UnitSpec* inUnitSpec);
 void UnitSpec_Free(UnitSpec* inUnitSpec) {
-    delete[] inUnitSpec->mInputSpec;
-    delete[] inUnitSpec->mOutputSpec;
+    guest_delete_array(inUnitSpec->mInputSpec);
+    guest_delete_array(inUnitSpec->mOutputSpec);
 }
 
 void GraphDef_Free(GraphDef* inGraphDef) {
@@ -591,15 +605,15 @@ void GraphDef_Free(GraphDef* inGraphDef) {
         UnitSpec_Free(inGraphDef->mUnitSpecs + i);
     }
     for (uint32 i = 0; i < inGraphDef->mNumVariants; ++i) {
-        delete[] inGraphDef->mVariants[i].mInitialControlValues;
+        guest_delete_array(inGraphDef->mVariants[i].mInitialControlValues);
     }
-    delete inGraphDef->mParamSpecTable;
-    delete[] inGraphDef->mParamSpecs;
-    delete[] inGraphDef->mInitialControlValues;
-    delete[] inGraphDef->mConstants;
-    delete[] inGraphDef->mUnitSpecs;
-    delete[] inGraphDef->mVariants;
-    delete inGraphDef;
+    guest_delete(inGraphDef->mParamSpecTable);
+    guest_delete_array(inGraphDef->mParamSpecs);
+    guest_delete_array(inGraphDef->mInitialControlValues);
+    guest_delete_array(inGraphDef->mConstants);
+    guest_delete_array(inGraphDef->mUnitSpecs);
+    guest_delete_array(inGraphDef->mVariants);
+    guest_delete(inGraphDef);
 }
 
 void NodeDef_Dump(NodeDef* inNodeDef) {
@@ -637,8 +651,8 @@ public:
     int NumBufs() { return mRefs.size(); }
 
 private:
-    std::vector<int16> mRefs;
-    std::vector<int16> mStack;
+    std::vector<int16, GuestAllocator<int16>> mRefs;
+    std::vector<int16, GuestAllocator<int16>> mStack;
 };
 
 inline BufColorAllocator::BufColorAllocator() {

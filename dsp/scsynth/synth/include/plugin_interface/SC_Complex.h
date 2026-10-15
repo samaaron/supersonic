@@ -49,6 +49,12 @@ const int32 kPolarLUTSize = 2049;
 const int32 kPolarLUTSize2 = kPolarLUTSize >> 1;
 
 
+#ifdef CLOCKWORK_GUEST
+// One set, in the guest's working memory, placed and filled by scsynth_tables.cpp on every World_New.
+extern float* gMagLUT;
+extern float* gPhaseLUT;
+extern float* gSine;
+#else
 /* each object file that is including this header will have separate lookup tables */
 namespace {
 
@@ -78,6 +84,7 @@ static bool initTables(void) {
 bool dummy = initTables();
 
 }
+#endif // CLOCKWORK_GUEST
 
 struct Polar;
 
