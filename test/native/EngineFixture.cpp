@@ -353,10 +353,16 @@ EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames
             const auto due = began + std::chrono::nanoseconds(static_cast<int64_t>(
                 1e9 * double(callback * frames) / double(sampleRate)));
             std::this_thread::sleep_until(due);
+            if (const int64_t stall = mStallNanos.exchange(0, std::memory_order_relaxed); stall > 0)
+                std::this_thread::sleep_for(std::chrono::nanoseconds(stall));
             const auto late = std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - due).count();
             if (late > mWorstLateNanos.load(std::memory_order_relaxed))
                 mWorstLateNanos.store(late, std::memory_order_relaxed);
+            if (late > 1'000'000) {   // a millisecond: the jitter of a timer wake is less
+                std::lock_guard<std::mutex> lock(mLateMutex);
+                mLateWakes.push_back({due, late / 1e9});
+            }
             mFx.mEngine.pumpAudioCallback(frames, afterEachBlock);
         }
     });

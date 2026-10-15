@@ -202,10 +202,23 @@ public:
         // reads this to know whether it had one.
         double worstLateSeconds() const { return mWorstLateNanos.load(std::memory_order_relaxed) / 1e9; }
 
+        // Every callback that woke more than a millisecond late, with when it
+        // was due: so a test can tell a dropout the machine made, by stalling
+        // the device, from one the engine made. Read once the device is gone.
+        struct LateWake { std::chrono::steady_clock::time_point due; double lateSeconds; };
+        std::vector<LateWake> lateWakes() const { std::lock_guard<std::mutex> lock(mLateMutex); return mLateWakes; }
+
+        // Make the next callback this much late, on purpose: the machine
+        // stalling the device, for a test of what is heard when it does.
+        void stallNextCallback(std::chrono::nanoseconds by) { mStallNanos.store(by.count(), std::memory_order_relaxed); }
+
     private:
         EngineFixture&       mFx;
         std::atomic<bool>    mStop{false};
         std::atomic<int64_t> mWorstLateNanos{0};
+        std::atomic<int64_t> mStallNanos{0};
+        mutable std::mutex   mLateMutex;
+        std::vector<LateWake> mLateWakes;
         std::thread          mThread;
     };
 

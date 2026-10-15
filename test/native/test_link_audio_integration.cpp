@@ -1099,6 +1099,17 @@ struct Heard {
     double pace   = 0.0;   // audio taken per second of wall clock: 1 is a device's pace
     double worstLateSeconds = 0.0;   // the device's latest wake after its due time
     std::string damage;   // where the gaps and jumps were, for a failure to say
+    std::vector<std::pair<double, double>> gapsAt;   // each: seconds from where the judging began, length
+    std::vector<double> jumpsAt;                     // seconds from where the judging began
+    // The device's late wakes: when each was due, in seconds from where the
+    // judging began (negative: while settling), and how late it came.
+    std::vector<std::pair<double, double>> lateWakes;
+    double deviceBufferSeconds = 0.0;   // one callback's worth
+    // The peer's own stalls, by the same clock: when each slot it woke late
+    // to publish was due and how late it came; and the slots in which it
+    // could not publish at all, for a full queue.
+    std::vector<std::pair<double, double>> peerLate;
+    std::vector<double> peerSkipped;
 };
 
 // The engine holds a peer's audio the input latency ahead of where it reads
@@ -1113,6 +1124,104 @@ struct Heard {
 // is not. (A threshold of 5 ms once skipped every case on every macOS runner.)
 constexpr double kInputLatencySeconds = 0.05;
 constexpr double kDeviceKeptTimeSeconds = kInputLatencySeconds / 2.0;
+
+// Whether every gap and jump heard has a stall of the machine's just before
+// it, within the quarter second before the damage: the device's callback
+// woke later than the dropout is long and later than half a device buffer;
+// or the peer woke to publish later than the latency the engine holds, so
+// the engine ran out of what it held by its own design; or the peer could
+// not publish at all, so what the engine was given had the hole already.
+// None of these is the engine's, and what is heard then says nothing about
+// the claim under test. The explanation when every piece of damage has one,
+// else empty.
+std::string hostStalledBefore(const Heard& h) {
+    std::ostringstream why;
+    why.setf(std::ios::fixed);
+    why.precision(1);
+    const double floor = std::max(0.005, h.deviceBufferSeconds / 2.0);
+    const auto before = [](double due, double at) { return due <= at + 0.05 && due >= at - 0.25; };
+    const auto explained = [&](double at, double length, const char* what) {
+        const auto say = [&](const char* who, double due, double late) {
+            why << (why.tellp() > 0 ? "; " : "") << who << " due at " << due << " s woke " << late * 1e3
+                << " ms late, and the " << what << " at " << at << " s followed";
+        };
+        for (const auto& [due, late] : h.lateWakes) {
+            if (!before(due, at) || late < floor || late < length) continue;
+            say("the device's callback", due, late);
+            return true;
+        }
+        for (const auto& [due, late] : h.peerLate) {
+            if (!before(due, at) || late < kInputLatencySeconds || late < length) continue;
+            say("the peer's slot", due, late);
+            return true;
+        }
+        for (const double due : h.peerSkipped) {
+            if (!before(due, at)) continue;
+            why << (why.tellp() > 0 ? "; " : "") << "the peer could not publish in its slot due at " << due
+                << " s, and the " << what << " at " << at << " s followed";
+            return true;
+        }
+        return false;
+    };
+    for (const auto& [at, length] : h.gapsAt) if (!explained(at, length, "gap")) return {};
+    for (const double at : h.jumpsAt)         if (!explained(at, 0.0, "jump")) return {};
+    return why.str();
+}
+
+// The rule the strict case judges by, on made-up accounts: deterministic.
+TEST_CASE("LinkAudio: a gap is the machine's only when the device or the peer stalled just before it",
+          "[LinkAudio]") {
+    Heard h;
+    h.deviceBufferSeconds = 512.0 / 44100.0;   // 11.6 ms; the floor is half of it
+    h.gapsAt = {{1.71, 0.0018}};
+    SECTION("a wake late by more than the gap, due just before it, explains it") {
+        h.lateWakes = {{1.69, 0.02297}};
+        const std::string why = hostStalledBefore(h);
+        CHECK(why.find("due at 1.7 s woke 23.0 ms late") != std::string::npos);
+        CHECK(why.find("gap at 1.7 s followed") != std::string::npos);
+    }
+    SECTION("a wake after the gap explains nothing") {
+        h.lateWakes = {{1.80, 0.02297}};
+        CHECK(hostStalledBefore(h).empty());
+    }
+    SECTION("a wake long before the gap explains nothing") {
+        h.lateWakes = {{1.40, 0.02297}};
+        CHECK(hostStalledBefore(h).empty());
+    }
+    SECTION("a wake shorter than half a device buffer explains nothing") {
+        h.lateWakes = {{1.69, 0.004}};
+        CHECK(hostStalledBefore(h).empty());
+    }
+    SECTION("a wake shorter than the gap explains nothing") {
+        h.gapsAt = {{1.71, 0.030}};
+        h.lateWakes = {{1.69, 0.02297}};
+        CHECK(hostStalledBefore(h).empty());
+    }
+    SECTION("every piece of damage needs its own stall") {
+        h.jumpsAt = {0.40};
+        h.lateWakes = {{1.69, 0.02297}};
+        CHECK(hostStalledBefore(h).empty());
+        h.lateWakes.push_back({0.39, 0.012});
+        CHECK(!hostStalledBefore(h).empty());
+    }
+    SECTION("the peer waking later than the latency the engine holds explains it") {
+        h.peerLate = {{1.68, 0.061}};
+        CHECK(hostStalledBefore(h).find("the peer's slot due at 1.7 s woke 61.0 ms late") != std::string::npos);
+    }
+    SECTION("the peer waking late, but within the latency the engine holds, explains nothing") {
+        h.peerLate = {{1.68, 0.030}};
+        CHECK(hostStalledBefore(h).empty());
+    }
+    SECTION("the peer unable to publish just before explains it") {
+        h.peerSkipped = {1.70};
+        CHECK(hostStalledBefore(h).find("could not publish in its slot due at 1.7 s") != std::string::npos);
+    }
+    SECTION("no damage needs no excuse, and gets none") {
+        h.gapsAt.clear();
+        h.lateWakes = {{1.69, 0.02297}};
+        CHECK(hostStalledBefore(h).empty());
+    }
+}
 
 void requireDeviceKeptTime(const Heard& h, int rate, uint32_t frames) {
     if (h.worstLateSeconds > kDeviceKeptTimeSeconds) {
@@ -1133,9 +1242,13 @@ constexpr double kSettleSeconds = 0.25;
 // moment of its choosing.
 Heard analyseHeard(const std::vector<float>& stream, size_t settle, int sampleRate, double expectHz);
 
+// A stall for the test to give the device: its callback made this much late
+// once, when the judging has heard this many seconds.
+struct DeviceStall { double atSeconds = 0.0; std::chrono::milliseconds by{0}; };
+
 Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t blockSize,
              uint32_t deviceFrames, double seconds, double expectHz,
-             const std::function<void(size_t heard)>& progress) {
+             const std::function<void(size_t heard)>& progress, DeviceStall stall = {}) {
     std::vector<float> stream, block;
     const size_t settle = static_cast<size_t>(kSettleSeconds * sampleRate);
     const size_t want   = settle + static_cast<size_t>(seconds * sampleRate);
@@ -1145,22 +1258,39 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
     const auto began = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point ended;
     double worstLate = 0.0;
+    std::vector<std::pair<double, double>> lateWakes;
     {
+        // The device is made after its callback, which the device's thread
+        // runs: so the callback reaches it through this, set once it exists.
+        // The stall is asked for long after the first blocks.
+        std::atomic<EngineFixture::Device*> theDevice{nullptr};
+        const size_t stallAt = settle + static_cast<size_t>(stall.atSeconds * sampleRate);
+        bool stalled = stall.by.count() == 0;
         EngineFixture::Device device{fx, sampleRate, deviceFrames, [&] {
             if (heard.load(std::memory_order_relaxed) >= want) return;   // enough: the rest is not kept
             if (snapshotBus(channel, blockSize, block))
                 stream.insert(stream.end(), block.begin(), block.end());
             heard.store(stream.size(), std::memory_order_release);
+            if (!stalled && stream.size() >= stallAt)
+                if (auto* d = theDevice.load(std::memory_order_acquire)) { d->stallNextCallback(stall.by); stalled = true; }
             progress(stream.size());
         }};
+        theDevice.store(&device, std::memory_order_release);
         while (heard.load(std::memory_order_acquire) < want)
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
         ended = std::chrono::steady_clock::now();
         worstLate = device.worstLateSeconds();
+        // The judging began when `settle` frames had been heard: at a
+        // device's pace, that many seconds after the device began.
+        const double judgedFrom = double(settle) / sampleRate;
+        for (const auto& w : device.lateWakes())
+            lateWakes.emplace_back(std::chrono::duration<double>(w.due - began).count() - judgedFrom, w.lateSeconds);
     }
 
     Heard h = analyseHeard(stream, settle, sampleRate, expectHz);
     h.worstLateSeconds = worstLate;
+    h.lateWakes = std::move(lateWakes);
+    h.deviceBufferSeconds = double(deviceFrames) / sampleRate;
     h.pace = (double(stream.size()) / sampleRate)
            / std::chrono::duration<double>(ended - began).count();
     return h;
@@ -1185,6 +1315,8 @@ Heard analyseHeard(const std::vector<float>& stream, size_t settle, int sampleRa
     where.precision(3);
     size_t told = 0;
     const auto tell = [&](const char* what, size_t at, size_t frames) {
+        if (frames != 0) h.gapsAt.emplace_back(double(at - settle) / sampleRate, double(frames) / sampleRate);
+        else             h.jumpsAt.push_back(double(at - settle) / sampleRate);
         if (++told > 12) return;
         where << (told > 1 ? "; " : "") << what << " at " << double(at - settle) / sampleRate << " s";
         if (frames != 0) where << " for " << 1e3 * double(frames) / sampleRate << " ms";
@@ -1327,7 +1459,8 @@ uint64_t engineUnderruns(EngineFixture& fx) {
 // With a `peerStall`, the peer's callback stalls for that long half a second
 // into the judged time.
 Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
-                        std::chrono::milliseconds peerStall = std::chrono::milliseconds{0}) {
+                        std::chrono::milliseconds peerStall = std::chrono::milliseconds{0},
+                        DeviceStall deviceStall = {}) {
     FakeLinkPeerProcess::Options peerOpts;
     peerOpts.name       = "FakeSonicPi";
     peerOpts.blockSize  = 64;
@@ -1410,7 +1543,7 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                             if (now.resyncs > seen.resyncs) event(at) << "lost its place (" << now.resyncs - seen.resyncs << ")";
                             if (now.warps > seen.warps)     event(at) << "bent (" << now.warps - seen.warps << ")";
                             seen = now;
-                        });
+                        }, deviceStall);
     const auto listened = std::chrono::steady_clock::now();
     {
         std::ostringstream account;
@@ -1422,7 +1555,17 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
         for (const uint32_t n : arrived) account << ' ' << n;
         out.engineAccount = account.str();
     }
-    out.peerAccount = peerAccountOf(peer.timing(listened), judgedFrom, leastHeldMs.size());
+    const auto peerTiming = peer.timing(listened);
+    out.peerAccount = peerAccountOf(peerTiming, judgedFrom, leastHeldMs.size());
+    if (peerTiming) {   // the peer's stalls, in seconds from where the judging began
+        const auto& t = *peerTiming;
+        const size_t slots = std::min({t.lateUs.size(), t.skipped.size()});
+        for (size_t i = 0; i < slots; ++i) {
+            const double due = std::chrono::duration<double>(t.t0 + t.slot * static_cast<int64_t>(i) - judgedFrom).count();
+            if (t.lateUs[i] > 1000) out.heard.peerLate.emplace_back(due, t.lateUs[i] / 1e6);
+            if (t.skipped[i] > 0)   out.heard.peerSkipped.push_back(due);
+        }
+    }
     out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
     out.engineUnderrunsAtEnd = engineUnderruns(fx);
     out.engineLog = fx.debugMessagesDump();
@@ -1504,7 +1647,6 @@ TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and d
       DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
         const Hearing hearing = hearSonicPiPeer(rate, frames);
         const Heard& h = hearing.heard;
-        requireDeviceKeptTime(h, rate, frames);
         const auto& a = hearing.atStart;
         const auto& b = hearing.atEnd;
         INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
@@ -1515,6 +1657,14 @@ TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and d
              << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps, drift "
              << b.driftPpm << " ppm");
         INFO(hearing.story());
+        // A dropout the machine made, by stalling the device, is not the
+        // engine's: the case did not get to test its claim, and says so.
+        if (h.gaps + h.jumps > 0) {
+            const std::string stalled = hostStalledBefore(h);
+            if (!stalled.empty())
+                SKIP("this machine stalled the " << frames << "-frame device at " << rate << " Hz: " << stalled
+                     << "; what was heard is the device's doing, not the engine's");
+        }
         CHECK(h.frames > static_cast<size_t>(rate));
         CHECK(h.peak > 0.5f);
         CHECK(h.gaps == 0);
@@ -1523,6 +1673,33 @@ TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and d
       }
     }
 }
+
+// The machine stalling the device, done on purpose: the strict case must
+// then tell the device's doing from the engine's. Either the engine bridges
+// the stall, and nothing is heard of it, or what is heard has the stall just
+// before it, and is excused. The device's late wake is on record either way,
+// placed on the judging's clock, where the gaps are.
+TEST_CASE("LinkAudio: a dropout the device made is told from one the engine made",
+          "[Link][LinkAudio][integration]") {
+    const DeviceStall stall{1.0, std::chrono::milliseconds{80}};
+    const Hearing hearing = hearSonicPiPeer(48000, 64, std::chrono::milliseconds{0}, stall);
+    const Heard& h = hearing.heard;
+    INFO(hearing.story());
+    std::ostringstream wakes;
+    for (const auto& [due, late] : h.lateWakes) wakes << due << " s +" << late * 1e3 << " ms; ";
+    INFO("the device's late wakes: " << wakes.str());
+    const auto theStall = std::find_if(h.lateWakes.begin(), h.lateWakes.end(), [&](const auto& w) {
+        return w.second >= 0.08 && std::fabs(w.first - stall.atSeconds) < 0.1;
+    });
+    REQUIRE(theStall != h.lateWakes.end());
+    const std::string excuse = hostStalledBefore(h);
+    INFO("the excuse: " << excuse);
+    CHECK(excuse.empty() == (h.gaps + h.jumps == 0));
+    // And the stall is the only damage, if any: the first second was clean.
+    for (const auto& [at, length] : h.gapsAt) CHECK(at > stall.atSeconds - 0.05);
+    for (const double at : h.jumpsAt)         CHECK(at > stall.atSeconds - 0.05);
+}
+
 
 // The endpoint worker takes peers' audio off the network and resamples it
 // into the ring the audio thread reads: it feeds the audio thread, from an
