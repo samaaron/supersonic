@@ -158,8 +158,12 @@ jobs:
       - name: Run tests (each case on its own)
         run: ctest --test-dir build/native -C Release --output-on-failure -LE rt -j 4 --timeout 300
 
+      # Verbose, so a case that SKIPs — the machine stalled, and the case
+      # says how (a device callback or the peer late, with the times) — has
+      # its reason in the log, not only "Skipped": ctest prints a skipped
+      # case's output no other way. Forty cases, so the log stays short.
       - name: Run real-time tests (one at a time)
-        run: ctest --test-dir build/native -C Release --output-on-failure -L rt -j 1 --timeout 300
+        run: ctest --test-dir build/native -C Release -V -L rt -j 1 --timeout 300
 
       # The binary, every pumped case in one process, in a shuffled order: a
       # case that leaves something behind for the next fails here. The seed is
