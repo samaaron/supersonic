@@ -36,6 +36,7 @@
 #include "SC_Group.h"        // mTopGroup is only a forward declaration in SC_World.h
 #include "SC_InterfaceTable.h"   // ScopeBufferHnd, the ugens' shape of a scope handle
 #include "node_tree.h"
+#include "piano_wavetable.h"   // supersonic_piano_wavetable_reset: the table goes with the instance
 #include "scsynth_scope.h"
 
 // SC_Reply.h only forward-declares ReplyAddress; the layout — and mReplyData,
@@ -523,6 +524,27 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     options.mMaxGraphDefs          = so.maxGraphDefs;
     options.mMaxWireBufs           = so.maxWireBufs;
     options.mNumAudioBusChannels   = so.numAudioBusChannels;
+    // THE BUS HOLDS THE HOST'S CHANNELS. The first mNumOutputs + mNumInputs
+    // channels of the audio bus are the host's in and out, and the host
+    // chooses those ceilings (DspConfig: "size buffers against these in
+    // dsp_new"), lanes for its ports and tracks included, which can be far
+    // wider than the device. A bus narrower than that is written past its
+    // end every block — found 2026-10-15 by clockwork's pool check: an
+    // embedded-tight 64-channel bus under an 80-channel host, the audio bus
+    // overrunning into the next block of the guest's heap. Upstream scsynth
+    // refuses the option at its command line; a guest widens the bus and
+    // says so, since the option was written against a device and the host
+    // knows the lanes.
+    {
+        const uint32_t hostChannels = config->max_input_channels + config->max_output_channels;
+        if (options.mNumAudioBusChannels < hostChannels) {
+            char line[160];
+            snprintf(line, sizeof(line), "numAudioBusChannels %u is narrower than the host's %u in + %u out: the bus is widened to %u",
+                     options.mNumAudioBusChannels, config->max_input_channels, config->max_output_channels, hostChannels);
+            supersonic_guest_log(line, (uint32_t)std::strlen(line));
+            options.mNumAudioBusChannels = hostChannels;
+        }
+    }
     options.mNumControlBusChannels = so.numControlBusChannels;
     options.mRealTimeMemorySize    = so.realTimeMemorySize;
     options.mNumRGens              = so.numRGens;
@@ -657,6 +679,10 @@ void dsp_free(struct Dsp* dsp) {
     if (g_dsp == d) g_dsp = nullptr;
     if (d->world) World_Cleanup(d->world, true);
     supersonic_node_tree_unbind();
+    // Nothing of this instance may be remembered past it: its memory goes
+    // with it (guest_heap.h), and a pointer kept in a global would be handed
+    // back to the next instance's heap as if it were the next instance's.
+    supersonic_piano_wavetable_reset();
     d->~ScsynthDsp();
     supersonic_guest_free_bytes(d);
 }

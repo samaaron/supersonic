@@ -77,6 +77,12 @@ extern "C" size_t supersonic_piano_wavetable_frames(void) {
     return g_frames.load(std::memory_order_relaxed);
 }
 
+extern "C" void supersonic_piano_wavetable_reset(void) {
+    g_table = nullptr;
+    g_frames.store(0, std::memory_order_relaxed);
+    supersonic_set_piano_wavetable(nullptr, 0);
+}
+
 extern "C" int supersonic_meth_piano_wavetable(World* inWorld, int inSize, char* inData,
                                                ReplyAddress* inReply) {
     static const char* kName = "/supersonic/piano/wavetable";

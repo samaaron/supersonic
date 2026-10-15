@@ -132,7 +132,12 @@ void set_def_name(NodeEntry* entry, const char* name) {
 // ── The window ──────────────────────────────────────────────────────────────
 
 void supersonic_node_tree_bind(void* window, uint32_t bytes) {
-    release_indices();
+    // Indices still named here belong to an instance that is gone — freed
+    // with its memory on the web's reload, where no dsp_free runs — and are
+    // forgotten, never handed to this instance's heap. unbind, in dsp_free,
+    // is where a live instance's indices are given back.
+    g_free_next = nullptr; g_hash = nullptr;
+    g_hash_mask = 0; g_free_head = -1; g_capacity = 0;
     g_window       = static_cast<uint8_t*>(window);
     g_window_bytes = bytes;
     if (!g_window || bytes < NODE_TREE_HEADER_SIZE + NODE_TREE_ENTRY_SIZE) {

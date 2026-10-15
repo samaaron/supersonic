@@ -31,6 +31,12 @@ int supersonic_meth_piano_wavetable(struct World* inWorld, int inSize, char* inD
 /* Frames in the table the plugin currently plays from; 0 while it has none. */
 size_t supersonic_piano_wavetable_frames(void);
 
+/* The instance is going (dsp_free): forget its table. The table lives in
+ * the instance's own memory and goes with it; the pointer kept here must
+ * not outlive it, or the next instance's first swap would hand a dead
+ * instance's table back to its own heap. */
+void supersonic_piano_wavetable_reset(void);
+
 /* The plugin's own minimum (MdaUGens.cpp): a shorter table is not a table. */
 size_t supersonic_piano_wavetable_min_frames(void);
 
