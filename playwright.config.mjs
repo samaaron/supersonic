@@ -15,6 +15,12 @@ export default defineConfig({
       args: [
         "--use-fake-ui-for-media-stream",
         "--use-fake-device-for-media-stream",
+        // No audio hardware at all: Chromium renders every output stream
+        // into a fake sink driven by a timer, so a test page never opens the
+        // machine's sound card (one run opened a developer's 198 times and
+        // clicked it on every start, 2026-10-16). Timing is the real
+        // clock's, as a device's would be.
+        "--disable-audio-output",
         "--autoplay-policy=no-user-gesture-required",
       ],
     },

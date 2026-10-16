@@ -36,6 +36,10 @@ export const test = base.extend({
       synthdefBaseURL: "/dist/synthdefs/",
       snapshotIntervalMs: 25,  // Fast metrics updates for test reliability
       mode,
+      // No output device: Chromium renders a context whose sink is "none"
+      // without opening the machine's hardware (clockwork's test/fixtures.mjs
+      // says why). The graph, the worklet and the engine run as with one.
+      audioContextOptions: { sinkId: { type: "none" } },
     });
   },
 
