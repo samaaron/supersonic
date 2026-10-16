@@ -71,9 +71,16 @@ Replies arrive on its `in` and `in:osc` events.
 - An address beginning `/clockwork/` (slash included) is clockwork's.
   Everything else goes to scsynth untouched.
 - A `/clockwork/` verb that nothing answers is refused:
-  `← /clockwork/error s:address s:reason`. Reasons include
+  `← /clockwork/error s:address s:reason i:generation`. Reasons include
   `unknown clockwork verb` and `malformed`. An unknown `/clockwork/clock/…`
   verb gets [`/clockwork/clock/unsupported`](#clock-and-link) instead.
+- **Any** message that reaches the engine while scsynth is being rebuilt
+  (a cold swap) is refused the same way, with the reason `rebuilding`,
+  `no instance` or `stalled`, rather than dropped: nothing sent is left
+  unanswered. `generation` is the one that closed; wait for
+  [`/clockwork/setup`](#notify-and-lifecycle) and send again. A
+  `/d_load`, `/d_loadDir` or sample load the front had in flight when the
+  rebuild came answers its asker with scsynth's `/fail` instead.
 - **A bundle is scsynth's**, whole and unopened. A `/clockwork/` message
   inside a bundle reaches scsynth and is dropped there. To time a clockwork
   verb, wrap it in [`/clockwork/schedule`](#scheduling).
@@ -152,8 +159,8 @@ Pushed to notify targets:
 
 | ← | |
 |---|---|
-| `/clockwork/statechange s:state s:reason` | `state`: `stopped` `booting` `running` `restarting` `error`. `reason`: `init` `boot` `shutdown` `rate-change` `swap-failed-rollback` `swap-no-audio` `swap-recovered` `rebuild-failed` `snapshot`, or scsynth's own text when it failed to build. |
-| `/clockwork/setup i:sampleRate i:bufferSize i:generation` | scsynth was rebuilt (a cold swap): everything it held is gone. `generation` counts builds; the first rebuild is 2. |
+| `/clockwork/statechange s:state s:reason i:generation` | `state`: `stopped` `booting` `running` `restarting` `error`. `reason`: `init` `boot` `shutdown` `rate-change` `swap-failed-rollback` `swap-no-audio` `swap-recovered` `rebuild-failed` `snapshot`, or scsynth's own text when it failed to build. |
+| `/clockwork/setup i:sampleRate i:bufferSize i:generation` | scsynth was rebuilt (a cold swap): everything it held is gone. `generation` counts builds; the first rebuild is 2. A `statechange` to `restarting` names the generation closing, and one to `running` after a rebuild the one opened. |
 
 ---
 

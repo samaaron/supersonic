@@ -153,6 +153,9 @@ private:
     // The next definition to hand over for `token`, if one is waiting and
     // none is in flight: the oldest load's, marked in flight. Under mMut.
     bool takeNextDef(uint32_t token, std::vector<uint8_t>& out);
+    // The load whose definition the engine has just answered (or refused)
+    // for `token`, no longer in flight; end() if none was. Under mMut.
+    std::deque<DefLoad>::iterator defInFlight(uint32_t token);
     void sendDef(uint32_t token, const std::vector<uint8_t>& bytes);
 
     void run();

@@ -13,6 +13,7 @@
  */
 #include "rt_alloc.h"
 #include "DebugTail.h"
+#include "../../clockwork/test/RealDeviceGuard.h"   // no case opens a real device unless tagged [.hardware]
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_case_info.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
@@ -55,6 +56,7 @@ struct RTAllocListener : Catch::EventListenerBase {
 } // namespace
 
 CATCH_REGISTER_LISTENER(RTAllocListener)
+CATCH_REGISTER_LISTENER(real_device_guard::Listener)
 
 // ─── The arguments as ctest hands them ────────────────────────────────────────
 // ctest runs each case on its own, giving the binary the case's name on the

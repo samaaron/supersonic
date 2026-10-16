@@ -850,3 +850,79 @@ TEST_CASE("front: a load in flight when the engine is rebuilt fails to its asker
     CHECK(rig.sink.count("/done", kSpider) == 0);
     rig.holdCommitted = false;
 }
+
+// What clockwork says for a message that reached it between instances
+// (clockwork's docs/RESTARTS.md): the refused address, the reason, and the
+// generation the refusal came from.
+osc_test::Packet refusal(const char* address, const char* reason) {
+    osc_test::Builder b;
+    b.begin("/clockwork/error") << address << reason << int32_t{3};
+    return b.end();
+}
+
+TEST_CASE("front: a definition load in flight when the engine is rebuilt fails to its asker, and sends no more",
+          "[front][synthdef][ColdSwap]") {
+    // The front hands a directory's definitions to the engine one /d_recv at a time, the next on the reply to the
+    // last. When the World they are going into is torn down mid-way, the one in flight is refused by clockwork
+    // rather than answered by scsynth (every message that arrives while the engine rebuilds hears
+    // /clockwork/error). The definitions already in are gone with the old World and the rest have no World to go
+    // to: the whole load fails to its asker, in scsynth's words, so it asks the new World — nothing is sent on,
+    // and the asker never hears a /done for a directory the new World has none of.
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump = true;
+    Rig rig(cfg);
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    // The first definition is with the engine, unanswered: no block renders unless this case asks for one.
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (rig.front.defsInFlightPeak() < 1 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    REQUIRE(rig.front.defsInFlightPeak() == 1);
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+
+    const auto refused = refusal("/d_recv", "rebuilding");
+    REQUIRE(rig.front.egress(kSpider, refused.ptr(), refused.size()));
+    OscReply fail;
+    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/d_loadDir", &fail, 5000, [] {}));
+    CHECK(fail.parsed().argString(1).find("rebuil") != std::string::npos);
+
+    // Nothing more goes to the engine for that load, and no /done for the
+    // directory follows the /fail once blocks render again (the new World's
+    // setup included). This rig's engine was never torn down, so it still
+    // answers the one definition it was handed; the front has no load for
+    // that answer and passes it on — a reply a real rebuild never sends.
+    const auto setup = setupPush();
+    rig.front.notice(setup.ptr(), setup.size());
+    for (int i = 0; i < 50; ++i) rig.fx.pumpBlock();
+    CHECK(rig.front.defsInFlightPeak() == 1);
+    CHECK(rig.sink.count("/fail", kSpider) == 1);
+    CHECK_FALSE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", nullptr, 50, [] {}));
+}
+
+TEST_CASE("front: a sample commit the engine refused between instances fails to its asker, and its slot is free",
+          "[front][load_sample][ColdSwap]") {
+    // The same for a sample: staged and committed, the commit reached the engine while it was rebuilding, and
+    // clockwork refused it. The asker hears /fail in scsynth's words with the engine's reason, and the slot goes
+    // back to the pool — nothing will ever say /clockwork/asset/released for a commit no World took.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    Rig rig;
+    rig.holdCommitted = true;
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    REQUIRE(rig.fx.pollUntil([&] { return rig.front.laneFreeBytes() < rig.front.laneBytes(); }, 5000));
+    REQUIRE(rig.fx.pollUntil([&] { return rig.freesAnswered.load() >= 1; }, 5000));
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+
+    const auto refused = refusal("/clockwork/asset/commit", "rebuilding");
+    REQUIRE(rig.front.egress(kSpider, refused.ptr(), refused.size()));
+    OscReply fail;
+    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_allocRead", &fail));
+    CHECK(fail.parsed().argString(1).find("rebuilding") != std::string::npos);
+    CHECK(fail.parsed().argInt(2) == 0);
+    CHECK(rig.front.laneFreeBytes() == rig.front.laneBytes());
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+    // Not ours twice: the same refusal again has nothing left to answer.
+    CHECK_FALSE(rig.front.egress(kSpider, refused.ptr(), refused.size()));
+    rig.holdCommitted = false;
+}

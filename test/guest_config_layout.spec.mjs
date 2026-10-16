@@ -89,6 +89,8 @@ test("GUEST_CONFIG_START is consistent with ARENA_SIZE", async ({ sonicPage, son
       channelMapSize: bc.CHANNEL_MAP_SIZE,
       nrtOutStart: bc.NRT_OUT_RING_START,
       nrtOutSize: bc.NRT_OUT_RING_SIZE,
+      controlRingStart: bc.CONTROL_RING_START,   // clockwork's own control verbs: the transport area's last
+      controlRingSize: bc.CONTROL_RING_SIZE,
       clockworkBlockSize: bc.CLOCKWORK_HALF_SIZE,
       guestRegionStart: bc.GUEST_HALF_START,
       totalBufferSize: bc.ARENA_SIZE,
@@ -98,15 +100,16 @@ test("GUEST_CONFIG_START is consistent with ARENA_SIZE", async ({ sonicPage, son
   // The arena is five areas in two halves (clockwork/docs/ARENA.md).
   // clockwork's half: clockwork-state (METRICS, ..., SAMPLE_CLOCK,
   // CHANNEL_MAP), clockwork-audio (the SCOPE, then the TAPS), then
-  // clockwork-transport (the ring cursors and the rings, the NRT-out ring at
-  // the end). The guest's half follows: guest-public is the WINDOW, and
+  // clockwork-transport (the ring cursors and the rings, then the control
+  // ring at the end). The guest's half follows: guest-public is the WINDOW, and
   // guest-private is GUEST_CONFIG (the world options) and, closing the arena,
   // GUEST_PERSIST (to the 16-byte alignment of the arena's end). A region is
   // APPENDED to the area it belongs to, so the seams pinned here are what
   // this file follows when one is added.
   expect(result.scopeStart + result.scopeTotalSize).toBeLessThanOrEqual(result.nrtOutStart);
-  expect(result.nrtOutStart + result.nrtOutSize).toBeLessThanOrEqual(result.clockworkBlockSize);
-  expect(result.clockworkBlockSize - (result.nrtOutStart + result.nrtOutSize)).toBeLessThan(16);
+  expect(result.nrtOutStart + result.nrtOutSize).toBeLessThanOrEqual(result.controlRingStart);
+  expect(result.controlRingStart + result.controlRingSize).toBeLessThanOrEqual(result.clockworkBlockSize);
+  expect(result.clockworkBlockSize - (result.controlRingStart + result.controlRingSize)).toBeLessThan(16);
   expect(result.guestRegionStart).toBe(result.clockworkBlockSize);
   expect(result.windowStart).toBe(result.guestRegionStart);
   expect(result.worldOptionsStart).toBeGreaterThanOrEqual(result.windowStart + result.windowSize);

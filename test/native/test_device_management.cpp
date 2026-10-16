@@ -4,6 +4,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
 #include "OscBuilder.h"
+#include "clockwork_sys.h"
 
 // ── Device enumeration (headless) ────────────────────────────────────────────
 
@@ -151,8 +152,9 @@ TEST_CASE("DeviceManagement: purge clears ring buffer and scheduler",
           "[DeviceManagement]") {
     EngineFixture fix;
 
-    // Send some messages, then purge
-    fix.engine().purge();
+    // Send some messages, then purge: every one answered to its sender
+    // with the reason, none dropped silently (ClockworkEngine::purge).
+    fix.engine().purge(CLOCKWORK_REFUSED_REBUILDING);
 
     // Verify engine still works after purge
     OscReply reply;

@@ -14,6 +14,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
+#include "clockwork_sys.h"
 #include "OscBuilder.h"
 #include <thread>
 #include <chrono>
@@ -681,7 +682,7 @@ TEST_CASE("RapidSwitch: purge after rapid cold swaps clears stale state",
     }
 
     // Explicit purge
-    fix.engine().purge();
+    fix.engine().purge(CLOCKWORK_REFUSED_REBUILDING);
 
     // Engine should still respond cleanly
     fix.clearReplies();

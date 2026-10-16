@@ -470,6 +470,13 @@ void Commands::loadDefs(const Job& job) {
     if (go) sendDef(job.token, first);
 }
 
+std::deque<Commands::DefLoad>::iterator Commands::defInFlight(uint32_t token) {
+    auto it = mDefLoads.begin();
+    for (; it != mDefLoads.end(); ++it) if (it->token == token && it->inFlight) break;
+    if (it != mDefLoads.end()) { it->inFlight = false; --mDefsInFlight; }
+    return it;
+}
+
 bool Commands::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
     for (auto& load : mDefLoads) {
         if (load.token != token) continue;
@@ -523,7 +530,7 @@ void Commands::notice(const uint8_t* data, uint32_t size) {
 
 bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
     if (size < 8 || data[0] != '/') return false;
-    enum { Committed, Refused, Released, Done, Fail, Info, Published, None } kind = None;
+    enum { Committed, Refused, Released, Done, Fail, Info, Published, Error, None } kind = None;
     if      (isMessage(data, size, "/clockwork/asset/committed"))   kind = Committed;
     else if (isMessage(data, size, "/clockwork/asset/refused"))     kind = Refused;
     else if (isMessage(data, size, "/clockwork/asset/released"))    kind = Released;
@@ -531,6 +538,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
     else if (isMessage(data, size, "/fail"))                        kind = Fail;
     else if (isMessage(data, size, "/b_info"))                      kind = Info;
     else if (isMessage(data, size, "/supersonic/buffer/published")) kind = Published;
+    else if (isMessage(data, size, "/clockwork/error"))             kind = Error;
     if (kind == None) return false;
 
     int32_t     id = -1, a1 = 0, a2 = 0;
@@ -541,7 +549,17 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
                                                    static_cast<osc::osc_bundle_element_size_t>(size)));
         auto it = m.ArgumentsBegin();
         const auto end = m.ArgumentsEnd();
-        if (kind == Done || kind == Fail) {
+        if (kind == Error) {
+            // "/clockwork/error <address> <reason> <generation>": clockwork
+            // refused something sent on a token — ours, when the address is
+            // one we had in flight for it. A refusal between instances
+            // ("rebuilding", "no instance", "stalled", clockwork's
+            // docs/RESTARTS.md) is what a load caught by a rebuild hears
+            // instead of the /done that will never come.
+            if (it == end || !it->IsString()) return false;
+            cmd = (it++)->AsStringUnchecked();
+            if (it != end && it->IsString()) why = (it++)->AsStringUnchecked();
+        } else if (kind == Done || kind == Fail) {
             if (it == end || !it->IsString()) return false;
             cmd = (it++)->AsStringUnchecked();
             if (kind == Fail && it != end && it->IsString()) why = (it++)->AsStringUnchecked();
@@ -560,6 +578,64 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         return false;
     }
 
+    // A refusal of anything else we had in flight on this token — a sample's
+    // commit, a read, a query, a publish — fails that ask to its asker, in
+    // scsynth's words, and frees what the ask held, as notice() does for a
+    // rebuild the front hears of by setup. Not ours: left for whoever is.
+    if (kind == Error) {
+        // A definition refused is not one scsynth skipped (its own /fail,
+        // below, costs the load one definition): the World it was going into
+        // is gone, with every definition already in it, and the rest have no
+        // World to go to. The whole load fails to its asker, nothing more is
+        // sent for it, and the next load queued for the token takes its turn
+        // — to be refused in turn, until the new World is up.
+        if (cmd == "/d_recv") {
+            DefLoad refused;
+            std::vector<uint8_t> next;
+            bool found = false, sendNext = false;
+            {
+                std::lock_guard<std::mutex> lock(mMut);
+                auto it = defInFlight(token);
+                if (it != mDefLoads.end()) {
+                    refused = std::move(*it);
+                    mDefLoads.erase(it);
+                    found = true;
+                    sendNext = takeNextDef(token, next);
+                }
+            }
+            if (!found) return false;
+            sendFailCmd(token, refused.cmd.c_str(),
+                        "the engine was rebuilt while '" + refused.path + "' was loading (" + why + ")");
+            if (sendNext) sendDef(token, next);
+            return true;
+        }
+        // The refusal names the message WE sent; a pending ask remembers the
+        // verb its ASKER used. The kind of ask is what the two share.
+        int what = -1;
+        if      (cmd == "/clockwork/asset/commit")    what = Pending::Commit;
+        else if (cmd == "/supersonic/buffer/read")    what = Pending::ReadInto;
+        else if (cmd == "/b_query")                   what = Pending::WriteQuery;
+        else if (cmd == "/supersonic/buffer/publish") what = Pending::WritePublish;
+        if (what < 0) return false;
+        std::vector<std::pair<uint32_t, Pending>> failed;
+        {
+            std::lock_guard<std::mutex> lock(mMut);
+            for (auto it = mPending.begin(); it != mPending.end();) {
+                if (it->token == token && it->what == what) {
+                    if (mPool && (it->what == Pending::Commit || it->what == Pending::ReadInto))
+                        clockwork_asset_pool_free(mPool, it->slot);
+                    failed.emplace_back(it->token, std::move(*it));
+                    it = mPending.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+        if (failed.empty()) return false;
+        for (auto& f : failed)
+            sendFail(f.first, f.second.cmd.c_str(), "the engine refused it: " + why, f.second.bufnum);
+        return true;
+    }
     // /d_recv replies: the definition in flight for that token, oldest load
     // first — and the reply is what sends the next one.
     if ((kind == Done || kind == Fail) && cmd == "/d_recv") {
@@ -569,11 +645,8 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         bool sendNext = false;
         {
             std::lock_guard<std::mutex> lock(mMut);
-            auto it = mDefLoads.begin();
-            for (; it != mDefLoads.end(); ++it) if (it->token == token && it->inFlight) break;
+            auto it = defInFlight(token);
             if (it == mDefLoads.end()) return false;
-            it->inFlight = false;
-            --mDefsInFlight;
             if (kind == Fail) ++it->failed;
             if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
             sendNext = takeNextDef(token, next);

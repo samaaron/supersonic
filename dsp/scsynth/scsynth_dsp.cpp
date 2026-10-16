@@ -254,6 +254,12 @@ const DspInfo kInfo = {
     // arena table (node_tree.h).
     /* window_magic            */ NODE_TREE_WINDOW_MAGIC,
     /* window_version          */ NODE_TREE_WINDOW_VERSION,
+    // A World is laid out at boot for one rate and one channel count — its
+    // wire buffers, its busses, its UGen graphs — so no device change is
+    // taken live: every rate or channel change is a cold restart, the
+    // instance destroyed and built again (clockwork's docs/RESTARTS.md),
+    // and dsp_reconfigure below is never asked.
+    /* survives                */ 0,
 };
 
 } // namespace
@@ -261,6 +267,10 @@ const DspInfo kInfo = {
 extern "C" {
 
 const DspInfo* dsp_describe(void) { return &kInfo; }
+
+// Never called: kInfo.survives declares nothing (above). Refused if it ever
+// were, so clockwork does what it does for an instance that survives nothing.
+int dsp_reconfigure(struct Dsp*, double, uint32_t, uint32_t) { return 1; }
 
 // The fast memory scsynth will lay out by hand: its tables and its real-time
 // pool, from -m. A config it will refuse makes no claim: dsp_new refuses it,
@@ -676,6 +686,12 @@ int dsp_asset(struct Dsp* dsp, const ClockworkAsset* asset) {
 void dsp_free(struct Dsp* dsp) {
     auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
     if (!d) return;
+    // What the guest owes here (dsp_api.h): every ask still held, answered.
+    // This World holds none across a block — every command stage runs inline
+    // in the block it arrived in — and the asks that take longer than a
+    // block (a definition's load, a sample's read) are the front's
+    // (front/supersonic_commands.cpp), which hears clockwork's refusal of
+    // what it had in flight and answers its asker in scsynth's words.
     if (g_dsp == d) g_dsp = nullptr;
     if (d->world) World_Cleanup(d->world, true);
     supersonic_node_tree_unbind();
