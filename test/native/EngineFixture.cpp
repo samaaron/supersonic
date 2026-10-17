@@ -309,8 +309,7 @@ std::string EngineFixture::repliesDump() const {
 
 void EngineFixture::stopHeadlessDriver() {
     if (mManualPump) return;   // pumped: there is no driver to stop
-    mEngine.mHeadlessDriver->signalThreadShouldExit();
-    mEngine.mHeadlessDriver->stopThread(2000);
+    mEngine.mHeadlessDriver->stop();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
 

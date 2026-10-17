@@ -16,7 +16,7 @@
 // kick off a recovery and wait for its /supersonic/devices/reopen.done — no
 // message-loop pump, which is why they run on every platform. Two invariants are
 // exercised here:
-//   * the mDeviceManager reset() must not race concurrent device queries
+//   * replacing the device session must not race concurrent device queries
 //     ([race], caught by the TSan build), and
 //   * a recovery must never strand the engine with no audio source.
 
@@ -34,8 +34,8 @@ namespace {
 // The only job of the timeout is to bound a genuinely broken recovery that
 // never reports. It must therefore sit well ABOVE the worst-case latency of a
 // *healthy* recovery — which on a driverless / loaded CI runner is dominated by
-// JUCE spinning up a fresh AudioDeviceManager and enumerating (failing) real
-// devices, and can take several seconds — so the verdict tracks "did recovery
+// a fresh device session enumerating (failing) real devices, and can take
+// several seconds — so the verdict tracks "did recovery
 // report completion?" rather than "how fast is this runner?". Scaled up under
 // sanitizers, which slow everything further.
 #if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
@@ -82,20 +82,20 @@ TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.do
     REQUIRE(reopened);
 }
 
-// Use-after-free guard: recoverAudio -> recreateDeviceManager resets
-// mDeviceManager, while device queries (currentDevice / listDevices /
+// Use-after-free guard: recoverAudio -> recreateDeviceSession replaces the
+// engine's device session, while device queries (currentDevice / listDevices /
 // currentDriver / listDrivers — run on the NRT control thread and the
-// debounce-switch thread in production) dereference mDeviceManager from another
-// thread. Reproduce that shape here. Machine-independent: the reset() happens
-// regardless of whether a device opens. Under the TSan build this reports the
-// data race if the swap gate doesn't serialise the reset against the readers;
-// on a normal build it is a latent UAF.
-TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
+// debounce-switch thread in production) use it from another thread. Reproduce
+// that shape here. Machine-independent: the session is replaced whether or not
+// a device opens. Under the TSan build this reports the data race if the swap
+// gate doesn't serialise the replacement against the readers; on a normal
+// build it is a latent UAF.
+TEST_CASE("Recover: replacing the device session races concurrent device queries",
           "[Recover][race][rt]") {
     EngineFixture fix(recoverConfig());
 
-    // Every public reader that dereferences mDeviceManager must take the swap
-    // gate, else recreateDeviceManager()'s reset() races it. Each reader runs in
+    // Every public reader that uses the device session must take the swap
+    // gate, else recreateDeviceSession() replacing it races it. Each reader runs in
     // its OWN thread: a gated reader BLOCKS while recovery holds the gate, so a
     // single loop mixing device and driver readers would let the (gated) device
     // calls fence the driver calls out of the reset window and mask the race.
@@ -113,7 +113,7 @@ TEST_CASE("Recover: mDeviceManager reset races concurrent device queries",
         }
     });
 
-    // A single recovery (one mDeviceManager.reset()) racing the reader is enough
+    // A single recovery (one replaced session) racing the reader is enough
     // for TSan to flag it; do a couple, each waited to completion then spaced
     // past the 3s recovery cooldown.
     for (int i = 0; i < 2; ++i) {
