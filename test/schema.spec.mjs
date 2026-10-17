@@ -44,7 +44,9 @@ test.describe('Schema Validation', () => {
   test('layout panel keys all reference valid metrics', async ({ page }) => {
     const result = await page.evaluate(() => {
       const schema = window.SuperSonic.getMetricsSchema();
-      const metricKeys = new Set(Object.keys(schema.metrics));
+      // One layout serves the web and native panels, so a cell may read a
+      // metric or one of the device layer's native stats (shown natively only).
+      const metricKeys = new Set([...Object.keys(schema.metrics), ...Object.keys(schema.nativeStats)]);
       const missingKeys = [];
 
       for (const panel of schema.layout.panels) {
