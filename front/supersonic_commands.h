@@ -25,8 +25,8 @@
  *   /d_load, /d_loadDir                 read the files → one /d_recv each,
  *                                       paced so a block parses a few
  *   /clockwork/record/start, /stop      the master tap (audio slot 0) pulled
- *                                       into a file on a thread here
- *                                       (Recorder.h); the engine is not told
+ *                                       into a file here (Recorder.h); the
+ *                                       engine is not told
  *   /clockwork/summary                  the host's version and features, down
  *                                       the debug channel for a GUI's info
  *                                       pane (setSummary)
@@ -37,8 +37,9 @@
  * The engine's replies to what the front sent stay behind the front; the
  * asker hears scsynth's words — /done "/b_read" bufnum, /fail "/b_write"
  * why bufnum — and a completion message goes on once the load is in. One
- * thread reads, decodes and encodes, in arrival order; the audio thread
- * only ever binds a pointer, copies a bounded range, or parses one synthdef.
+ * thread reads, decodes and encodes, in arrival order — the front's own, or
+ * its host's (Work::Host) — and the audio thread only ever binds a pointer,
+ * copies a bounded range, or parses one synthdef.
  * Sonic Pi, 2026-09-07: the glitch on every sample not yet loaded, and the
  * 24 ms block at boot.
  */
@@ -65,11 +66,24 @@ namespace supersonic {
 
 class Commands final : public OscFront {
 public:
+    // Who does the front's work: the file jobs, and a recording's copying
+    // from the tap into its file. Own: threads of its own, a worker started
+    // here and one for each recording, as a server wants. Host: none; the
+    // host calls runPending() on a thread of its own, as a host that drives
+    // clockwork's control plane calls controlPass() (Config::hostDrivesControl).
+    enum class Work { Own, Host };
+
     // `replies` is where the front's own answers go: the transport the
     // engine's replies also leave by, so a /done from here and a /b_info
     // from the engine reach the same socket in order.
-    Commands(ClockworkEngine& engine, IOscTransport* replies);
+    Commands(ClockworkEngine& engine, IOscTransport* replies, Work work = Work::Own);
     ~Commands() override;
+
+    // Work::Host: every file job queued so far, in arrival order, then what a
+    // recording has waiting written to its file, on the calling thread. That
+    // thread is the front's one worker: never two at once. Work::Own: nothing,
+    // since the front's own threads do it.
+    void runPending();
 
     // What /clockwork/summary answers with: the host's to say (its product,
     // its version, what it was built with). Set before the transport starts;
@@ -85,14 +99,17 @@ public:
     // engine has answered for each: scsynth's -D, before any client is heard.
     // The engine's replies must already be flowing through egress(). False,
     // with the reason in `why`, when the directory holds none or the engine
-    // does not answer.
+    // does not answer, and under Work::Host, whose load would wait on work
+    // only the host runs: such a host sends /d_loadDir and runs until the
+    // /done comes.
     bool loadDefinitions(const std::string& dir, std::string* why);
 
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
     bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
     // /clockwork/setup: scsynth was rebuilt and every buffer with it, so every
-    // lane slot a buffer held is free again, and a load in flight has nothing
-    // to land in (its asker hears /fail).
+    // lane slot a buffer held is free again. A load still on its way is
+    // settled by its own answer: the old instance answered everything it was
+    // sent before setup, so the answer is the new instance's.
     void        notice(const uint8_t* data, uint32_t size) override;
     const char* describe() const override {
         return "the file verbs (/b_allocRead, /b_read, /b_write, /d_load...) answered here, through the lanes";
@@ -159,6 +176,8 @@ private:
     void sendDef(uint32_t token, const std::vector<uint8_t>& bytes);
 
     void run();
+    void runJobs();
+    void enqueue(Job job);
     void loadSample(const Job& job);
     void loadDefs(const Job& job);
     void startWrite(const Job& job);
@@ -175,6 +194,7 @@ private:
 
     ClockworkEngine& mEngine;
     IOscTransport*   mReplies;
+    const Work       mWork;
     Recorder         mRecorder;
     std::string      mSummary;
     std::function<void()> mQuit;
@@ -182,6 +202,10 @@ private:
     // loadDefinitions' own asker: a token no transport hands out (theirs are
     // small and non-zero), so its answer is caught in reply() instead of sent.
     static constexpr uint32_t kOwnToken = 0xFFFFFFFFu;
+    // The front's own /b_free of what a buffer held before a load replaces it:
+    // another token no transport hands out, so everything said back to it,
+    // a refusal included, is the front's, and egress() takes it.
+    static constexpr uint32_t kFreeToken = 0xFFFFFFFEu;
     std::mutex              mOwnMut;
     std::condition_variable mOwnCv;
     bool                    mOwnAnswered = false;
@@ -198,13 +222,13 @@ private:
     uint32_t                      mPoolBytes = 0, mOutPoolBytes = 0;
     std::map<int32_t, uint32_t>   mLive;       // bufnum → lane slot the guest holds
     std::deque<Pending>           mPending;    // in send order
-    std::map<int32_t, uint32_t>   mFreeing;    // bufnum → /b_free replies of ours still to swallow
     std::deque<DefLoad>           mDefLoads;   // in order; a /d_recv reply answers the oldest for its token
     uint32_t                      mDefsInFlight = 0, mDefsInFlightPeak = 0;   // /d_recv with the engine, unanswered
 
-    // LAST, and it must stay last. The constructor starts this thread in its
-    // member-init list, and members are constructed in DECLARATION order — so
-    // every member run() touches has to be declared above it. Declared any
+    // LAST, and it must stay last. The constructor starts this thread (under
+    // Work::Own) in its member-init list, and members are constructed in
+    // DECLARATION order — so every member run() touches has to be declared
+    // above it. Declared any
     // earlier and the worker locks mQueueMut, and reads mStop, before they are
     // constructed: EINVAL out of std::mutex::lock, an uncaught system_error,
     // and a SIGABRT in whichever test happened to be running.

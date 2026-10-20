@@ -7,14 +7,11 @@
  * tap, written at the device edge from boot with nobody holding anything.
  * Recording a session is reading that slot from its live position:
  * SuperSonic's front answers /clockwork/record/start and
- * /clockwork/record/stop by pulling the slot on a thread of its own into
- * the writer API, and replies in the shape the engine used to —
- * record/start.reply <ok> <path|error>.
+ * /clockwork/record/stop by pulling the slot into the writer API, off the
+ * audio thread, and replies in the shape the engine used to —
+ * record/start.reply <ok> <path|error>. The rig is FrontRig.h's.
  */
-#include "EngineFixture.h"
-#include "OscTestUtils.h"
-#include "supersonic_commands.h"
-#include "IOscTransport.h"
+#include "FrontRig.h"
 #include "clockwork_audio_file.h"
 #include "clockwork_client.h"
 #include "shm_audio_buffer.hpp"
@@ -36,44 +33,6 @@ namespace {
 
 constexpr uint32_t kAsker = 0x4EC0;
 
-struct RecordingSink final : IOscTransport {
-    struct Sent { uint32_t token; OscReply reply; };
-    std::mutex mu;
-    std::vector<Sent> sent;
-    bool send(uint32_t token, const uint8_t* d, uint32_t n, bool) override {
-        std::lock_guard<std::mutex> lock(mu);
-        sent.push_back({ token, OscReply{ osc_test::parseAddress(d, n), std::vector<uint8_t>(d, d + n) } });
-        return true;
-    }
-    void broadcastNotify(const uint8_t*, uint32_t) override {}
-    void broadcastLink(const uint8_t*, uint32_t) override {}
-    bool hasNotifySubscribers() const override { return false; }
-    bool subscribeNotify(uint32_t) override { return false; }
-    bool subscribeNotifyPort(int) override { return false; }
-    void unsubscribeNotify(uint32_t) override {}
-    void clearNotify() override {}
-    bool subscribeLink(uint32_t) override { return false; }
-    void unsubscribeLink(uint32_t) override {}
-    void broadcastMidi(const uint8_t*, uint32_t) override {}
-    bool subscribeMidi(uint32_t) override { return false; }
-    void unsubscribeMidi(uint32_t) override {}
-    void broadcastGamepad(const uint8_t*, uint32_t) override {}
-    bool subscribeGamepad(uint32_t) override { return false; }
-    void unsubscribeGamepad(uint32_t) override {}
-    bool waitFor(const char* addr, uint32_t token, OscReply* out, int timeoutMs = 3000) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-        while (std::chrono::steady_clock::now() < deadline) {
-            {
-                std::lock_guard<std::mutex> lock(mu);
-                for (const auto& s : sent)
-                    if (s.token == token && s.reply.address == addr) { if (out) *out = s.reply; return true; }
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        }
-        return false;
-    }
-};
-
 // The recordings here are measured in the engine's frames, never the wall clock's. The tap counts every frame
 // clockwork writes to it (write_position), and with manualAudioPump nothing renders but this thread, a block at a
 // time, so a recording holds exactly the frames rendered between its start and its stop however slow the machine is.
@@ -86,33 +45,19 @@ ClockworkEngine::Config pumpedConfig() {
     return cfg;
 }
 
-// The headless driver rendering on its own thread, as a device does.
-ClockworkEngine::Config liveConfig() {
-    auto cfg = EngineFixture::defaultConfig();
-    cfg.manualAudioPump = false;
-    cfg.freewheelClock  = false;
-    return cfg;
-}
 
-struct Rig {
-    EngineFixture    fx;
-    RecordingSink    sink;
-    supersonic::Commands front;
+struct Rig : FrontRig {
     shm_audio_buffer* slot0 = nullptr;
-    explicit Rig(const ClockworkEngine::Config& cfg = pumpedConfig()) : fx(cfg), front(fx.engine(), &sink) {
-        fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
-            if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
-        });
+    explicit Rig(const ClockworkEngine::Config& cfg = pumpedConfig()) : FrontRig(cfg) {
         ClockworkRegion taps {};
         REQUIRE(clockwork_client_region(fx.engine().egressClient(), CLOCKWORK_REGION_SCOPE, &taps) == CLOCKWORK_OK);
         slot0 = static_cast<shm_audio_buffer*>(taps.base);
         REQUIRE(slot0->enabled.load() == 1);   // formatted at boot: the tap is live before the first block
     }
-    ~Rig() { fx.setRoutedObserver(nullptr); }   // under the fixture's lock: no call runs after this
     bool ingress(const osc_test::Packet& p) { return front.ingress(p.ptr(), p.size(), kAsker); }
     OscReply expect(const char* addr) {
         OscReply r;
-        REQUIRE(sink.waitFor(addr, kAsker, &r));
+        REQUIRE(waitFor(addr, kAsker, nullptr, &r));
         return r;
     }
     // Every frame clockwork has written to the tap since boot.
@@ -130,14 +75,14 @@ struct Rig {
     }
     // Start recording `path`; true when the front said it had.
     bool start(const std::string& path, const char* header = "wav", int bits = 16) {
-        sink.sent.clear();
+        sink.clear();
         osc_test::Builder b;
         b.begin("/clockwork/record/start") << path.c_str() << header << int32_t{bits};
         if (!ingress(b.end())) return false;
         return expect("/clockwork/record/start.reply").parsed().argInt(0) == 1;
     }
     bool stop() {
-        sink.sent.clear();
+        sink.clear();
         if (!ingress(osc_test::message("/clockwork/record/stop"))) return false;
         return expect("/clockwork/record/stop.reply").parsed().argInt(0) == 1;
     }
@@ -381,7 +326,7 @@ TEST_CASE("recording: against the live audio thread, the file holds what clockwo
     // the engine's frames all the same: at least what was written between the start's reply and the stop's request,
     // at most what was written between the start's request and the stop's reply. A frame the ring lapped is counted
     // (framesLost), never hidden, so the frames written and lost together are bounded the same way.
-    Rig rig(liveConfig());
+    Rig rig(EngineFixture::driverConfig());   // the headless driver on its own thread, as a device renders
     const std::string path = tempWav("front-record-live");
     const uint64_t beforeStart = rig.written();
     REQUIRE(rig.start(path));

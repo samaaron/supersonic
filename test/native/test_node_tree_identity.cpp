@@ -20,15 +20,12 @@
 
 namespace {
 ClockworkEngine::Config segmentConfig(unsigned port) {
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate    = 48000;
-    cfg.bufferSize    = 128;
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.udpPort       = port;   // non-zero: the public shm segment exists
     setGuestOption(cfg, "numBuffers", 256);
     setGuestOption(cfg, "maxNodes", 256);
     setGuestOption(cfg, "maxGraphDefs", 64);
     setGuestOption(cfg, "maxWireBufs", 32);
-    cfg.headless      = true;
     return cfg;
 }
 }  // namespace

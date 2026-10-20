@@ -16,9 +16,6 @@
 #include "EngineFixture.h"
 #include "clockwork_sys.h"
 #include "OscBuilder.h"
-#include <thread>
-#include <chrono>
-#include <atomic>
 #include <vector>
 
 // =============================================================================
@@ -461,36 +458,18 @@ TEST_CASE("RapidSwitch: concurrent swap rejected during cold swap",
           "[RapidSwitch]") {
     EngineFixture fix;
 
-    // Slow the swap with a delay hook that signals once it holds mSwapMutex.
-    std::atomic<bool> swapEntered{false};
-    fix.engine().testSwapFailure = [&swapEntered](bool) -> std::string {
-        swapEntered.store(true, std::memory_order_release);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        return "slow failure";
-    };
+    // The first swap, held inside mSwapMutex until the others are refused.
+    {
+        EngineFixture::HeldSwap first(fix, "", 44100);
+        REQUIRE(first.entered());
 
-    // First swap in background
-    SwapResult firstResult;
-    std::thread t1([&]() {
-        firstResult = fix.engine().switchDevice("", 44100);
-    });
-
-    // Wait until the first swap is inside the critical section (holds
-    // mSwapMutex) before issuing competing swaps — a fixed sleep races the
-    // lock acquisition on a loaded runner.
-    REQUIRE(fix.pollUntil([&] { return swapEntered.load(std::memory_order_acquire); }));
-
-    // Three rapid attempts should all be rejected
-    for (int i = 0; i < 3; ++i) {
-        auto rejected = fix.engine().switchDevice("", 22050);
-        REQUIRE_FALSE(rejected.success);
-        REQUIRE(rejected.error == "swap already in progress");
+        // Three rapid attempts should all be rejected
+        for (int i = 0; i < 3; ++i) {
+            auto rejected = fix.engine().switchDevice("", 22050);
+            REQUIRE_FALSE(rejected.success);
+            REQUIRE(rejected.error == "swap already in progress");
+        }
     }
-
-    t1.join();
-
-    // Clear the failure hook
-    fix.engine().testSwapFailure = nullptr;
 
     // Engine should recover — do a successful swap
     auto recovery = fix.engine().switchDevice("", 44100);
@@ -506,29 +485,16 @@ TEST_CASE("RapidSwitch: concurrent switchDriver rejected during switchDevice",
           "[RapidSwitch]") {
     EngineFixture fix;
 
-    std::atomic<bool> swapEntered{false};
-    fix.engine().testSwapFailure = [&swapEntered](bool) -> std::string {
-        swapEntered.store(true, std::memory_order_release);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        return "slow failure";
-    };
+    {
+        EngineFixture::HeldSwap device(fix, "", 44100);
+        REQUIRE(device.entered());
 
-    SwapResult deviceResult;
-    std::thread t([&]() {
-        deviceResult = fix.engine().switchDevice("", 44100);
-    });
-
-    REQUIRE(fix.pollUntil([&] { return swapEntered.load(std::memory_order_acquire); }));
-
-    // switchDriver shares mSwapMutex — should be rejected
-    auto driverResult = fix.engine().switchDriver("ALSA");
-    // In headless, switchDriver returns "no audio device" before hitting the mutex,
-    // but the guard is still tested
-    REQUIRE_FALSE(driverResult.success);
-
-    t.join();
-
-    fix.engine().testSwapFailure = nullptr;
+        // switchDriver shares mSwapMutex — should be rejected
+        auto driverResult = fix.engine().switchDriver("ALSA");
+        // In headless, switchDriver returns "no audio device" before hitting the mutex,
+        // but the guard is still tested
+        REQUIRE_FALSE(driverResult.success);
+    }
 
     REQUIRE(fix.engine().engineState() == EngineState::Running);
 }
@@ -643,22 +609,21 @@ TEST_CASE("RapidSwitch: multiple failures then success",
 // OSC-LEVEL DEVICE SWITCH MESSAGES
 // =============================================================================
 
-TEST_CASE("RapidSwitch: /supersonic/devices/switch via sendOSC",
+TEST_CASE("RapidSwitch: /clockwork/devices/switch via sendOSC",
           "[RapidSwitch]") {
     EngineFixture fix;
 
     // Send the same message the Ruby server would send:
-    // /supersonic/devices/switch "" 44100.0 0
+    // /clockwork/devices/switch "" 44100.0 0
     {
         osc_test::Builder b;
         auto& s = b.begin("/clockwork/devices/switch");
         s << "" << 44100.0f << (int32_t)0;
         fix.send(b.end());
     }
-
-    // In headless mode, /supersonic/devices/switch goes through the ring buffer,
-    // not the UDP server, so it won't be handled as a supersonic command.
-    // This test verifies the message doesn't crash the engine.
+    // The switch runs on the engine's device lane, after its debounce: done
+    // before the engine is asked anything else.
+    fix.waitForDeviceLane();
 
     // Engine should still be alive
     OscReply reply;
@@ -862,7 +827,7 @@ TEST_CASE("RapidSwitch: cold swap with active synths after tiny buffer",
     fix.clearReplies();
 
     // Let synths run briefly
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    fix.pumpBlock(fix.blocksOfAudio(50));
 
     // Tiny buffer (hot)
     auto r1 = fix.engine().switchDevice("", 0, 16);

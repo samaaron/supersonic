@@ -22,25 +22,19 @@
 
 #include "shm_segment.hpp"
 
-#include <chrono>
 #include <filesystem>
-#include <thread>
 
 using detail_shm_segment::shm_segment_client;
 
 namespace {
 
 ClockworkEngine::Config scopeOwnershipConfig() {
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate        = 48000;
-    cfg.bufferSize        = 128;
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.udpPort           = 57210;  // non-zero enables shared memory
     setGuestOption(cfg, "numBuffers", 64);
     setGuestOption(cfg, "maxNodes", 256);
     setGuestOption(cfg, "maxGraphDefs", 64);
     setGuestOption(cfg, "maxWireBufs", 64);
-    cfg.headless          = true;
-    cfg.numOutputChannels = 2;
     cfg.numInputChannels  = 0;
     return cfg;
 }
@@ -92,12 +86,8 @@ TEST_CASE("scope-ownership: late dtor of a superseded unit leaves the slot activ
     REQUIRE(fix.waitForBlocks(40, 3000));
     CHECK(reader.valid());
     const uint64_t before = reader.write_position();
-    bool advanced = false;
-    for (int i = 0; i < 50 && !advanced; ++i) {
-        advanced = reader.write_position() > before;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    CHECK(advanced);
+    REQUIRE(fix.waitForBlocks(4));
+    CHECK(reader.write_position() > before);
 
     // Owner release still frees the slot.
     fix.clearReplies();

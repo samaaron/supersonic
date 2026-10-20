@@ -134,8 +134,9 @@ bool decodeFor(const std::string& path, int32_t start, int32_t want, const std::
 
 namespace supersonic {
 
-Commands::Commands(ClockworkEngine& engine, IOscTransport* replies)
-    : mEngine(engine), mReplies(replies), mRecorder(engine), mWorker([this] { run(); }) {}
+Commands::Commands(ClockworkEngine& engine, IOscTransport* replies, Work work)
+    : mEngine(engine), mReplies(replies), mWork(work), mRecorder(engine, work == Work::Own),
+      mWorker(work == Work::Own ? std::thread([this] { run(); }) : std::thread()) {}
 
 Commands::~Commands() {
     {
@@ -235,23 +236,44 @@ bool Commands::ingress(const uint8_t* data, uint32_t size, uint32_t token) {
     } catch (const osc::Exception&) {
         return false;   // malformed: the engine's refusal says what is wrong
     }
-    {
-        std::lock_guard<std::mutex> lock(mQueueMut);
-        mQueue.push_back(std::move(job));
-    }
-    mQueueCv.notify_one();
+    enqueue(std::move(job));
     return true;
 }
 
 // ── The worker ───────────────────────────────────────────────────────────────
 
+void Commands::enqueue(Job job) {
+    {
+        std::lock_guard<std::mutex> lock(mQueueMut);
+        mQueue.push_back(std::move(job));
+    }
+    mQueueCv.notify_one();
+}
+
 void Commands::run() {
     for (;;) {
-        Job job;
         {
             std::unique_lock<std::mutex> lock(mQueueMut);
             mQueueCv.wait(lock, [this] { return mStop || !mQueue.empty(); });
             if (mStop) return;
+        }
+        runJobs();
+    }
+}
+
+void Commands::runPending() {
+    if (mWork != Work::Host) return;
+    runJobs();
+    mRecorder.pull();
+}
+
+// Every job queued, in arrival order, on the calling thread: the one worker.
+void Commands::runJobs() {
+    for (;;) {
+        Job job;
+        {
+            std::lock_guard<std::mutex> lock(mQueueMut);
+            if (mStop || mQueue.empty()) return;
             job = std::move(mQueue.front());
             mQueue.pop_front();
         }
@@ -332,12 +354,6 @@ void Commands::loadSample(const Job& job) {
                      + std::to_string(clockwork_asset_pool_free_bytes(mPool)) + " free", job.bufnum);
             return;
         }
-        if (alloc) {
-            // The buffer is replaced, as /b_allocRead always replaced: whatever
-            // it held goes first, and the guest lets its asset go with it. The
-            // reply to that free is ours to swallow.
-            mFreeing[job.bufnum] += 1;
-        }
         Pending p { alloc ? Pending::Commit : Pending::ReadInto, job.token, job.bufnum, cmd, slot, job.completion, {} };
         mPending.push_back(std::move(p));
     }
@@ -351,8 +367,11 @@ void Commands::loadSample(const Job& job) {
     if (alloc) {
         {
             osc::OutboundPacketStream p(buf, sizeof buf);
+            // The buffer is replaced, as /b_allocRead always replaced: whatever
+            // it held goes first, and the guest lets its asset go with it. Sent
+            // as the front's own, so whatever is said back is the front's.
             p << osc::BeginMessage("/b_free") << job.bufnum << osc::EndMessage;
-            mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), job.token);
+            mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), kFreeToken);
         }
         osc::OutboundPacketStream p(buf, sizeof buf);
         p << osc::BeginMessage("/clockwork/asset/commit")
@@ -504,31 +523,20 @@ void Commands::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
 
 void Commands::notice(const uint8_t* data, uint32_t size) {
     if (!isMessage(data, size, "/clockwork/setup")) return;
-    // The guest is new: nothing it held is held. The slots the old guest's
-    // buffers sat in go back to the pool (the engine will never say
-    // /clockwork/asset/released for a World that is gone), and a sample that
-    // was on its way in has no World to be committed to — its asker is told,
-    // in scsynth's words, so it can ask again of the new one.
-    std::vector<std::pair<uint32_t, Pending>> failed;
-    {
-        std::lock_guard<std::mutex> lock(mMut);
-        if (mPool) for (auto& live : mLive) clockwork_asset_pool_free(mPool, live.second);
-        mLive.clear();
-        mFreeing.clear();
-        for (auto it = mPending.begin(); it != mPending.end();) {
-            if (it->what == Pending::Commit || it->what == Pending::ReadInto) {
-                if (mPool) clockwork_asset_pool_free(mPool, it->slot);
-                failed.emplace_back(it->token, std::move(*it));
-                it = mPending.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-    for (auto& f : failed) sendFail(f.first, f.second.cmd.c_str(), "the engine was rebuilt while the sample was loading", f.second.bufnum);
+    // The guest is new: nothing the old one held is held. The old instance
+    // released its assets as it went (/clockwork/asset/released, ahead of
+    // setup); a slot still held here is one whose release the ring had no
+    // room for, and goes back to the pool now. Nothing else is settled here: everything the old instance was sent is answered or
+    // refused before setup (clockwork's docs/RESTARTS.md), so an ask still
+    // waiting now went to the new instance, or has yet to go, and its own
+    // answer settles it.
+    std::lock_guard<std::mutex> lock(mMut);
+    if (mPool) for (auto& live : mLive) clockwork_asset_pool_free(mPool, live.second);
+    mLive.clear();
 }
 
 bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
+    if (token == kFreeToken) return true;   // what is said to the front's own frees is the front's, and goes no further
     if (size < 8 || data[0] != '/') return false;
     enum { Committed, Refused, Released, Done, Fail, Info, Published, Error, None } kind = None;
     if      (isMessage(data, size, "/clockwork/asset/committed"))   kind = Committed;
@@ -580,8 +588,8 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
 
     // A refusal of anything else we had in flight on this token — a sample's
     // commit, a read, a query, a publish — fails that ask to its asker, in
-    // scsynth's words, and frees what the ask held, as notice() does for a
-    // rebuild the front hears of by setup. Not ours: left for whoever is.
+    // scsynth's words, and frees what the ask held. Not ours: left for
+    // whoever is.
     if (kind == Error) {
         // A definition refused is not one scsynth skipped (its own /fail,
         // below, costs the load one definition): the World it was going into
@@ -661,16 +669,6 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
             }
         }
         if (sendNext) sendDef(token, next);
-        return true;
-    }
-
-    // /b_free replies: ours if we issued one for that buffer (a failed free
-    // names no buffer; the oldest of ours is the one it answers).
-    if ((kind == Done || kind == Fail) && cmd == "/b_free") {
-        std::lock_guard<std::mutex> lock(mMut);
-        auto it = id >= 0 ? mFreeing.find(id) : mFreeing.begin();
-        if (it == mFreeing.end()) return false;
-        if (--it->second == 0) mFreeing.erase(it);
         return true;
     }
 
@@ -758,9 +756,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
             // An empty range writes an empty file, as /b_write did.
             Job enc = p.job;
             enc.kind = Kind::Encode;
-            std::lock_guard<std::mutex> lock(mQueueMut);
-            mQueue.push_back(std::move(enc));
-            mQueueCv.notify_one();
+            enqueue(std::move(enc));
             return true;
         }
         char buf[128];
@@ -782,11 +778,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         enc.outChannels = static_cast<uint32_t>(a1);
         enc.outFrames   = static_cast<uint32_t>(a2);
         enc.outRate     = f3;
-        {
-            std::lock_guard<std::mutex> lock(mQueueMut);
-            mQueue.push_back(std::move(enc));
-        }
-        mQueueCv.notify_one();
+        enqueue(std::move(enc));
         return true;
     }
     return false;
@@ -854,6 +846,10 @@ void Commands::reply(uint32_t token, const uint8_t* data, uint32_t size) {
 }
 
 bool Commands::loadDefinitions(const std::string& dir, std::string* why) {
+    if (mWork == Work::Host) {
+        if (why) *why = "this front's work is its host's: send /d_loadDir and run until the /done comes";
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(mOwnMut);
         mOwnAnswered = false;
@@ -863,11 +859,7 @@ bool Commands::loadDefinitions(const std::string& dir, std::string* why) {
     job.kind  = Kind::SynthDefDir;
     job.token = kOwnToken;
     job.path  = dir;
-    {
-        std::lock_guard<std::mutex> lock(mQueueMut);
-        mQueue.push_back(std::move(job));
-    }
-    mQueueCv.notify_one();
+    enqueue(std::move(job));
 
     // One definition per block, each answered before the next goes: a few
     // hundred take well under a second. A minute is an engine not answering.

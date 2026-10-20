@@ -43,15 +43,7 @@ TEST_CASE("InputChannels: disable inputs triggers cold swap", "[InputChannels]")
 
 TEST_CASE("InputChannels: enable inputs triggers cold swap", "[InputChannels]") {
     // Boot with 0 inputs
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate       = 48000;
-    cfg.bufferSize       = 128;
-    cfg.udpPort          = 0;
-    setGuestOption(cfg, "numBuffers", 1024);
-    setGuestOption(cfg, "maxNodes", 1024);
-    setGuestOption(cfg, "maxGraphDefs", 512);
-    setGuestOption(cfg, "maxWireBufs", 64);
-    cfg.headless         = true;
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.numInputChannels = 0;
     EngineFixture fix(cfg);
 

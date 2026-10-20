@@ -52,11 +52,9 @@ constexpr int kReopenScale = 1;
 constexpr int kReopenTimeoutMs = 20000 * kReopenScale;
 
 ClockworkEngine::Config recoverConfig() {
-    auto cfg = EngineFixture::defaultConfig();
     // The headless driver, not the test's pump: a real audio source runs, so
     // audioSource() is meaningful and recoverAudio's stop/start hits real state.
-    cfg.manualAudioPump  = false;
-    cfg.freewheelClock   = false;
+    auto cfg = EngineFixture::driverConfig();
     cfg.callbackWatchdog = true;
     cfg.watchdogStallMs  = 250;
     cfg.watchdogPollMs   = 50;

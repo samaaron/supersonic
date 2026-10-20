@@ -12,10 +12,8 @@
 #include "clock/clock_math.h"   // wallClockNTP; WallClock.h was a shim for this
 #include "shared_memory.h"
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <thread>
 #include <vector>
 #include <numeric>
 
@@ -23,20 +21,39 @@ extern "C" {
     extern uint8_t arena_storage[];
 }
 
-// Sanitizer builds (ASAN/TSAN) render several times slower, so the render-
-// completion deadline below must scale with them or it becomes the flake it
-// exists to prevent. Mirrors kTimeoutScale in test_link_audio_integration.cpp.
-#if defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
-constexpr int kTimeoutScale = 4;
-#elif defined(__has_feature)
-#  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
-constexpr int kTimeoutScale = 4;
-#  else
-constexpr int kTimeoutScale = 1;
-#  endif
-#else
-constexpr int kTimeoutScale = 1;
-#endif
+// The engine the cases measure. Headless, the fixture's pumped engine on a
+// freewheel clock from a fixed origin: frame f is heard at kOriginNtp +
+// f / rate, the same render in every run. Or the device CLOCKWORK_TEST_DEVICE
+// names (e.g. "MacBook Pro Speakers"; a name that matches no device opens the
+// default), on the wall clock it keeps.
+constexpr double kOriginNtp = 3'900'000'000.0;
+
+static const char* testDevice() {
+    const char* device = std::getenv("CLOCKWORK_TEST_DEVICE");
+    return device && device[0] != '\0' ? device : nullptr;
+}
+
+static ClockworkEngine::Config accuracyConfig(int maxNodes) {
+    const char* device = testDevice();
+    ClockworkEngine::Config cfg = device ? EngineFixture::driverConfig() : EngineFixture::defaultConfig();
+    setGuestOption(cfg, "maxNodes", maxNodes);
+    cfg.freewheelClock = true;
+    if (device) {
+        cfg.headless       = false;
+        cfg.hardwareDevice = device;
+    } else {
+        cfg.freewheelOriginNtp = kOriginNtp;
+    }
+    return cfg;
+}
+
+// Now on the engine's clock: the wall clock a device keeps, or, headless, the
+// time the next block is heard at, from the blocks rendered so far.
+static double engineNow(EngineFixture& fx, uint32_t sampleRate) {
+    if (testDevice()) return wallClockNTP();
+    const uint32_t blocks = fx.engine().processor().processCount.load(std::memory_order_acquire);
+    return kOriginNtp + double(blocks) * 128.0 / double(sampleRate);
+}
 
 // Find the first sample frame where audio exceeds threshold (onset detection)
 static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
@@ -54,33 +71,38 @@ static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
 // the start, pulled while the engine renders, until `neededFrames` are in
 // hand. Nothing is reset and nothing is toggled — the tap flows from boot —
 // and the ring may be shorter than the window, which is why the pull runs
-// alongside the render rather than after it. Returns interleaved frames.
-static std::vector<float> captureTap(shm_audio_buffer* tap, uint32_t neededFrames) {
+// alongside the render rather than after it: whenever the ring is drained, a
+// block more (pumped here, or waited for from a device). Returns interleaved
+// frames.
+static std::vector<float> captureTap(EngineFixture& fx, shm_audio_buffer* tap, uint32_t neededFrames) {
     shm_audio_buffer_reader reader(tap);
     reader.seek_to_live();
     const uint32_t channels = tap->channels;
     std::vector<float> out;
     out.reserve(static_cast<size_t>(neededFrames) * channels);
     std::vector<float> chunk(4096 * channels);
-    const auto deadline = std::chrono::steady_clock::now()
-                        + std::chrono::seconds(30) * kTimeoutScale;
-    while (out.size() < static_cast<size_t>(neededFrames) * channels
-           && std::chrono::steady_clock::now() < deadline) {
+    // Every block brings 128 frames, so twice the blocks the window needs is
+    // a render that has stopped, not a slow one.
+    uint32_t blocks = 0;
+    while (out.size() < static_cast<size_t>(neededFrames) * channels) {
         uint64_t gap = 0;
         const uint32_t n = reader.pull(chunk.data(), 4096, &gap);
         REQUIRE(gap == 0);
-        if (n == 0) { std::this_thread::sleep_for(std::chrono::milliseconds(5)); continue; }
+        if (n == 0) {
+            REQUIRE(++blocks <= 2 * (neededFrames / 128 + 1));
+            fx.pumpBlock();
+            continue;
+        }
         out.insert(out.end(), chunk.begin(), chunk.begin() + static_cast<size_t>(n) * channels);
     }
-    REQUIRE(out.size() >= static_cast<size_t>(neededFrames) * channels);
     return out;
 }
 
 // On hardware, the engine must really be on it, and say which. An engine that
 // cannot open the device it was given runs headless instead, and the case
 // would then pass on the headless clock having measured no device at all.
-static void requireHardware(EngineFixture& fx, const char* device) {
-    if (!device || device[0] == '\0') return;
+static void requireHardware(EngineFixture& fx) {
+    if (!testDevice()) return;
     const auto cur = fx.engine().currentDevice();
     WARN("measured on " << cur.typeName << " / " << cur.name << " at "
                         << cur.activeSampleRate << " Hz");
@@ -89,27 +111,8 @@ static void requireHardware(EngineFixture& fx, const char* device) {
 
 TEST_CASE("relative scheduling accuracy across multiple bundles",
           "[scheduling][accuracy]") {
-    // Default to headless.  Set CLOCKWORK_TEST_DEVICE to a device name
-    // (e.g. "MacBook Pro Speakers") to test against real hardware; a name
-    // that matches no device opens the default.
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate   = 48000;
-    cfg.bufferSize   = 128;
-    cfg.udpPort      = 0;
-    setGuestOption(cfg, "numBuffers", 1024);
-    setGuestOption(cfg, "maxNodes", 1024);
-    setGuestOption(cfg, "maxGraphDefs", 512);
-    setGuestOption(cfg, "maxWireBufs", 64);
-    cfg.freewheelClock = true;   // deterministic sample clock — see test header
-    const char* device = std::getenv("CLOCKWORK_TEST_DEVICE");
-    if (device && device[0] != '\0') {
-        cfg.headless = false;
-        cfg.hardwareDevice = device;
-    } else {
-        cfg.headless = true;
-    }
-    EngineFixture fx(cfg);
-    requireHardware(fx, device);
+    EngineFixture fx(accuracyConfig(1024));
+    requireHardware(fx);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
 
@@ -124,7 +127,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
-    double ntpNow = wallClockNTP();
+    double ntpNow = engineNow(fx, sampleRate);
 
     // Schedule NUM_BUNDLES synths at regular intervals
     for (int i = 0; i < NUM_BUNDLES; i++) {
@@ -139,7 +142,7 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
 
     const uint32_t neededFrames = static_cast<uint32_t>(
         (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC + 0.1) * sampleRate);
-    const std::vector<float> captured = captureTap(capture, neededFrames);
+    const std::vector<float> captured = captureTap(fx, capture, neededFrames);
 
     // Free any lingering synths
     for (int i = 0; i < NUM_BUNDLES; i++)
@@ -181,7 +184,9 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     }
 
     INFO("Detected " << onsets.size() << " of " << NUM_BUNDLES << " onsets");
-    REQUIRE(onsets.size() >= 7);   // tolerate up to 3 missed detections (CI runners are noisy)
+    // Headless, the render is the same in every run, so every onset is in it;
+    // a device's may lose up to 3 to the machine.
+    REQUIRE(onsets.size() >= (testDevice() ? 7u : size_t{NUM_BUNDLES}));
 
     // ── Compute spacings ─────────────────────────────────────────────────
     double blockMs = 1000.0 * 128.0 / sampleRate;
@@ -230,24 +235,8 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
 // ─────────────────────────────────────────────────────────────────────────
 TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bundles)",
           "[scheduling][accuracy]") {
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate   = 48000;
-    cfg.bufferSize   = 128;
-    cfg.udpPort      = 0;
-    setGuestOption(cfg, "numBuffers", 1024);
-    setGuestOption(cfg, "maxNodes", 2048);
-    setGuestOption(cfg, "maxGraphDefs", 512);
-    setGuestOption(cfg, "maxWireBufs", 64);
-    cfg.freewheelClock = true;   // deterministic sample clock — see test header
-    const char* device = std::getenv("CLOCKWORK_TEST_DEVICE");
-    if (device && device[0] != '\0') {
-        cfg.headless = false;
-        cfg.hardwareDevice = device;
-    } else {
-        cfg.headless = true;
-    }
-    EngineFixture fx(cfg);
-    requireHardware(fx, device);
+    EngineFixture fx(accuracyConfig(2048));
+    requireHardware(fx);
     if (!fx.loadSynthDef("sonic-pi-beep")) { SKIP("sonic-pi-beep not available"); }
     fx.clearReplies();
 
@@ -262,7 +251,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     uint32_t sampleRate = capture->sample_rate;
     REQUIRE(sampleRate > 0);
 
-    double ntpNow = wallClockNTP();
+    double ntpNow = engineNow(fx, sampleRate);
 
     for (int i = 0; i < NUM_BUNDLES; i++) {
         double t = ntpNow + FIRST_DELAY_SEC + i * SPACING_SEC;
@@ -276,7 +265,7 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
 
     const uint32_t neededFrames = static_cast<uint32_t>(
         (FIRST_DELAY_SEC + NUM_BUNDLES * SPACING_SEC + 0.1) * sampleRate);
-    const std::vector<float> captured = captureTap(capture, neededFrames);
+    const std::vector<float> captured = captureTap(fx, capture, neededFrames);
 
     for (int i = 0; i < NUM_BUNDLES; i++)
         fx.send(osc_test::message("/n_free", 5001 + i));
@@ -314,7 +303,9 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     }
 
     INFO("Detected " << onsets.size() << " of " << NUM_BUNDLES << " onsets");
-    REQUIRE(onsets.size() >= 90);   // need ~100 for stable p99; tolerate up to 10 missed
+    // Headless, every onset (see above); a device may lose up to 10 of the ~100
+    // a stable p99 needs.
+    REQUIRE(onsets.size() >= (testDevice() ? 90u : size_t{NUM_BUNDLES}));
 
     double blockMs = 1000.0 * 128.0 / sampleRate;
     double expectedSpacingMs = SPACING_SEC * 1000.0;

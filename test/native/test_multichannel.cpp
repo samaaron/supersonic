@@ -3,7 +3,6 @@
  *
  * Verifies that the engine boots and processes audio correctly with
  * various channel configurations (mono, stereo, 4ch, 8ch, 16ch).
- * Also tests the recording start/stop API.
  */
 #include "EngineFixture.h"
 
@@ -24,24 +23,21 @@ extern "C" {
 
 // ── Helper: boot engine with given channel config ────────────────────────────
 
-static void bootAndVerify(int outCh, int inCh) {
-    ClockworkEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
-
-    ClockworkEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
+// The fixture's pumped config, at these widths.
+static ClockworkEngine::Config channels(int outCh, int inCh) {
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.numOutputChannels = outCh;
     cfg.numInputChannels  = inCh;
-    engine.init(cfg);
+    return cfg;
+}
 
-    // init() blocks until HeadlessDriver fires at least one audio
-    // block — if the channel config would crash process_audio(), we'd
-    // already know by this point.
-    REQUIRE(engine.isRunning());
-
-    engine.shutdown();
-    CHECK_FALSE(engine.isRunning());
+static void bootAndVerify(int outCh, int inCh) {
+    EngineFixture fx(channels(outCh, inCh));
+    REQUIRE(fx.engine().isRunning());
+    // Blocks rendered at this width: a channel config process_audio() cannot
+    // take crashes here.
+    REQUIRE(fx.waitForBlocks(4));
+    CHECK(fx.engine().isRunning());
 }
 
 // ── 1. Boot with various output channel counts ──────────────────────────────
@@ -105,18 +101,14 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     int inCh  = 2;
 
     ClockworkEngine engine;
-    bool gotReply = false;
-    engine.onReply = [&](const uint8_t*, uint32_t) { gotReply = true; };
+    engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    ClockworkEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
+    ClockworkEngine::Config cfg = channels(outCh, inCh);
     // Manual pump: this test drives process_audio() directly on the test
     // thread, so the engine must NOT start its own headless driver thread —
     // otherwise both threads call process_audio() concurrently (data race).
+    // Pinned, as SUPERSONIC_TEST_REALTIME=1 would otherwise start one.
     cfg.manualAudioPump   = true;
-    cfg.numOutputChannels = outCh;
-    cfg.numInputChannels  = inCh;
     engine.init(cfg);
 
     REQUIRE(engine.isRunning());
@@ -158,15 +150,12 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     ClockworkEngine engine;
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
-    ClockworkEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
+    ClockworkEngine::Config cfg = channels(outCh, inCh);
     // Manual pump: this test drives process_audio() directly on the test
     // thread, so the engine must NOT start its own headless driver thread —
     // otherwise both threads call process_audio() concurrently (data race).
+    // Pinned, as SUPERSONIC_TEST_REALTIME=1 would otherwise start one.
     cfg.manualAudioPump   = true;
-    cfg.numOutputChannels = outCh;
-    cfg.numInputChannels  = inCh;
     engine.init(cfg);
 
     REQUIRE(engine.isRunning());
@@ -218,39 +207,39 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
 // ── 6. Prefetch buffer is correctly sized ────────────────────────────────────
 
 TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
-    // Boot with 8 output channels — prefetch should be 8 * 128 = 1024 floats
-    ClockworkEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
+    // The device path keeps the rest of a block it rendered when the device
+    // asks for fewer frames than a block (ClockworkProcessor's prefetch), a
+    // block per output channel. A device of 100 frames against 128-frame
+    // blocks takes that path every callback, so a prefetch sized for fewer
+    // channels than the device has is written past its end (once hardcoded
+    // at 8: 16 outputs crashed). Only the device path has a prefetch; the
+    // headless driver renders whole blocks.
+    for (const int outCh : {8, 16}) {
+        INFO(outCh << " outputs");
+        ClockworkEngine engine;
+        engine.onReply = [](const uint8_t*, uint32_t) {};
+        ClockworkEngine::Config cfg = channels(outCh, 0);
+        cfg.manualAudioPump = true;   // pumpDevice's premise, whatever SUPERSONIC_TEST_REALTIME says
+        engine.init(cfg);
+        REQUIRE(engine.isRunning());
 
-    ClockworkEngine::Config cfg;
-    cfg.headless          = true;
-    cfg.udpPort           = 0;
-    cfg.numOutputChannels = 8;
-    cfg.numInputChannels  = 0;
-    engine.init(cfg);
-
-    REQUIRE(engine.isRunning());
-
-    // If prefetch was still hardcoded to kMaxChannels=8, this would have worked
-    // previously. But with 16 channels it would have crashed. Boot with 16 to
-    // verify dynamic sizing works.
-    engine.shutdown();
-
-    ClockworkEngine engine2;
-    engine2.onReply = [](const uint8_t*, uint32_t) {};
-
-    ClockworkEngine::Config cfg2;
-    cfg2.headless          = true;
-    cfg2.udpPort           = 0;
-    cfg2.numOutputChannels = 16;
-    cfg2.numInputChannels  = 0;
-    engine2.init(cfg2);
-    REQUIRE(engine2.isRunning());
-
-    // HeadlessDriver is already processing with 16 channels —
-    // if the prefetch buffer were too small, init() would have crashed.
-
-    engine2.shutdown();
+        // Nothing plays, so every callback's whole buffer is silence: each
+        // one written in full, from the prefetch and the block after it.
+        constexpr int kFrames = 100;
+        constexpr float kSentinel = 1234.5f;
+        std::vector<std::vector<float>> out(outCh, std::vector<float>(kFrames));
+        std::vector<float*> outs;
+        for (auto& ch : out) outs.push_back(ch.data());
+        int unwritten = 0;
+        for (int callback = 0; callback < 32; ++callback) {   // 25 blocks
+            for (auto& ch : out) std::fill(ch.begin(), ch.end(), kSentinel);
+            engine.pumpDevice(nullptr, 0, outs.data(), outCh, kFrames);
+            for (const auto& ch : out)
+                unwritten += static_cast<int>(std::count_if(ch.begin(), ch.end(), [](float s) { return s != 0.0f; }));
+        }
+        CHECK(unwritten == 0);
+        engine.shutdown();
+    }
 }
 
 // ── 7. Recording start/stop API ─────────────────────────────────────────────

@@ -9,20 +9,11 @@
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
 #include "shm_segment.hpp"
-#include <thread>
-#include <chrono>
 #include <filesystem>
 
 static ClockworkEngine::Config scopeConfig() {
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate    = 48000;
-    cfg.bufferSize    = 128;
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.udpPort       = 57199;  // Non-zero enables shared memory (needed for scope buffers)
-    setGuestOption(cfg, "numBuffers", 1024);
-    setGuestOption(cfg, "maxNodes", 1024);
-    setGuestOption(cfg, "maxGraphDefs", 512);
-    setGuestOption(cfg, "maxWireBufs", 64);
-    cfg.headless      = true;
     return cfg;
 }
 
@@ -35,7 +26,6 @@ using detail_shm_segment::shm_segment_client;
 // slot the reader watches must go live again.
 TEST_CASE("ColdSwap: scope data resumes after a cold swap and re-spawn",
           "[ColdSwap][Scope]") {
-    std::string defPath = std::string(CLOCKWORK_SAMPLES_DIR).empty() ? "" : "";
     std::string synthPath = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-scope.scsyndef";
     if (!std::filesystem::exists(synthPath)) SKIP("sonic-pi-scope synthdef not available");
 
@@ -53,13 +43,11 @@ TEST_CASE("ColdSwap: scope data resumes after a cold swap and re-spawn",
           << "scope_num" << kSlot << "max_frames" << 1024.0f;
         fix.send(b.end());
     };
-    auto advances = [](shm_tap_stream_reader& r) {
+    // The cursor moves as blocks render.
+    auto advances = [&](shm_tap_stream_reader& r) {
         const uint64_t before = r.write_position();
-        for (int i = 0; i < 60; ++i) {
-            if (r.write_position() > before) return true;
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        return false;
+        REQUIRE(fix.waitForBlocks(4));
+        return r.write_position() > before;
     };
 
     // Before the swap: the slot is live and its cursor advances.

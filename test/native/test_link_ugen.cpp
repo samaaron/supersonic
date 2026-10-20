@@ -38,9 +38,13 @@ namespace {
 // (LinkSession::clockMicros -> link.clock().micros()), which is real time and
 // unaffected by either. So pumping decides when we render; only wall time
 // advances the phase, which is why the sleeps below must stay.
+//
+// For the same reason, the engine's own gateway delivers, and the fixture's
+// waits keep the wall clock (EngineFixture::testIsTheHost).
 ClockworkEngine::Config linkProbeConfig() {
     auto cfg = EngineFixture::defaultConfig();
-    cfg.manualAudioPump = true;
+    cfg.manualAudioPump   = true;
+    cfg.hostDrivesControl = false;
     return cfg;
 }
 

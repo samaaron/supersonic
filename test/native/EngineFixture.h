@@ -17,6 +17,7 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include <future>
 #include <string>
 #include <chrono>
 #include <thread>
@@ -54,6 +55,9 @@ class EngineFixture {
 public:
     EngineFixture();
     explicit EngineFixture(const ClockworkEngine::Config& cfg);
+    // Given the engine before it boots, for what boot reads: the transport its
+    // replies leave by (a front's, wired as the server wires it).
+    EngineFixture(const ClockworkEngine::Config& cfg, const std::function<void(ClockworkEngine&)>& beforeBoot);
     ~EngineFixture();
 
     // ── OSC send (in-process, no UDP) ──────────────────────────────────
@@ -77,20 +81,32 @@ public:
     // fixed sleep_for elapses while the audio thread was preempted.
     bool waitForBlocks(uint32_t n, int timeoutMs = 2000);
 
-    // Poll `pred()` (every ~2 ms) until it returns true, or timeout.
+    // Poll `pred()` until it returns true, or timeout.
     // Generic deadline loop for non-block conditions: a metric atomic
     // reaching a value, a counter draining to zero. Returns the final
     // pred() value (true = condition met before the deadline).
     //
-    // Pumped, the wait has two budgets, and gives up only once both are
-    // spent: timeoutMs of audio, pumped a block a turn (what the audio thread
-    // answers after so many blocks arrives on audio time, however slow the
-    // machine), and timeoutMs of wall clock (what one of the engine's threads
-    // delivers once woken needs real time to run). One budget alone was
-    // wrong: the wall clock ran out before the audio on a loaded runner,
-    // each turn's sleep stretched (SendReply at 2 Hz, macOS arm64, 2026-10-14).
+    // Pumped, with the engine's own gateway delivering, the wait has two
+    // budgets, and gives up only once both are spent: timeoutMs of audio,
+    // pumped a block a turn (what the audio thread answers after so many
+    // blocks arrives on audio time, however slow the machine), and timeoutMs
+    // of wall clock (what one of the engine's threads delivers once woken
+    // needs real time to run). One budget alone was wrong: the wall clock ran
+    // out before the audio on a loaded runner, each turn's sleep stretched
+    // (SendReply at 2 Hz, macOS arm64, 2026-10-14).
+    //
+    // When the test is the host (testIsTheHost) there is one budget: what it
+    // waits for comes from the blocks and passes it runs, so timeoutMs of
+    // audio, a block a turn, and no sleeping.
     template <typename Pred>
     bool pollUntil(Pred pred, int timeoutMs = 2000) {
+        if (testIsTheHost()) {
+            for (uint32_t owed = blocksOfAudio(timeoutMs);; --owed) {
+                if (pred()) return true;
+                if (!owed) return false;
+                pumpBlock();
+            }
+        }
         const auto deadline = std::chrono::steady_clock::now()
                             + std::chrono::milliseconds(timeoutMs);
         uint32_t owed = testPumps() ? blocksOfAudio(timeoutMs) : 0;
@@ -153,6 +169,10 @@ public:
     // can tweak one field (e.g. freewheelClock) and pass it to the
     // Config-taking constructor without replicating the whole struct.
     static ClockworkEngine::Config defaultConfig();
+    // The same, rendered by the headless driver on a thread of its own, with
+    // the engine's gateway delivering its replies: for a case whose claim is
+    // about real time, tagged [rt] and run on its own.
+    static ClockworkEngine::Config driverConfig();
 
     // Stop the HeadlessDriver so callers can own process_audio exclusively
     void stopHeadlessDriver();
@@ -163,11 +183,17 @@ public:
     // taken between pumps can't race a real-time driver. waitForReply()/pollUntil()
     // pump automatically in this mode, so most tests never call this directly.
     // With a driver or a Device rendering, waits for `n` of its blocks instead.
+    // With cfg.hostDrivesControl the test is the host as well: each block is
+    // followed by one control pass, as the engine's gateway runs it every block,
+    // and the host work (setHostWork).
     void pumpBlock(uint32_t n = 1);
 
     // Render one device callback of `frames` as a device of that buffer size
     // does — one clock step, then its blocks back to back — running
     // `afterEachBlock` after each. Manual pump only, and no Device rendering.
+    // With cfg.hostDrivesControl, one control pass and the host work once the
+    // callback is done: when a device's gateway gets to run, its blocks going
+    // back to back far faster than the gateway wakes.
     void pumpCallback(uint32_t frames, const std::function<void()>& afterEachBlock = {});
 
     // The next pump starts the engine's clock afresh, as a device starting
@@ -178,13 +204,34 @@ public:
     // the audio thread themselves (see pumpBlock).
     bool manualPump() const { return mManualPump; }
 
+    // The test thread is the one thing that moves the engine: it renders every
+    // block (manual pump, no Device) and runs every control pass
+    // (cfg.hostDrivesControl, defaultConfig's when pumped), and with them the
+    // host work. A wait is then a count of blocks. The one thread of the
+    // engine's own left is its device lane (waitForDeviceLane).
+    bool testIsTheHost() const { return testPumps() && mHostControl; }
+
+    // What the host runs after each control pass the fixture runs (pumpBlock,
+    // pumpCallback, a Device's callback): a front's file jobs and a
+    // recording's copying (supersonic::Commands::runPending). Set it before the
+    // engine renders and clear it before what it calls goes.
+    void setHostWork(std::function<void()> work);
+
+    // Everything sent so far that runs on the engine's device lane has run.
+    // The lane is a thread of the engine's own, where the device verbs
+    // (/clockwork/devices/...) run, so a case that sends one waits here before
+    // it counts blocks for the answer.
+    void waitForDeviceLane();
+
     // A device for a manual-pump engine: a thread rendering a callback of
     // `frames` at each one's due time on the wall clock, catching up after a
     // late wake as a device's buffer would, while the test talks to the engine
     // as a host does. A device is the engine's one renderer, and so is this:
     // while it runs the waits wait for its blocks rather than pump their own,
     // which would be a second thread rendering. The engine's clock starts
-    // afresh with it. Declared after its fixture, so that it stops first.
+    // afresh with it. With cfg.hostDrivesControl it runs the control pass and
+    // the host work after each callback, as pumpCallback does. Declared after
+    // its fixture, so that it stops first.
     class Device {
     public:
         // `afterEachBlock` runs on the device thread after each block it
@@ -222,11 +269,44 @@ public:
         std::thread          mThread;
     };
 
+    // A cold swap held open on a thread of its own, inside the engine's swap
+    // lock, until release(): for a case about what is refused while a swap
+    // runs. The engine's testSwapFailure hook holds it, so nothing waits on a
+    // sleep a slow machine could outlast, and the swap then fails with
+    // "held open". Released and joined when it goes, if not before.
+    class HeldSwap {
+    public:
+        HeldSwap(EngineFixture& fx, const std::string& deviceName, double sampleRate);
+        ~HeldSwap();
+        HeldSwap(const HeldSwap&) = delete;
+        HeldSwap& operator=(const HeldSwap&) = delete;
+
+        // Whether the swap holds the lock: its thread gets there, however long
+        // that takes, up to `timeoutMs`.
+        bool entered(int timeoutMs = 30000);
+        // Let the swap finish; what it returned.
+        SwapResult release();
+
+    private:
+        EngineFixture&                 mFx;
+        std::atomic<bool>              mEntered{false};
+        std::promise<void>             mRelease;
+        const std::shared_future<void> mReleased = mRelease.get_future().share();
+        bool                           mJoined = false;
+        SwapResult                     mResult;
+        std::thread                    mThread;   // last: it runs against everything above
+    };
+
 private:
-    void init(const ClockworkEngine::Config& cfg);
+    void init(const ClockworkEngine::Config& cfg, const std::function<void(ClockworkEngine&)>& beforeBoot = {});
+    // The host's turn after a block or callback: the control pass, when the
+    // test drives it, then the host work.
+    void hostTurn();
     // The test thread renders: manual pump, and no Device rendering instead.
     bool testPumps() const { return mManualPump && !mDeviceRendering.load(std::memory_order_relaxed); }
     bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
+    bool             mHostControl = false; // cfg.hostDrivesControl — the pumps pass
+    std::function<void()> mHostWork;       // setHostWork
     int              mSampleRate = 48000;  // cfg.sampleRate — blocksOfAudio
     std::atomic<bool> mDeviceRendering{false};  // a Device is the renderer
     uint64_t         mGeneration = 0;      // unique per fixture (see generation())

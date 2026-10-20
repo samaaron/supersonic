@@ -93,6 +93,7 @@ TEST_CASE("DeviceManagement: device report carries a well-formed per-driver tabl
     // Subscribing a reply port makes the engine broadcast the report set.
     fix.send(osc_test::message("/clockwork/devices/report",
                                static_cast<int32_t>(1)));
+    fix.waitForDeviceLane();   // the report is made there
 
     // The grouped table is broadcast alongside the flat report. Headless:
     // no device manager, so both driver fields are empty and there are no

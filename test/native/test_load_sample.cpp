@@ -13,10 +13,8 @@
 #include "SampleLane.h"
 #include "clockwork_audio_file.h"
 #include <catch2/catch_approx.hpp>
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
-#include <thread>
 #include "TestPid.h"
 #include <vector>
 #include <algorithm>
@@ -381,7 +379,7 @@ TEST_CASE("load sample, play via synth, free both", "[load_sample]") {
         }
 
         // Let it run briefly (a few audio blocks)
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        fx.pumpBlock(fx.blocksOfAudio(50));
 
         // Free the synth
         fx.send(osc_test::message("/n_free", 1000));
@@ -397,7 +395,7 @@ TEST_CASE("load sample, play via synth, free both", "[load_sample]") {
           << (int32_t)0 << (int32_t)1;
         fx.send(b.end());
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        fx.pumpBlock(fx.blocksOfAudio(50));
 
         fx.send(osc_test::message("/n_free", 1000));
     }

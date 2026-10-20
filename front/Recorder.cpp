@@ -13,7 +13,8 @@
 #include <chrono>
 #include <vector>
 
-Recorder::Recorder(ClockworkEngine& engine) : mEngine(engine) {}
+Recorder::Recorder(ClockworkEngine& engine, bool ownThread)
+    : mEngine(engine), mOwnThread(ownThread), mBuf(4096 * SCOPE_CHANNELS) {}
 
 Recorder::~Recorder() {
     std::string path, err;
@@ -67,9 +68,10 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
     // From the live position as the start is answered, not as the thread first runs: a recording is of what
     // happens from the moment it was said to have started. Taken on the thread, a loaded machine — or a test
     // rendering faster than real time — had the take begin late, its head missing, or all of it.
-    shm_audio_buffer_reader reader(slot);
-    reader.seek_to_live();
-    mThread = std::thread([this, slot, reader] { run(slot, reader); });
+    mSlot   = slot;
+    mReader = shm_audio_buffer_reader(slot);
+    mReader.seek_to_live();
+    if (mOwnThread) mThread = std::thread([this] { run(); });
     return true;
 }
 
@@ -77,7 +79,8 @@ bool Recorder::stop(std::string* path, std::string* err) {
     std::lock_guard<std::mutex> lock(mMut);
     if (!mRunning.load()) { if (err) *err = "not recording"; return false; }
     mStop.store(true);
-    if (mThread.joinable()) mThread.join();
+    if (mThread.joinable()) mThread.join();   // its last pulls are what arrived before the stop
+    else drain();                             // the host's: the same, here
     const ClockworkStatus closed = clockwork_audio_writer_close(mWriter, nullptr, nullptr);
     mWriter = nullptr;
     mRunning.store(false);
@@ -90,27 +93,37 @@ bool Recorder::stop(std::string* path, std::string* err) {
 }
 
 
-void Recorder::run(shm_audio_buffer* slot, shm_audio_buffer_reader reader) {
-    // `reader` starts at the writer's cursor as start() answered (above). The
-    // tap has been flowing since boot, so that cursor is "now"; the one thing
-    // that can move it backwards is a device restart, which re-formats the
-    // slot (see pullOnce).
-    std::vector<float> buf(4096 * SCOPE_CHANNELS);
-    auto pullOnce = [&] {
-        // The counter went backwards: the slot was re-formatted under us (a
-        // device restart). Everything since the reset is the recording's;
-        // start from the slot's first frame.
-        if (slot && reader.writer_position() < reader.last_read_position()) reader.seek_to_start();
-        uint64_t gap = 0;
-        const uint32_t n = reader.pull(buf.data(), 4096, &gap);
-        if (gap) mLost.fetch_add(gap);
-        if (n) audio_thread_witness::fileWork();
-        if (n && mWriter && clockwork_audio_writer_write(mWriter, buf.data(), n) == CLOCKWORK_OK)
-            mWritten.fetch_add(n);
-        return n;
-    };
+void Recorder::pull() {
+    std::lock_guard<std::mutex> lock(mMut);
+    if (mOwnThread || !mRunning.load()) return;
+    drain();
+}
+
+// The tap's frames, written until it has none waiting.
+void Recorder::drain() {
+    while (pullOnce() > 0) {}
+}
+
+// `mReader` starts at the writer's cursor as start() answered (above). The tap
+// has been flowing since boot, so that cursor is "now"; the one thing that can
+// move it backwards is a device restart, which re-formats the slot.
+uint32_t Recorder::pullOnce() {
+    // The counter went backwards: the slot was re-formatted under us (a device
+    // restart). Everything since the reset is the recording's; start from the
+    // slot's first frame.
+    if (mSlot && mReader.writer_position() < mReader.last_read_position()) mReader.seek_to_start();
+    uint64_t gap = 0;
+    const uint32_t n = mReader.pull(mBuf.data(), 4096, &gap);
+    if (gap) mLost.fetch_add(gap);
+    if (n) audio_thread_witness::fileWork();
+    if (n && mWriter && clockwork_audio_writer_write(mWriter, mBuf.data(), n) == CLOCKWORK_OK)
+        mWritten.fetch_add(n);
+    return n;
+}
+
+void Recorder::run() {
     while (!mStop.load(std::memory_order_relaxed)) {
         if (pullOnce() == 0) std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    while (pullOnce() > 0) {}   // what arrived before the stop
+    drain();   // what arrived before the stop
 }

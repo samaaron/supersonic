@@ -85,6 +85,7 @@ TEST_CASE("devices/report with no port registers the caller connection",
     // must subscribe the caller and trigger a device report broadcast that
     // reaches it. Headless engines still produce a (possibly empty) report.
     fx.send(osc_test::message("/clockwork/devices/report"));
+    fx.waitForDeviceLane();   // the report is made there
     OscReply devices;
     CHECK(fx.waitForReply("/clockwork/devices", devices, 10000));
 }

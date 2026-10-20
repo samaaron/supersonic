@@ -13,9 +13,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
 #include "OscBuilder.h"
-#include <thread>
-#include <chrono>
-#include <atomic>
 
 // ── Successful cold swap ─────────────────────────────────────────────────────
 
@@ -190,34 +187,19 @@ TEST_CASE("ColdSwap: no rate specified triggers hot swap", "[ColdSwap]") {
 TEST_CASE("ColdSwap: concurrent swap is rejected", "[ColdSwap]") {
     EngineFixture fix;
 
-    // Slow failure hook that signals once it holds mSwapMutex.
-    std::atomic<bool> swapEntered{false};
-    fix.engine().testSwapFailure = [&swapEntered](bool) -> std::string {
-        swapEntered.store(true, std::memory_order_release);
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        return "slow failure";
-    };
-
-    // Launch first swap in a background thread
-    SwapResult firstResult;
-    std::thread t1([&]() {
-        firstResult = fix.engine().switchDevice("", 44100);
-    });
-
-    // Wait until the first swap holds mSwapMutex before issuing the competing
-    // swap — a fixed sleep races the lock acquisition on a loaded runner.
-    REQUIRE(fix.pollUntil([&] { return swapEntered.load(std::memory_order_acquire); }));
+    // The first swap, held inside mSwapMutex until the second is refused.
+    EngineFixture::HeldSwap first(fix, "", 44100);
+    REQUIRE(first.entered());
 
     // Second swap should be rejected immediately
     auto secondResult = fix.engine().switchDevice("", 22050);
+    const SwapResult firstResult = first.release();
     REQUIRE_FALSE(secondResult.success);
     REQUIRE(secondResult.error == "swap already in progress");
 
-    t1.join();
-
     // First swap should have completed (with failure from the hook)
     REQUIRE_FALSE(firstResult.success);
-    REQUIRE(firstResult.error == "slow failure");
+    REQUIRE(firstResult.error == "held open");
 
     // Engine should still be running after all that
     OscReply reply;
@@ -349,8 +331,8 @@ TEST_CASE("ColdSwap: commands work after 1s delay post cold swap", "[ColdSwap]")
     REQUIRE(result.success);
     fix.clearReplies();
 
-    // Simulate Spider's 1-second debounce delay
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    // Spider's 1-second debounce delay: a second of audio, rendered
+    fix.pumpBlock(fix.blocksOfAudio(1000));
 
     // Now send commands — they must still work
     fix.send(osc_test::message("/notify", 1));

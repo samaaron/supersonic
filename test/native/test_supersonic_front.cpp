@@ -7,26 +7,24 @@
  *
  * Sonic Pi's spider says /b_allocRead bufnum path start frames and waits for
  * /done "/b_allocRead" bufnum, or /fail "/b_allocRead" why bufnum. The front
- * sits between the socket and the engine, decodes the file on a thread of its
- * own, stages the frames in the assets area lane with the guest's guard frames,
+ * sits between the socket and the engine, decodes the file off the audio
+ * thread, stages the frames in the assets area lane with the guest's guard frames,
  * commits them as an asset, and answers in scsynth's words. The engine's own
  * asset replies for those buffers stop at the front; the spider never learns
  * a lane exists.
  *
- * The rig here is the front around an in-process engine: replies routed by
- * origin come through onReplyRouted, exactly what the fronted transport sees
- * in Main.cpp, and a recording sink stands in for the socket.
+ * The rig here is the front around an in-process engine (FrontRig.h): replies
+ * routed by origin come through onReplyRouted, exactly what the fronted
+ * transport sees in SuperSonicMain.cpp, and a recording sink stands in for the
+ * socket. The front's work is the test thread's, between blocks, so every
+ * wait is a count of blocks.
  */
-#include "EngineFixture.h"
-#include "OscTestUtils.h"
-#include "supersonic_commands.h"
+#include "FrontRig.h"
 #include "clockwork_audio_file.h"
-#include "IOscTransport.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include "TestPid.h"
 #include "BlockBudget.h"
@@ -40,8 +38,6 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
-#include <string_view>
-#include <thread>
 #include <vector>
 
 #ifndef CLOCKWORK_SAMPLES_DIR
@@ -76,98 +72,9 @@ osc_test::Packet allocRead(int32_t bufnum, const std::string& path,
     return b.end();
 }
 
-// The socket, as the front sees it: every send is kept, by token.
-struct RecordingSink final : IOscTransport {
-    struct Sent { uint32_t token; OscReply reply; };
-    std::mutex        mu;
-    std::vector<Sent> sent;
-    // What a wait does between looks when it brings no tick of its own: the
-    // rig's idle, which renders a block when the engine is pumped.
-    std::function<void()> idle;
-
-    bool send(uint32_t token, const uint8_t* d, uint32_t n, bool) override {
-        std::lock_guard<std::mutex> lock(mu);
-        sent.push_back({ token, OscReply{ osc_test::parseAddress(d, n), std::vector<uint8_t>(d, d + n) } });
-        return true;
-    }
-    void broadcastNotify(const uint8_t*, uint32_t) override {}
-    void broadcastLink(const uint8_t*, uint32_t) override {}
-    bool hasNotifySubscribers() const override { return false; }
-    bool subscribeNotify(uint32_t) override { return false; }
-    bool subscribeNotifyPort(int) override { return false; }
-    void unsubscribeNotify(uint32_t) override {}
-    void clearNotify() override {}
-    bool subscribeLink(uint32_t) override { return false; }
-    void unsubscribeLink(uint32_t) override {}
-    void broadcastMidi(const uint8_t*, uint32_t) override {}
-    bool subscribeMidi(uint32_t) override { return false; }
-    void unsubscribeMidi(uint32_t) override {}
-    void broadcastGamepad(const uint8_t*, uint32_t) override {}
-    bool subscribeGamepad(uint32_t) override { return false; }
-    void unsubscribeGamepad(uint32_t) override {}
-
-    // The first reply at `addr` for `token` whose first string argument is
-    // `cmd` (scsynth's /done and /fail name the command), within timeoutMs.
-    bool waitFor(const char* addr, uint32_t token, const char* cmd, OscReply* out,
-                 int timeoutMs = 5000, std::function<void()> tick = {}) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-        while (std::chrono::steady_clock::now() < deadline) {
-            {
-                std::lock_guard<std::mutex> lock(mu);
-                for (const auto& s : sent) {
-                    if (s.token != token || s.reply.address != addr) continue;
-                    if (cmd && (s.reply.parsed().argCount() < 1 || s.reply.parsed().argString(0) != cmd)) continue;
-                    if (out) *out = s.reply;
-                    return true;
-                }
-            }
-            if (tick) tick();
-            else if (idle) idle();
-            else std::this_thread::sleep_for(std::chrono::milliseconds(2));
-        }
-        return false;
-    }
-    size_t count(const char* addr, uint32_t token) {
-        std::lock_guard<std::mutex> lock(mu);
-        size_t n = 0;
-        for (const auto& s : sent) if (s.token == token && s.reply.address == addr) ++n;
-        return n;
-    }
-};
-
-// The front around an in-process engine, wired the way Main.cpp wires it.
-struct Rig {
-    EngineFixture   fx;
-    RecordingSink   sink;
-    supersonic::Commands front;
-    // While set, the engine's /clockwork/asset/committed never reaches the
-    // front: a load stays in flight for as long as a case needs it to.
-    std::atomic<bool> holdCommitted { false };
-    // The engine's answers to the frees the front issued for itself (a
-    // /b_allocRead frees what the buffer held first), counted as they reach
-    // the front.
-    std::atomic<int> freesAnswered { 0 };
-
-    explicit Rig(ClockworkEngine::Config cfg = EngineFixture::defaultConfig())
-        : fx(cfg), front(fx.engine(), &sink) {
-        sink.idle = [this] { idle(); };
-        fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
-            const std::string address = osc_test::parseAddress(d, n);
-            if (holdCommitted.load() && address == "/clockwork/asset/committed") return;
-            const bool answersAFree = address == "/done"
-                && std::string_view(reinterpret_cast<const char*>(d), n).find("/b_free") != std::string_view::npos;
-            if (!front.egress(origin, d, n)) sink.send(origin, d, n, false);
-            else if (answersAFree) ++freesAnswered;
-        });
-    }
-    ~Rig() { fx.setRoutedObserver(nullptr); }   // under the fixture's lock: no call runs after this
-
-    // A wait's pause between looks, as the fixture's own waits take it: a
-    // pumped engine renders nothing unless the test does, so a block first.
-    void idle() {
-        if (fx.manualPump()) fx.pumpBlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(fx.manualPump() ? 3 : 2));
-    }
+// The front around an in-process engine (FrontRig.h), and the spider's ways to it.
+struct Rig : FrontRig {
+    using FrontRig::FrontRig;
 
     bool ingress(const osc_test::Packet& p, uint32_t token = kSpider) {
         return front.ingress(p.ptr(), p.size(), token);
@@ -179,14 +86,9 @@ struct Rig {
         REQUIRE(fx.waitForReply("/b_info", info));
         return info.parsed().argInt(1);
     }
-    // Poll until the lane is whole again (a release lands after /done).
+    // Until the lane is whole again (a release lands after /done).
     bool laneWholeWithin(int ms) {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (front.laneFreeBytes() == front.laneBytes()) return true;
-            idle();
-        }
-        return front.laneFreeBytes() == front.laneBytes();
+        return fx.pollUntil([&] { return front.laneFreeBytes() == front.laneBytes(); }, ms);
     }
 };
 
@@ -200,7 +102,7 @@ TEST_CASE("front: /b_allocRead is answered from the lane, in scsynth's words, to
 
     REQUIRE(rig.ingress(allocRead(0, path)));       // taken by the front: the engine never sees it
     OscReply done;
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", &done));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", &done));
     CHECK(done.parsed().argInt(1) == 0);
 
     // The buffer is loaded, at the file's length.
@@ -217,14 +119,14 @@ TEST_CASE("front: /b_free hands the slot back, and the release stays behind the 
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     REQUIRE(rig.front.laneFreeBytes() < rig.front.laneBytes());
 
     // The spider frees, as it always did; the engine answers it, as it always did.
     const auto free = osc_test::message("/b_free", int32_t{0});
     REQUIRE_FALSE(rig.ingress(free));                // not the front's business
     rig.fx.engine().ingest(free.ptr(), free.size(), kSpider);
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_free", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_free", nullptr));
     CHECK(rig.laneWholeWithin(2000));
     CHECK(rig.sink.count("/clockwork/asset/released", kSpider) == 0);
 }
@@ -235,7 +137,7 @@ TEST_CASE("front: a file that cannot be decoded fails to the asker, scsynth-styl
     const uint32_t before = rig.front.laneFreeBytes();
     REQUIRE(rig.ingress(allocRead(1, samplePath("no-such-file-here.wav"))));
     OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_allocRead", &fail));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_allocRead", &fail));
     // /fail ,ssi "/b_allocRead" why bufnum — the shape Sonic Pi's detect_fail matches.
     REQUIRE(fail.parsed().argCount() == 3);
     CHECK_FALSE(fail.parsed().argString(1).empty());
@@ -250,20 +152,17 @@ TEST_CASE("front: start and frame count are honoured, and a load replaces what t
     Rig rig;
     const std::string path = samplePath("bd_haus.flac");
     REQUIRE(rig.ingress(allocRead(2, path)));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     const uint32_t oneSlot = rig.front.laneBytes() - rig.front.laneFreeBytes();
     REQUIRE(oneSlot > 0);
 
-    rig.sink.sent.clear();
+    rig.sink.clear();
     REQUIRE(rig.ingress(allocRead(2, path, 100, 200)));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     CHECK(rig.queryFrames(2) == 200);
 
     // Only the new slot is held: the old one came back when the guest let it go.
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (rig.front.laneBytes() - rig.front.laneFreeBytes() >= oneSlot
-           && std::chrono::steady_clock::now() < deadline)
-        rig.idle();
+    rig.fx.pollUntil([&] { return rig.front.laneBytes() - rig.front.laneFreeBytes() < oneSlot; });
     CHECK(rig.front.laneBytes() - rig.front.laneFreeBytes() < oneSlot);
     // The /b_free the front issued to make room is its own affair.
     CHECK(rig.sink.count("/done", kSpider) == 1);
@@ -276,7 +175,7 @@ TEST_CASE("front: the completion message runs once the sample is in, after /done
     const auto completion = osc_test::message("/b_query", int32_t{3});
     REQUIRE(rig.ingress(allocRead(3, samplePath("bd_haus.flac"), 0, 0, &completion)));
     OscReply info;
-    REQUIRE(rig.sink.waitFor("/b_info", kSpider, nullptr, &info));
+    REQUIRE(rig.waitFor("/b_info", kSpider, nullptr, &info));
     CHECK(info.parsed().argInt(0) == 3);
     CHECK(info.parsed().argInt(1) > 0);   // queried AFTER the load: the frames are there
 
@@ -306,28 +205,27 @@ TEST_CASE("front: everything else passes through untouched", "[front]") {
     // Engine replies for buffers the front never loaded go on to the socket.
     const auto q = osc_test::message("/b_query", int32_t{9});
     rig.fx.engine().ingest(q.ptr(), q.size(), kSpider);
-    REQUIRE(rig.sink.waitFor("/b_info", kSpider, nullptr, nullptr));
+    REQUIRE(rig.waitFor("/b_info", kSpider, nullptr, nullptr));
 }
 
 TEST_CASE("front: the audio thread never carries the decode", "[front][load_sample]") {
-    // Where the decode runs, counted rather than timed (AudioThreadWitness.h): on the front's thread, never in a
+    // Where the decode runs, counted rather than timed (AudioThreadWitness.h): the front's work, never in a
     // block. This thread renders the blocks here (manualAudioPump), so a decode a block carried would be counted.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     Rig rig(cfg);
-    auto pump = [&] { rig.fx.pumpBlock(); };
     const uint64_t before = audio_thread_witness::fileWorkCount();
     REQUIRE(rig.ingress(allocRead(4, samplePath("bd_haus.flac"))));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000, pump));
-    for (int i = 0; i < 50; ++i) pump();
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000));
+    rig.fx.pumpBlock(50);
     CHECK(audio_thread_witness::fileWorkCount() == before);
     CHECK(rig.queryFrames(4) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
 }
 
 TEST_CASE("front: file work is counted on the audio thread, and only there", "[front]") {
     // The instrument the cases above and below read. rt_alloc's flag marks the audio thread while a block renders
-    // (process_audio's guard); file work outside it is the front's own thread's, and is not counted.
+    // (process_audio's guard); file work outside it, the front's, is not counted.
     const uint64_t before = audio_thread_witness::fileWorkCount();
     audio_thread_witness::fileWork();
     CHECK(audio_thread_witness::fileWorkCount() == before);
@@ -347,7 +245,7 @@ TEST_CASE("front, benchmark: blocks rendered while the front decodes stay within
     block_budget::requireWithin(block_budget::kBlockMs, [&] {
         ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
         cfg.manualAudioPump = true;   // this thread IS the audio thread
-        Rig rig(cfg);
+        Rig rig(cfg, Rig::Work::Own);
 
         double maxBlockMs = 0.0;
         auto pump = [&] {
@@ -359,7 +257,7 @@ TEST_CASE("front, benchmark: blocks rendered while the front decodes stay within
         for (int i = 0; i < 20; ++i) pump();
         REQUIRE(rig.ingress(allocRead(4, samplePath("bd_haus.flac"))));
         // The front decodes on its own thread while this one keeps rendering.
-        REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000, pump));
+        REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000));
         for (int i = 0; i < 50; ++i) pump();
 
         CHECK(rig.queryFrames(4) > 0);
@@ -379,13 +277,13 @@ TEST_CASE("front, benchmark: blocks rendered while the front decodes stay within
 namespace {
 // Whether `name` can be played: /s_new of an unknown synthdef fails.
 bool synthKnown(Rig& rig, const char* name, uint32_t token) {
-    rig.sink.sent.clear();
+    rig.sink.clear();
     osc_test::Builder b;
     b.begin("/s_new") << name << int32_t{-1} << int32_t{0} << int32_t{0};
     const auto m = b.end();
     rig.fx.engine().ingest(m.ptr(), m.size(), token);
     OscReply fail;
-    const bool failed = rig.sink.waitFor("/fail", token, "/s_new", &fail, 400, [&] { rig.fx.pumpBlock(); });
+    const bool failed = rig.waitFor("/fail", token, "/s_new", &fail, 400);
     rig.fx.engine().ingest(osc_test::message("/g_freeAll", int32_t{0}).ptr(),
                            osc_test::message("/g_freeAll", int32_t{0}).size(), token);
     return !failed;
@@ -425,7 +323,7 @@ std::filesystem::path biggestSynthDef(const std::filesystem::path& dir) {
 double singleDefBlockMs(const std::filesystem::path& def) {
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
-    Rig rig(cfg);
+    Rig rig(cfg, Rig::Work::Own);
     std::vector<uint8_t> bytes;
     {
         std::ifstream f(def, std::ios::binary);
@@ -437,7 +335,7 @@ double singleDefBlockMs(const std::filesystem::path& def) {
     for (int i = 0; i < 20; ++i) pump();
     const auto pkt = osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size());
     rig.fx.engine().ingest(pkt.ptr(), pkt.size(), kSpider);
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_recv", nullptr, 5000, pump));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_recv", nullptr, 5000, pump));
     return timer.maxMs;
 }
 } // namespace
@@ -457,24 +355,23 @@ TEST_CASE("front: the engine itself reads no sample files: a sample sent past th
     CHECK(rig.sink.count("/done", kSpider) == 0);
 }
 
-TEST_CASE("front: /d_loadDir reads the synthdefs on its own thread; no block carries the read",
+TEST_CASE("front: /d_loadDir reads the synthdefs off the audio thread; no block carries the read",
           "[front][synthdef]") {
-    // What keeps a block from carrying the directory, counted rather than timed: the files are read on the front's
-    // thread, never in a block (AudioThreadWitness.h; this thread renders the blocks, manualAudioPump), and the
+    // What keeps a block from carrying the directory, counted rather than timed: the files are read as the front's
+    // work, never in a block (AudioThreadWitness.h; this thread renders the blocks, manualAudioPump), and the
     // definitions go to the engine one at a time, the next only on the reply to the last, so no block parses more
     // than one.
     if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     Rig rig(cfg);
-    auto pump = [&] { rig.fx.pumpBlock(); };
     REQUIRE_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
 
     const uint64_t before = audio_thread_witness::fileWorkCount();
-    rig.sink.sent.clear();
+    rig.sink.clear();
     REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000, pump));
-    for (int i = 0; i < 50; ++i) pump();
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
+    rig.fx.pumpBlock(50);
     CHECK(audio_thread_witness::fileWorkCount() == before);
     CHECK(rig.front.defsInFlightPeak() == 1);
 
@@ -499,15 +396,15 @@ TEST_CASE("front, benchmark: blocks rendered while /d_loadDir loads stay within 
     block_budget::requireWithin(bar, [&] {
         ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
         cfg.manualAudioPump = true;
-        Rig rig(cfg);
+        Rig rig(cfg, Rig::Work::Own);
         REQUIRE_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
 
         BlockTimer timer;
         const auto pump = timer.pumpOf(rig);
-        rig.sink.sent.clear();
+        rig.sink.clear();
         REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
         OscReply done;
-        REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", &done, 30000, pump));
+        REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", &done, 30000, pump));
         for (int i = 0; i < 50; ++i) pump();
 
         // One /done for the whole directory — the /d_recv replies stayed behind
@@ -520,13 +417,31 @@ TEST_CASE("front, benchmark: blocks rendered while /d_loadDir loads stay within 
     });
 }
 
+TEST_CASE("front: on threads of its own, as the server runs it, a sample and a directory of definitions load",
+          "[front][rt]") {
+    // Every other case here runs the front's work on the test thread (FrontRig.h). The server runs it on the
+    // front's own worker, beside a device's audio thread: the hand-over between the two is this case's.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    Rig rig(EngineFixture::driverConfig());
+    REQUIRE(rig.work == Rig::Work::Own);
+
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr, 10000));
+    CHECK(rig.queryFrames(0) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
+
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+    CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
+}
+
 TEST_CASE("front: /d_load loads what its pattern matches, and says so in scsynth's words when nothing does",
           "[front][synthdef]") {
     if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
     Rig rig(cfg);
-    auto pump = [&] { rig.fx.pumpBlock(); };
     const std::string dir = CLOCKWORK_SYNTHDEFS_DIR;
 
     // A glob: the b's, not the p's.
@@ -535,29 +450,29 @@ TEST_CASE("front: /d_load loads what its pattern matches, and says so in scsynth
     b.begin("/d_load") << (dir + "/sonic-pi-b*.scsyndef").c_str()
                        << osc::Blob(completion.ptr(), completion.size());
     REQUIRE(rig.ingress(b.end()));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_load", nullptr, 10000, pump));
-    REQUIRE(rig.sink.waitFor("/b_info", kSpider, nullptr, nullptr, 2000, pump));   // the completion ran
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_load", nullptr, 10000));
+    REQUIRE(rig.waitFor("/b_info", kSpider, nullptr, nullptr, 2000));   // the completion ran
     CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
     CHECK_FALSE(synthKnown(rig, "sonic-pi-piano", kSpider));
 
     // A single file, no wildcard.
-    rig.sink.sent.clear();
+    rig.sink.clear();
     REQUIRE(rig.ingress(osc_test::message("/d_load", (dir + "/sonic-pi-piano.scsyndef").c_str())));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/d_load", nullptr, 5000, pump));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_load", nullptr, 5000));
     CHECK(synthKnown(rig, "sonic-pi-piano", kSpider));
 
     // Nothing matches: /fail "/d_load" <pattern>, as the engine used to say.
-    rig.sink.sent.clear();
+    rig.sink.clear();
     const std::string none = dir + "/no-such-*.scsyndef";
     REQUIRE(rig.ingress(osc_test::message("/d_load", none.c_str())));
     OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/d_load", &fail, 5000, pump));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/d_load", &fail, 5000));
     CHECK(fail.parsed().argString(1) == none);
 
     // A directory that is not there: /fail "/d_loadDir" <dir>.
-    rig.sink.sent.clear();
+    rig.sink.clear();
     REQUIRE(rig.ingress(osc_test::message("/d_loadDir", "/no/such/dir/anywhere")));
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/d_loadDir", &fail, 5000, pump));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/d_loadDir", &fail, 5000));
     CHECK(fail.parsed().argString(1) == "/no/such/dir/anywhere");
 }
 
@@ -617,7 +532,7 @@ TEST_CASE("front: /b_read fills an allocated buffer from the file, offsets honou
     b.begin("/b_read") << int32_t{3} << path.c_str() << int32_t{100} << int32_t{500} << int32_t{200} << int32_t{0};
     REQUIRE(rig.ingress(b.end()));
     OscReply done;
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_read", &done));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_read", &done));
     CHECK(done.parsed().argInt(1) == 3);
     const auto got = firstSamplesOf(rig, 3, (200 + 8) * ch);
     for (int32_t i = 0; i < 200 * ch; ++i) CHECK(got[i] == 0.0f);
@@ -641,18 +556,18 @@ TEST_CASE("front: /b_read refuses a channel mismatch and leaveOpen, as scsynth r
         REQUIRE(rig.ingress(b.end()));
     }
     OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_read", &fail));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_read", &fail));
     CHECK(fail.parsed().argString(1).find("Channel mismatch") != std::string::npos);
     CHECK(fail.parsed().argInt(2) == 4);
     CHECK(rig.laneWholeWithin(1000));
 
-    rig.sink.sent.clear();
+    rig.sink.clear();
     {
         osc_test::Builder b;
         b.begin("/b_read") << int32_t{4} << path.c_str() << int32_t{0} << int32_t{-1} << int32_t{0} << int32_t{1};
         REQUIRE(rig.ingress(b.end()));
     }
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_read", &fail));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_read", &fail));
     CHECK(fail.parsed().argString(1).find("leaveOpen") != std::string::npos);
 }
 
@@ -673,7 +588,7 @@ TEST_CASE("front: /b_readChannel and /b_allocReadChannel keep the channels named
         b.begin("/b_readChannel") << int32_t{5} << path.c_str() << int32_t{0} << int32_t{50} << int32_t{0} << int32_t{0} << int32_t{1};
         REQUIRE(rig.ingress(b.end()));
     }
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_readChannel", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_readChannel", nullptr));
     const auto mono = firstSamplesOf(rig, 5, 8);
     for (int32_t i = 0; i < 8; ++i) CHECK(mono[i] == Catch::Approx(file.samples[i * ch + 1]).margin(1e-6f));
 
@@ -684,7 +599,7 @@ TEST_CASE("front: /b_readChannel and /b_allocReadChannel keep the channels named
         REQUIRE(rig.ingress(b.end()));
     }
     OscReply done;
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocReadChannel", &done));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocReadChannel", &done));
     CHECK(done.parsed().argInt(1) == 6);
     CHECK(rig.queryFrames(6) == (int32_t)file.info.frames);
     const auto swapped = firstSamplesOf(rig, 6, 8);
@@ -694,14 +609,14 @@ TEST_CASE("front: /b_readChannel and /b_allocReadChannel keep the channels named
     }
 
     // A channel the file does not have is refused.
-    rig.sink.sent.clear();
+    rig.sink.clear();
     {
         osc_test::Builder b;
         b.begin("/b_allocReadChannel") << int32_t{7} << path.c_str() << int32_t{0} << int32_t{0} << int32_t{9};
         REQUIRE(rig.ingress(b.end()));
     }
     OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_allocReadChannel", &fail));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_allocReadChannel", &fail));
     CHECK(fail.parsed().argInt(2) == 7);
 }
 
@@ -712,7 +627,7 @@ TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded 
     const DecodedFile file = decodeFileFor(path);
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, path)));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     const uint32_t returnsWhole = rig.front.returnsFreeBytes();
     REQUIRE(returnsWhole > 0);
 
@@ -725,12 +640,12 @@ TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded 
     for (const auto& c : cases) {
         DYNAMIC_SECTION(c.header << " " << c.sample) {
             const std::string out = tempFile("front-b_write", c.ext);
-            rig.sink.sent.clear();
+            rig.sink.clear();
             osc_test::Builder b;
             b.begin("/b_write") << int32_t{0} << out.c_str() << c.header << c.sample << int32_t{-1} << int32_t{0} << int32_t{0};
             REQUIRE(rig.ingress(b.end()));
             OscReply done;
-            REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_write", &done, 10000));
+            REQUIRE(rig.waitFor("/done", kSpider, "/b_write", &done, 10000));
             CHECK(done.parsed().argInt(1) == 0);
             // The front's own /b_query stayed behind it.
             CHECK(rig.sink.count("/b_info", kSpider) == 0);
@@ -753,11 +668,11 @@ TEST_CASE("front: /b_write round-trips the buffer through WAV and FLAC, encoded 
     // A range: 100 frames from frame 50.
     {
         const std::string out = tempFile("front-b_write-range", "wav");
-        rig.sink.sent.clear();
+        rig.sink.clear();
         osc_test::Builder b;
         b.begin("/b_write") << int32_t{0} << out.c_str() << "wav" << "float" << int32_t{100} << int32_t{50} << int32_t{0};
         REQUIRE(rig.ingress(b.end()));
-        REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_write", nullptr, 10000));
+        REQUIRE(rig.waitFor("/done", kSpider, "/b_write", nullptr, 10000));
         const DecodedFile back = decodeFileFor(out);
         CHECK(back.info.frames == 100);
         const size_t ch = file.info.channels;
@@ -771,158 +686,134 @@ TEST_CASE("front: /b_write refuses a format the codecs cannot write, at once, an
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     const std::string out = tempFile("front-b_write", "mp3");
-    rig.sink.sent.clear();
+    rig.sink.clear();
     osc_test::Builder b;
     b.begin("/b_write") << int32_t{0} << out.c_str() << "mp3" << "int16" << int32_t{-1} << int32_t{0} << int32_t{0};
     REQUIRE(rig.ingress(b.end()));
     OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_write", &fail));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_write", &fail));
     CHECK(fail.parsed().argString(1).find("Cannot write") != std::string::npos);
     CHECK(fail.parsed().argInt(2) == 0);
     CHECK_FALSE(std::filesystem::exists(out));
     CHECK(rig.sink.count("/b_info", kSpider) == 0);
 }
 
-// What the engine pushes to its notify targets on a rebuild, as the fronted
-// transport hands it on (test_embedded_host.cpp has it arrive that way).
-osc_test::Packet setupPush() {
-    osc_test::Builder b;
-    b.begin("/clockwork/setup") << int32_t{44100} << int32_t{64} << int32_t{2};
-    return b.end();
+// A cold swap on the test's own thread, as a device change does it. The
+// rebuild's setup is on the instance's ring when this returns, and the front
+// hears it with the next pass, after anything the old instance said
+// (clockwork's docs/RESTARTS.md).
+void coldSwap(Rig& rig) {
+    const auto swap = rig.fx.engine().switchDevice("", 44100);
+    REQUIRE(swap.success);
+    REQUIRE(swap.type == SwapType::Cold);
 }
 
 TEST_CASE("front: a cold swap hands every slot back",
           "[front][load_sample][ColdSwap]") {
     // scsynth rebuilt is scsynth with no buffers: the engine never says /clockwork/asset/released for a World
-    // that is gone, so the front must hear the rebuild itself (/clockwork/setup, through the fronted transport's
+    // that is gone, so the front hears the rebuild itself (/clockwork/setup, through the fronted transport's
     // notice) or the lane fills with the slots of samples no one can play — as it did, two swaps in, in Sonic Pi.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     REQUIRE(rig.front.laneFreeBytes() < rig.front.laneBytes());
 
-    auto result = rig.fx.engine().switchDevice("", 44100);
-    REQUIRE(result.success);
-    REQUIRE(result.type == SwapType::Cold);
-    const auto setup = setupPush();
-    rig.front.notice(setup.ptr(), setup.size());
-    CHECK(rig.front.laneFreeBytes() == rig.front.laneBytes());
+    coldSwap(rig);
+    CHECK(rig.laneWholeWithin(100));
 
     // the new World takes a load as the first did (the first's /done forgotten, so the wait is for this one's)
-    { std::lock_guard<std::mutex> lock(rig.sink.mu); rig.sink.sent.clear(); }
+    rig.sink.clear();
     REQUIRE(rig.ingress(allocRead(1, samplePath("bd_haus.flac"))));
-    REQUIRE(rig.sink.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     CHECK(rig.queryFrames(1) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
     CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
 }
 
-TEST_CASE("front: a load in flight when the engine is rebuilt fails to its asker, and its slot is free",
+TEST_CASE("front: a load the new instance takes before the front hears of the rebuild is done, and its slot held",
           "[front][load_sample][ColdSwap]") {
-    // The sample is staged and committed, and the front is waiting for the engine to say it is in, when the World
-    // it was committed to goes. Nothing will ever say so: the asker is told, in scsynth's words, why its sample
-    // is not there, so it can ask the new World, and the slot goes back to the pool rather than waiting for a
-    // release that cannot come.
+    // The front hears setup when the reply pass hands it on, and the new instance can take a load before then: a
+    // load asked for as the swap ends goes to it. Setup comes first all the same (clockwork's docs/RESTARTS.md),
+    // so the load's answer is the new instance's, and the load is that instance's like any other.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
-    rig.holdCommitted = true;
+    REQUIRE(rig.testMovesAll());
+    coldSwap(rig);
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
-    // staged: the slot is taken before the commit is sent, and held until the engine answers
-    REQUIRE(rig.fx.pollUntil([&] { return rig.front.laneFreeBytes() < rig.front.laneBytes(); }, 5000));
-    // A rebuild comes after everything the old World said: the engine drains
-    // its replies before it takes the World down. Here the rebuild is a notice
-    // handed to the front by hand, so the case waits for the World's answer to
-    // the free that comes before a load, as the engine would have delivered it;
-    // handed over sooner, that answer arrived after the notice, and reached the
-    // asker as a /done it never asked for (a slow runner, 2026-10-11).
-    REQUIRE(rig.fx.pollUntil([&] { return rig.freesAnswered.load() >= 1; }, 5000));
-    CHECK(rig.sink.count("/done", kSpider) == 0);
+    rig.front.runPending();   // decoded, staged and committed, before the pass that hands on setup
+    rig.fx.pumpBlock();       // the new instance takes it; the pass hands on setup, then its answer
 
-    const auto setup = setupPush();
-    rig.front.notice(setup.ptr(), setup.size());
-    OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_allocRead", &fail));
-    CHECK(fail.parsed().argString(1).find("rebuilt") != std::string::npos);
-    CHECK(fail.parsed().argInt(2) == 0);
-    CHECK(rig.front.laneFreeBytes() == rig.front.laneBytes());
-    CHECK(rig.sink.count("/done", kSpider) == 0);
-    rig.holdCommitted = false;
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+    CHECK(rig.queryFrames(0) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
+    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
 }
 
-// What clockwork says for a message that reached it between instances
-// (clockwork's docs/RESTARTS.md): the refused address, the reason, and the
-// generation the refusal came from.
-osc_test::Packet refusal(const char* address, const char* reason) {
-    osc_test::Builder b;
-    b.begin("/clockwork/error") << address << reason << int32_t{3};
-    return b.end();
+TEST_CASE("front: a load the old instance took just before the rebuild is done to its asker, and its slot freed with the rest",
+          "[front][load_sample][ColdSwap]") {
+    // The old instance takes the commit, and the rebuild comes before the front has heard so. Its answer comes
+    // before setup all the same: the asker hears /done, and the slot goes back with the old instance's others.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    Rig rig;
+    REQUIRE(rig.testMovesAll());
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    rig.front.runPending();
+    rig.fx.engine().pumpAudioBlock();   // a block, with no reply pass after it: the answer waits on the ring
+    coldSwap(rig);
+
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+    CHECK(rig.laneWholeWithin(100));
+}
+
+TEST_CASE("front: a load whose commit is still waiting when the engine is rebuilt lands in the new instance",
+          "[front][load_sample][ColdSwap]") {
+    // Staged and committed, and the rebuild comes before any block has taken the commit. The front's /b_free of
+    // what the buffer held went to the old instance's World, and is refused with it; the commit is clockwork's
+    // own, an asset hand-off, and is carried to the new instance (clockwork's docs/RESTARTS.md). The load is the
+    // new instance's: the asker hears /done and nothing of the front's own free, and the slot stays held.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    Rig rig;
+    REQUIRE(rig.testMovesAll());
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    rig.front.runPending();   // the free and the commit, waiting in the in ring with no block to take them
+    coldSwap(rig);
+
+    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
+    CHECK(rig.queryFrames(0) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
+    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
+    rig.fx.pumpBlock(8);
+    std::lock_guard<std::mutex> lock(rig.sink.mu);
+    for (const auto& r : rig.sink.sent) {
+        if (r.token != kSpider) continue;
+        INFO("the asker heard " << r.reply.address);
+        CHECK(r.reply.address == "/done");
+    }
 }
 
 TEST_CASE("front: a definition load in flight when the engine is rebuilt fails to its asker, and sends no more",
           "[front][synthdef][ColdSwap]") {
     // The front hands a directory's definitions to the engine one /d_recv at a time, the next on the reply to the
     // last. When the World they are going into is torn down mid-way, the one in flight is refused by clockwork
-    // rather than answered by scsynth (every message that arrives while the engine rebuilds hears
-    // /clockwork/error). The definitions already in are gone with the old World and the rest have no World to go
-    // to: the whole load fails to its asker, in scsynth's words, so it asks the new World — nothing is sent on,
-    // and the asker never hears a /done for a directory the new World has none of.
+    // rather than answered by scsynth. The definitions already in are gone with the old World and the rest have no
+    // World to go to: the whole load fails to its asker, in scsynth's words, so it asks the new World — nothing is
+    // sent on, and the asker never hears a /done for a directory the new World has none of.
     if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
-    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
-    cfg.manualAudioPump = true;
-    Rig rig(cfg);
+    Rig rig;
+    REQUIRE(rig.testMovesAll());
     REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
-    // The first definition is with the engine, unanswered: no block renders unless this case asks for one.
-    {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-        while (rig.front.defsInFlightPeak() < 1 && std::chrono::steady_clock::now() < deadline)
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
+    rig.front.runPending();   // the first definition handed over, and no block to take it
     REQUIRE(rig.front.defsInFlightPeak() == 1);
-    CHECK(rig.sink.count("/fail", kSpider) == 0);
+    coldSwap(rig);
 
-    const auto refused = refusal("/d_recv", "rebuilding");
-    REQUIRE(rig.front.egress(kSpider, refused.ptr(), refused.size()));
     OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/d_loadDir", &fail, 5000, [] {}));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/d_loadDir", &fail));
     CHECK(fail.parsed().argString(1).find("rebuil") != std::string::npos);
-
-    // Nothing more goes to the engine for that load, and no /done for the
-    // directory follows the /fail once blocks render again (the new World's
-    // setup included). This rig's engine was never torn down, so it still
-    // answers the one definition it was handed; the front has no load for
-    // that answer and passes it on — a reply a real rebuild never sends.
-    const auto setup = setupPush();
-    rig.front.notice(setup.ptr(), setup.size());
-    for (int i = 0; i < 50; ++i) rig.fx.pumpBlock();
+    rig.fx.pumpBlock(50);
     CHECK(rig.front.defsInFlightPeak() == 1);
     CHECK(rig.sink.count("/fail", kSpider) == 1);
-    CHECK_FALSE(rig.sink.waitFor("/done", kSpider, "/d_loadDir", nullptr, 50, [] {}));
-}
-
-TEST_CASE("front: a sample commit the engine refused between instances fails to its asker, and its slot is free",
-          "[front][load_sample][ColdSwap]") {
-    // The same for a sample: staged and committed, the commit reached the engine while it was rebuilding, and
-    // clockwork refused it. The asker hears /fail in scsynth's words with the engine's reason, and the slot goes
-    // back to the pool — nothing will ever say /clockwork/asset/released for a commit no World took.
-    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
-    Rig rig;
-    rig.holdCommitted = true;
-    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
-    REQUIRE(rig.fx.pollUntil([&] { return rig.front.laneFreeBytes() < rig.front.laneBytes(); }, 5000));
-    REQUIRE(rig.fx.pollUntil([&] { return rig.freesAnswered.load() >= 1; }, 5000));
     CHECK(rig.sink.count("/done", kSpider) == 0);
-
-    const auto refused = refusal("/clockwork/asset/commit", "rebuilding");
-    REQUIRE(rig.front.egress(kSpider, refused.ptr(), refused.size()));
-    OscReply fail;
-    REQUIRE(rig.sink.waitFor("/fail", kSpider, "/b_allocRead", &fail));
-    CHECK(fail.parsed().argString(1).find("rebuilding") != std::string::npos);
-    CHECK(fail.parsed().argInt(2) == 0);
-    CHECK(rig.front.laneFreeBytes() == rig.front.laneBytes());
-    CHECK(rig.sink.count("/done", kSpider) == 0);
-    // Not ours twice: the same refusal again has nothing left to answer.
-    CHECK_FALSE(rig.front.egress(kSpider, refused.ptr(), refused.size()));
-    rig.holdCommitted = false;
+    CHECK_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
 }

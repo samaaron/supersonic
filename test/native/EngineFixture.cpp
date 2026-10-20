@@ -45,15 +45,26 @@ ClockworkEngine::Config EngineFixture::defaultConfig() {
     cfg.numOutputChannels = 2;
     cfg.numInputChannels  = 2;
     // Pumped: the test thread renders every block (manualAudioPump) on a
-    // clock that is the sample count (freewheelClock), so nothing a case
-    // asserts can depend on how a real-time driver was scheduled, or on a
-    // runner being busy. A case whose claim is about real time asks for the
-    // headless driver itself, and is tagged [rt]. SUPERSONIC_TEST_REALTIME=1
-    // runs the whole suite on the driver instead, the shape it once had.
+    // clock that is the sample count (freewheelClock), and runs the control
+    // pass after it (hostDrivesControl), so a reply is delivered when the test
+    // says rather than when the engine's gateway thread wakes: nothing a case
+    // asserts can depend on how a thread was scheduled, or on a runner being
+    // busy. A case whose claim is about real time asks for the headless
+    // driver itself, and is tagged [rt]. SUPERSONIC_TEST_REALTIME=1 runs the
+    // whole suite on the driver instead, the shape it once had.
     const char* realtime = std::getenv("SUPERSONIC_TEST_REALTIME");
     const bool pumped = !(realtime && *realtime == '1');
-    cfg.manualAudioPump = pumped;
-    cfg.freewheelClock  = pumped;
+    cfg.manualAudioPump   = pumped;
+    cfg.freewheelClock    = pumped;
+    cfg.hostDrivesControl = pumped;
+    return cfg;
+}
+
+ClockworkEngine::Config EngineFixture::driverConfig() {
+    ClockworkEngine::Config cfg = defaultConfig();
+    cfg.manualAudioPump   = false;
+    cfg.freewheelClock    = false;
+    cfg.hostDrivesControl = false;
     return cfg;
 }
 
@@ -65,12 +76,24 @@ EngineFixture::EngineFixture(const ClockworkEngine::Config& cfg) {
     init(cfg);
 }
 
-void EngineFixture::init(const ClockworkEngine::Config& cfg) {
+EngineFixture::EngineFixture(const ClockworkEngine::Config& cfg,
+                             const std::function<void(ClockworkEngine&)>& beforeBoot) {
+    init(cfg, beforeBoot);
+}
+
+void EngineFixture::init(const ClockworkEngine::Config& cfg,
+                         const std::function<void(ClockworkEngine&)>& beforeBoot) {
     static uint64_t sGeneration = 0;
     mGeneration = ++sGeneration;
     // In manual-pump mode there is no audio-driver thread; the wait primitives
     // drive process_audio on the test thread instead (see pollUntil/waitForReply).
     mManualPump = cfg.manualAudioPump;
+    mHostControl = cfg.hostDrivesControl;
+    // The fixture runs the control pass after the blocks the test renders, and
+    // only then: a driver's engine with it would never deliver a reply.
+    INFO("cfg.hostDrivesControl without cfg.manualAudioPump: nothing runs the control pass "
+         "(EngineFixture::driverConfig() is the driver's config)");
+    REQUIRE((!cfg.hostDrivesControl || cfg.manualAudioPump));
     mSampleRate = cfg.sampleRate;
 
     // Wire reply/debug callbacks before initialising
@@ -102,6 +125,7 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg) {
         mDebugMessages.push_back(msg);
     };
 
+    if (beforeBoot) beforeBoot(mEngine);
     mEngine.init(cfg);
 
     // Wait for the engine to be ready (a pumped one is pumped by the wait)
@@ -161,9 +185,26 @@ bool EngineFixture::waitForReply(const std::string& addr, OscReply& out,
         return false;
     };
 
-    // Manual-pump mode: the NRT gateway only delivers replies after the audio
-    // thread ticks, and nothing ticks unless we pump here on the test thread.
-    // Two budgets, audio and wall clock, both spent before giving up
+    // The test is the host: what it waits for comes from the blocks and passes
+    // it runs, so the wait is a count of them.
+    if (testIsTheHost()) {
+        for (uint32_t owed = blocksOfAudio(timeoutMs);; --owed) {
+            if (take()) return true;
+            if (!owed) {
+                // The caller's assertion expands to a bare "false"; say what we
+                // waited for and what did arrive, so a timeout separates "wrong
+                // reply" from "no reply at all" without a rerun.
+                UNSCOPED_INFO("waitForReply(\"" << addr << "\") gave up after "
+                              << timeoutMs << "ms of audio; replies held:" << repliesDump());
+                return false;
+            }
+            pumpBlock();
+        }
+    }
+
+    // Manual-pump mode with the engine's own gateway: it delivers replies after
+    // the audio thread ticks, and nothing ticks unless we pump here on the test
+    // thread. Two budgets, audio and wall clock, both spent before giving up
     // (pollUntil says why).
     if (testPumps()) {
         uint32_t owed = blocksOfAudio(timeoutMs);
@@ -220,22 +261,16 @@ bool EngineFixture::sendAndExpectDone(const osc_test::Packet& pkt,
 // every command completed inline, before the guest's off-thread stages. A
 // /done for an earlier command can now arrive later, so the name is checked.
 bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
-    const auto deadline = std::chrono::steady_clock::now()
-                        + std::chrono::milliseconds(timeoutMs);
-    while (true) {
-        if (testPumps()) pumpBlock();
-        {
-            std::lock_guard<std::mutex> lk(mReplyMutex);
-            for (auto it = mReplies.begin(); it != mReplies.end(); ++it) {
-                if (it->address != "/done") continue;
-                if (it->parsed().argCount() < 1 || it->parsed().argString(0) != cmd) continue;
-                mReplies.erase(it);
-                return true;
-            }
+    return pollUntil([&] {
+        std::lock_guard<std::mutex> lk(mReplyMutex);
+        for (auto it = mReplies.begin(); it != mReplies.end(); ++it) {
+            if (it->address != "/done") continue;
+            if (it->parsed().argCount() < 1 || it->parsed().argString(0) != cmd) continue;
+            mReplies.erase(it);
+            return true;
         }
-        if (std::chrono::steady_clock::now() >= deadline) return false;
-        std::this_thread::sleep_for(std::chrono::milliseconds(testPumps() ? 3 : 2));
-    }
+        return false;
+    }, timeoutMs);
 }
 
 uint32_t EngineFixture::blocksOfAudio(int ms) const {
@@ -315,7 +350,10 @@ void EngineFixture::stopHeadlessDriver() {
 
 void EngineFixture::pumpBlock(uint32_t n) {
     if (testPumps()) {
-        for (uint32_t i = 0; i < n; ++i) mEngine.pumpAudioBlock();
+        for (uint32_t i = 0; i < n; ++i) {
+            mEngine.pumpAudioBlock();
+            hostTurn();
+        }
         return;
     }
     // A driver thread or a Device is rendering: a block pumped here would be a
@@ -328,11 +366,33 @@ void EngineFixture::pumpBlock(uint32_t n) {
 void EngineFixture::pumpCallback(uint32_t frames, const std::function<void()>& afterEachBlock) {
     REQUIRE(testPumps());
     mEngine.pumpAudioCallback(frames, afterEachBlock);
+    hostTurn();
 }
 
 void EngineFixture::restartPump() {
     REQUIRE(testPumps());
     mEngine.restartManualPump();
+}
+
+void EngineFixture::setHostWork(std::function<void()> work) {
+    mHostWork = std::move(work);
+}
+
+void EngineFixture::hostTurn() {
+    if (mHostControl) mEngine.controlPass();
+    if (mHostWork) mHostWork();
+}
+
+void EngineFixture::waitForDeviceLane() {
+    // Sent so far reaches the lane: the block that forwards a control verb, and
+    // the pass that hands it over.
+    if (testIsTheHost()) pumpBlock();
+    // Shared, not on this stack: a lane that never gets to it runs it after
+    // the REQUIRE below has thrown.
+    auto done = std::make_shared<std::promise<void>>();
+    auto ran = done->get_future();
+    REQUIRE(mEngine.postDeviceTask([done] { done->set_value(); }));
+    REQUIRE(ran.wait_for(std::chrono::seconds(30)) == std::future_status::ready);
 }
 
 // Assertions stay on the test thread: Catch2's aren't safe from another.
@@ -363,6 +423,7 @@ EngineFixture::Device::Device(EngineFixture& fx, int sampleRate, uint32_t frames
                 mLateWakes.push_back({due, late / 1e9});
             }
             mFx.mEngine.pumpAudioCallback(frames, afterEachBlock);
+            mFx.hostTurn();
         }
     });
 }
@@ -371,6 +432,37 @@ EngineFixture::Device::~Device() {
     mStop.store(true, std::memory_order_relaxed);
     mThread.join();
     mFx.mDeviceRendering.store(false, std::memory_order_relaxed);
+}
+
+EngineFixture::HeldSwap::HeldSwap(EngineFixture& fx, const std::string& deviceName, double sampleRate) : mFx(fx) {
+    // The hook can run twice in a swap (a retry without the input), so it
+    // waits on a signal that, once given, stays given.
+    mFx.mEngine.testSwapFailure = [this](bool) -> std::string {
+        mEntered.store(true, std::memory_order_release);
+        mReleased.wait();
+        return "held open";
+    };
+    mThread = std::thread([this, deviceName, sampleRate] {
+        mResult = mFx.mEngine.switchDevice(deviceName, sampleRate);
+    });
+}
+
+EngineFixture::HeldSwap::~HeldSwap() {
+    release();
+}
+
+bool EngineFixture::HeldSwap::entered(int timeoutMs) {
+    return mFx.pollUntil([this] { return mEntered.load(std::memory_order_acquire); }, timeoutMs);
+}
+
+SwapResult EngineFixture::HeldSwap::release() {
+    if (!mJoined) {
+        mRelease.set_value();
+        mThread.join();
+        mJoined = true;
+        mFx.mEngine.testSwapFailure = nullptr;
+    }
+    return mResult;
 }
 
 // ── Synthdef helpers ─────────────────────────────────────────────────────────

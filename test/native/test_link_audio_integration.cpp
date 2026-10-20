@@ -203,9 +203,15 @@ float inBusFor(int32_t channel) {
 
 // Six input channels, as a device might have. A stream never lands on them:
 // the engine puts it in its Link Audio lanes, above every device channel.
+//
+// Link runs threads of its own and hears its peers over the network: what a
+// case here waits for needs real time, however fast the test renders. So the
+// engine's own gateway delivers, and the fixture's waits keep the wall clock
+// (EngineFixture::testIsTheHost).
 ClockworkEngine::Config linkInputConfig() {
     auto cfg = EngineFixture::defaultConfig();
-    cfg.numInputChannels = 6;
+    cfg.numInputChannels  = 6;
+    cfg.hostDrivesControl = false;
     return cfg;
 }
 

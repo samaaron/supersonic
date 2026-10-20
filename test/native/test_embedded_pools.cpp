@@ -21,10 +21,10 @@
 
 namespace {
 
-// The ESP32 firmware's original (tight) WorldOptions.
+// The ESP32 firmware's original (tight) WorldOptions, on the fixture's pumped
+// engine.
 ClockworkEngine::Config embeddedConfig() {
-    ClockworkEngine::Config cfg;
-    cfg.sampleRate            = 48000;
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.bufferSize            = 64;
     setGuestOption(cfg, "maxNodes", 256);
     setGuestOption(cfg, "numBuffers", 64);
@@ -32,9 +32,7 @@ ClockworkEngine::Config embeddedConfig() {
     setGuestOption(cfg, "maxWireBufs", 64);
     setGuestOption(cfg, "numAudioBusChannels", 64);
     setGuestOption(cfg, "numControlBusChannels", 256);
-    cfg.numOutputChannels     = 2;
     setGuestOption(cfg, "realTimeMemorySize", 128);   // KB — the tight RT pool
-    cfg.headless              = true;
     return cfg;
 }
 
