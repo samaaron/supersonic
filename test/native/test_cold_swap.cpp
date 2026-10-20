@@ -184,6 +184,22 @@ TEST_CASE("ColdSwap: no rate specified triggers hot swap", "[ColdSwap]") {
 
 // ── Concurrent rejection ─────────────────────────────────────────────────────
 
+// What the cases below stand on: the swap they hold open runs on a thread of
+// its own, which gets where it is going on real time however the engine is
+// driven, and later than a count of blocks pumps through on a loaded runner.
+TEST_CASE("ColdSwap: a case waits for its own thread on real time, even when it pumps the engine", "[ColdSwap]") {
+    EngineFixture fix;
+
+    std::atomic<bool> there{false};
+    std::thread late([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        there.store(true, std::memory_order_release);
+    });
+    const bool seen = fix.waitForThread([&] { return there.load(std::memory_order_acquire); }, 2000);
+    late.join();
+    CHECK(seen);
+}
+
 TEST_CASE("ColdSwap: concurrent swap is rejected", "[ColdSwap]") {
     EngineFixture fix;
 

@@ -452,7 +452,7 @@ EngineFixture::HeldSwap::~HeldSwap() {
 }
 
 bool EngineFixture::HeldSwap::entered(int timeoutMs) {
-    return mFx.pollUntil([this] { return mEntered.load(std::memory_order_acquire); }, timeoutMs);
+    return mFx.waitForThread([this] { return mEntered.load(std::memory_order_acquire); }, timeoutMs);
 }
 
 SwapResult EngineFixture::HeldSwap::release() {

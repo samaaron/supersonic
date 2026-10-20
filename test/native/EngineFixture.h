@@ -107,18 +107,17 @@ public:
                 pumpBlock();
             }
         }
-        const auto deadline = std::chrono::steady_clock::now()
-                            + std::chrono::milliseconds(timeoutMs);
-        uint32_t owed = testPumps() ? blocksOfAudio(timeoutMs) : 0;
-        while (true) {
-            // In manual-pump mode nothing advances the engine unless we do it
-            // here, on this thread — keeps the test the sole audio-thread writer.
-            if (owed) { pumpBlock(); --owed; }
-            if (pred()) return true;
-            if (!owed && std::chrono::steady_clock::now() >= deadline) return false;
-            std::this_thread::sleep_for(std::chrono::milliseconds(testPumps() ? 3 : 2));
-        }
+        return pollOnBothClocks(pred, timeoutMs);
     }
+
+    // Poll `pred()` for something a thread of the case's own does (a swap
+    // held open on one, HeldSwap): the engine pumped as pollUntil pumps it,
+    // and timeoutMs of wall clock as well, whoever the host is. That thread
+    // runs on real time however the engine is driven; a count of blocks,
+    // when the test is the host, pumped 30 s of audio in half a second on a
+    // loaded runner and gave up before the thread had been scheduled.
+    template <typename Pred>
+    bool waitForThread(Pred pred, int timeoutMs = 2000) { return pollOnBothClocks(pred, timeoutMs); }
 
     // The blocks the engine renders in `ms` of audio, at its rate and block size.
     uint32_t blocksOfAudio(int ms) const;
@@ -298,6 +297,23 @@ public:
     };
 
 private:
+    // pollUntil's two budgets (above): timeoutMs of audio, pumped a block a
+    // turn when the test pumps, and timeoutMs of wall clock.
+    template <typename Pred>
+    bool pollOnBothClocks(Pred pred, int timeoutMs) {
+        const auto deadline = std::chrono::steady_clock::now()
+                            + std::chrono::milliseconds(timeoutMs);
+        uint32_t owed = testPumps() ? blocksOfAudio(timeoutMs) : 0;
+        while (true) {
+            // In manual-pump mode nothing advances the engine unless we do it
+            // here, on this thread — keeps the test the sole audio-thread writer.
+            if (owed) { pumpBlock(); --owed; }
+            if (pred()) return true;
+            if (!owed && std::chrono::steady_clock::now() >= deadline) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(testPumps() ? 3 : 2));
+        }
+    }
+
     void init(const ClockworkEngine::Config& cfg, const std::function<void(ClockworkEngine&)>& beforeBoot = {});
     // The host's turn after a block or callback: the control pass, when the
     // test drives it, then the host work.
