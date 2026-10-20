@@ -467,6 +467,8 @@ test.describe("Flush Scheduler", () => {
       eval(config._helpers);
 
       const sonic = new window.SuperSonic(config);
+      const refusedStale = [];
+      sonic.on('in', (m) => { if (m[0] === "/clockwork/error" && m[2] === "stalled") refusedStale.push(m[1]); });
       await sonic.init();
       await sonic.loadSynthDefs(["sonic-pi-beep"]);
       await sonic.sync(1);
@@ -493,7 +495,8 @@ test.describe("Flush Scheduler", () => {
       // ~now + 0.1s) AND for their timestamps to become past-due
       await new Promise(r => setTimeout(r, 1500));
 
-      // Purge — should clear prescheduler heap, WASM scheduler, AND ring buffer
+      // Purge — clears the prescheduler heap and the WASM scheduler, and marks what waits in the ring buffer
+      // as stale, for the next block to refuse rather than play (clockwork's docs/RESTARTS.md, rule 1)
       await sonic.purge();
 
       // Resume
@@ -514,6 +517,7 @@ test.describe("Flush Scheduler", () => {
         processedBaseline,
         processedAfter,
         newProcessed: processedAfter - processedBaseline,
+        refusedStale: refusedStale.length,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
@@ -523,7 +527,8 @@ test.describe("Flush Scheduler", () => {
 
     // After purge, no stale bundles should fire — lates must not increase
     expect(result.newLates).toBe(0);
-    // No stale messages should have been processed from the ring buffer
-    expect(result.newProcessed).toBe(0);
+    // And none was dropped without a word: each of the bundles that waited in the ring buffer is refused to its
+    // sender as stale, by the block that takes it
+    expect(result.refusedStale).toBe(20);
   });
 });
