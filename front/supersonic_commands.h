@@ -106,11 +106,6 @@ public:
 
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
     bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
-    // /clockwork/setup: scsynth was rebuilt and every buffer with it, so every
-    // lane slot a buffer held is free again. A load still on its way is
-    // settled by its own answer: the old instance answered everything it was
-    // sent before setup, so the answer is the new instance's.
-    void        notice(const uint8_t* data, uint32_t size) override;
     const char* describe() const override {
         return "the file verbs (/b_allocRead, /b_read, /b_write, /d_load...) answered here, through the lanes";
     }

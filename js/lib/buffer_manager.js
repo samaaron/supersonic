@@ -185,7 +185,12 @@ export class BufferManager {
             arrayBuffer = source instanceof ArrayBuffer
                 ? source
                 : source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength);
-            sourceInfo = null;
+            // In postMessage mode the frames live in the worklet's memory, which a reload does not keep: the bytes
+            // are kept to load them from again (SuperSonic.restoreClientState), as a file is loaded again from its
+            // path. A copy, because decoding takes the buffer it is given.
+            sourceInfo = this.#mode === 'postMessage'
+                ? { type: 'bytes', bytes: arrayBuffer.slice(0), startFrame, numFrames, channels }
+                : null;
         }
 
         const audioBuffer = await this.#decodeAudioData(arrayBuffer);
@@ -407,7 +412,7 @@ export class BufferManager {
 
         const decoded = await this.#fetchAndDecode({ source: blob, startFrame, numFrames, channels });
 
-        return this.#executeBufferOperationWithHash(bufnum, 30000, decoded, null);
+        return this.#executeBufferOperationWithHash(bufnum, 30000, decoded, decoded.sourceInfo);
     }
 
     async prepareFromFile(params) {
@@ -578,8 +583,9 @@ export class BufferManager {
             previousAllocation: previousEntry
                 ? { ptr: previousEntry.ptr, size: previousEntry.size }
                 : null,
-            // postMessage mode: keep source info for recovery (re-load from path)
-            // SAB mode: the frames persist in the SharedArrayBuffer; a reload re-commits them
+            // Where it came from. postMessage mode loads it again from there after a reload, the worklet's memory
+            // having gone with it; in SAB mode the frames stay where they are, and the engine hands them to a new
+            // instance itself.
             source: metadata.source || null
         };
         this.#allocatedBuffers.set(bufnum, entry);
@@ -791,22 +797,15 @@ export class BufferManager {
     }
 
     /**
-     * Get all allocated buffers for recovery
-     * SAB mode: returns what a re-commit needs (the frames persist in the SharedArrayBuffer)
-     * postMessage mode: returns source info for re-loading (WASM memory destroyed)
-     * @returns {Array<{bufnum, ptr, numFrames, numChannels, sampleRate, source?}>}
+     * What is loaded, by buffer number: its shape, where it came from, and its content hash.
+     * @returns {Array<{bufnum, numFrames, numChannels, sampleRate, source, hash}>}
      */
     getAllocatedBuffers() {
         const buffers = [];
         for (const [bufnum, entry] of this.#allocatedBuffers.entries()) {
             if (!entry || !entry.ptr) continue;
-            const laneOffset = entry.ptr - this.#clockwork.assets().offset;
             buffers.push({
                 bufnum,
-                ptr: entry.ptr,
-                laneOffset,
-                payloadOffset: laneOffset + this.GUARD_BEFORE * (entry.numChannels || 1) * 4,
-                byteCount: (entry.numFrames || 0) * (entry.numChannels || 1) * 4,
                 numFrames: entry.numFrames,
                 numChannels: entry.numChannels,
                 sampleRate: entry.sampleRate,

@@ -39,7 +39,7 @@ supersonic.on("setup", async () => {
 });
 ```
 
-**Why `setup` instead of `ready`?** When `recover()` falls through to a full `reload()`, WASM memory is destroyed and recreated, so all nodes are lost. The `setup` event lets you rebuild consistently on both initial boot and after recovery, regardless of transport mode. See [Communication Modes](MODES.md) for more on SAB vs postMessage.
+**Why `setup` instead of `ready`?** When `recover()` falls through to a full `reload()`, the engine may come back new, with no nodes: always in postMessage mode, whose worklet takes its memory with it, and in SAB mode when the new audio context runs at another sample rate. `setup` fires whenever the engine is new — the initial boot included — and not when a reload carried the engine on with everything built on it, so rebuilding in `setup` is right on every path, in either transport mode. See [Communication Modes](MODES.md) for more on SAB vs postMessage.
 
 ### Tab Visibility & Recovery
 

@@ -710,34 +710,40 @@ void coldSwap(Rig& rig) {
     REQUIRE(swap.type == SwapType::Cold);
 }
 
-TEST_CASE("front: a cold swap hands every slot back",
+TEST_CASE("front: a sample loaded before a cold swap is loaded after it, its slot still held",
           "[front][load_sample][ColdSwap]") {
-    // scsynth rebuilt is scsynth with no buffers: the old instance releases its assets as it goes
-    // (/clockwork/asset/released, ahead of setup), and a slot whose release found no room on the ring goes back
-    // when the front hears setup (the fronted transport's notice) — or the lane fills with the slots of samples no
-    // one can play, as it did, two swaps in, in Sonic Pi.
+    // The frames are the front's, in the lane a rebuild keeps, and the engine hands the new World every asset the
+    // old one held (clockwork's docs/RESTARTS.md): nothing is loaded again, and the slot is held until the buffer
+    // is freed, as before the swap.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    const auto frames = static_cast<int32_t>(framesOf(samplePath("bd_haus.flac")));
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
     REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
-    REQUIRE(rig.front.laneFreeBytes() < rig.front.laneBytes());
+    const uint32_t held = rig.front.laneFreeBytes();
+    REQUIRE(held < rig.front.laneBytes());
 
     coldSwap(rig);
-    CHECK(rig.laneWholeWithin(100));
+    CHECK(rig.queryFrames(0) == frames);
+    CHECK(rig.front.laneFreeBytes() == held);
 
     // the new World takes a load as the first did (the first's /done forgotten, so the wait is for this one's)
     rig.sink.clear();
     REQUIRE(rig.ingress(allocRead(1, samplePath("bd_haus.flac"))));
     REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
-    CHECK(rig.queryFrames(1) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
-    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
+    CHECK(rig.queryFrames(1) == frames);
+
+    // and freeing the two gives their slots back, the one from before the swap included
+    rig.fx.send(osc_test::message("/b_free", int32_t{0}));
+    rig.fx.send(osc_test::message("/b_free", int32_t{1}));
+    CHECK(rig.laneWholeWithin(100));
 }
 
 TEST_CASE("front: a load the new instance takes before the front hears of the rebuild is done, and its slot held",
           "[front][load_sample][ColdSwap]") {
-    // The front hears setup when the reply pass hands it on, and the new instance can take a load before then: a
-    // load asked for as the swap ends goes to it. Setup comes first all the same (clockwork's docs/RESTARTS.md),
-    // so the load's answer is the new instance's, and the load is that instance's like any other.
+    // A load asked for as the swap ends goes to the new instance, before the reply pass has handed on its setup.
+    // Setup comes first all the same (clockwork's docs/RESTARTS.md), so the load's answer is the new instance's, and
+    // the load is that instance's like any other.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.testMovesAll());
@@ -752,10 +758,11 @@ TEST_CASE("front: a load the new instance takes before the front hears of the re
     CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
 }
 
-TEST_CASE("front: a load the old instance took just before the rebuild is done to its asker, and its slot freed with the rest",
+TEST_CASE("front: a load the old instance took just before the rebuild is done to its asker, and the new instance has it",
           "[front][load_sample][ColdSwap]") {
     // The old instance takes the commit, and the rebuild comes before the front has heard so. Its answer comes
-    // before setup all the same: the asker hears /done, and the slot goes back with the old instance's others.
+    // before setup all the same: the asker hears /done, and the buffer is handed to the new instance with the old
+    // one's others, its slot held.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.testMovesAll());
@@ -766,7 +773,8 @@ TEST_CASE("front: a load the old instance took just before the rebuild is done t
 
     REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
     CHECK(rig.sink.count("/fail", kSpider) == 0);
-    CHECK(rig.laneWholeWithin(100));
+    CHECK(rig.queryFrames(0) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
+    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
 }
 
 TEST_CASE("front: a load whose commit is still waiting when the engine is rebuilt fails to its asker, and its slot goes back",

@@ -941,7 +941,8 @@ export interface SuperSonicEventMap {
    * Fired after init completes, before `'ready'`.
    * Use for setting up groups, FX chains, and bus routing.
    * Can be async — init waits for all setup handlers to resolve; one that throws is reported on `'error'`.
-   * Also fires after a `reload()`, including one `recover()` falls back to.
+   * Also fires after a `reload()` that built a new engine, including one `recover()` falls back to. A reload
+   * that carried the engine on (`resumed` on `'reload:complete'`) kept everything built on it, and does not fire it.
    */
   'setup': () => void | Promise<void>;
 
@@ -999,8 +1000,11 @@ export interface SuperSonicEventMap {
   /** Full reload started (worklet and WASM will be recreated). */
   'reload:start': () => void;
 
-  /** Full reload completed, or failed (`success: false`, with the error). */
-  'reload:complete': (data: { success: boolean; error?: Error }) => void;
+  /**
+   * Full reload completed, or failed (`success: false`, with the error). `resumed`: the engine carried on in the
+   * memory it ran in, with everything it held — nodes, synthdefs, buffers — and nothing was put back.
+   */
+  'reload:complete': (data: { success: boolean; resumed?: boolean; error?: Error }) => void;
 
   /** A reload failed. What it built has been taken down; `reload()` and `recover()` answer false. */
   'reload:failed': (data: { error: Error }) => void;
@@ -1605,11 +1609,17 @@ export class SuperSonic {
   suspend(): Promise<void>;
 
   /**
-   * Full reload — destroys and recreates the worklet and WASM, then restores
-   * all previously loaded synthdefs and audio buffers.
+   * Full reload — recreates the worklet and WASM, and brings the engine back
+   * doing as little as it can. In SAB mode the engine's memory is kept, and
+   * the engine carries on in it as it was — nodes, synthdefs and buffers all
+   * still there — unless the context it comes back on runs at another sample
+   * rate, when a new engine is built. A new engine (always, in postMessage
+   * mode, whose worklet takes its memory with it) has every previously
+   * loaded synthdef and audio buffer put back.
    *
-   * Emits `'reload:start'`, then `'setup'` (so you can rebuild groups, FX
-   * chains, and bus routing), `'ready'` and `'reload:complete'`. On failure
+   * Emits `'reload:start'`, then, for a new engine, `'setup'` (so you can
+   * rebuild groups, FX chains, and bus routing), then `'ready'` and
+   * `'reload:complete'` (with `resumed: true` when the engine carried on). On failure
    * it takes down what it built, emits `'reload:failed'` and
    * `'reload:complete'` with `success: false`, and resolves to false.
    * A call while a reload is under way gets that reload.

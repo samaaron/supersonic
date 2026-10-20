@@ -133,10 +133,11 @@ TEST_CASE("scsynth options as a struct round-trip through the guest's text", "[e
 #define CLOCKWORK_SAMPLES_DIR ""
 #endif
 
-TEST_CASE("embedded host: a rebuild reaches the front through the engine's own push, and the lane is free again",
+TEST_CASE("embedded host: a sample loaded before a rebuild is the new instance's, and freeing it gives its slot back",
           "[embedded][ColdSwap][load_sample]") {
-    // The whole path, with nothing called by hand: the engine rebuilds, pushes /clockwork/setup to its notify
-    // targets, the fronted transport lets the front hear it on the way, and the sample's slot is given back.
+    // The whole path, with nothing called by hand: the engine rebuilds and hands the new instance every asset the
+    // old one held (clockwork's docs/RESTARTS.md), so the sample's slot in the lane stays held, the new World plays
+    // from it, and freeing the buffer there gives the slot back.
     const std::string sample = std::string(CLOCKWORK_SAMPLES_DIR) + "/bd_haus.flac";
     if (!std::filesystem::exists(sample)) SKIP("sample bd_haus.flac not found");
     supersonic::EmbeddedHost host;
@@ -151,11 +152,29 @@ TEST_CASE("embedded host: a rebuild reaches the front through the engine's own p
     const auto load = b.end();
     REQUIRE(host.send(load.ptr(), load.size()));
     REQUIRE(replies.waitFor("/done"));
-    REQUIRE(host.front().laneFreeBytes() < host.front().laneBytes());
+    const uint32_t held = host.front().laneFreeBytes();
+    REQUIRE(held < host.front().laneBytes());
 
     const auto result = host.engine().switchDevice("", 44100);
     REQUIRE(result.success);
     REQUIRE(result.type == SwapType::Cold);
+    CHECK(host.front().laneFreeBytes() == held);
+
+    const auto query = osc_test::message("/b_query", int32_t{0});
+    REQUIRE(host.send(query.ptr(), query.size()));
+    REQUIRE(replies.waitFor("/b_info"));
+    int32_t frames = 0;
+    {
+        std::lock_guard<std::mutex> lk(replies.mut);
+        for (const auto& r : replies.all) {
+            const auto p = osc_test::parseReply(r.data(), static_cast<uint32_t>(r.size()));
+            if (p.address == "/b_info" && p.argInt(0) == 0) frames = p.argInt(1);
+        }
+    }
+    CHECK(frames > 0);
+
+    const auto free = osc_test::message("/b_free", int32_t{0});
+    REQUIRE(host.send(free.ptr(), free.size()));
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (host.front().laneFreeBytes() != host.front().laneBytes()
            && std::chrono::steady_clock::now() < deadline)

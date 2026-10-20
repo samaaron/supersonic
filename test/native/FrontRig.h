@@ -3,9 +3,9 @@
 /*
  * FrontRig.h — supersonic::Commands around an in-process engine, wired as the
  * server wires it (SuperSonicMain.cpp): the engine's transport is clockwork's
- * FrontedTransport, so every reply is offered to the front first and every
- * notice (setup) is heard by it, in the order the engine delivers them, and a
- * recording sink stands in for the socket.
+ * FrontedTransport, so every reply is offered to the front first, in the
+ * order the engine delivers them, and a recording sink stands in for the
+ * socket.
  *
  * When the test is the host (EngineFixture::testIsTheHost, the default), the
  * front starts no threads (Commands::Work::Host): its file jobs and a

@@ -467,13 +467,17 @@ export class SuperSonic extends Clockwork {
   }
 
   /**
-   * Put the sample buffers back after a reload.
+   * Put back what a new instance was not given, after a reload.
    *
-   * The frames themselves are still in guest memory — a reload rebuilds the
-   * engine, not the region — so this only has to hand the engine the pointers
-   * again. In postMessage mode a buffer that came from a file is reloaded
-   * from it instead, because the client's pool there is bookkeeping and the
-   * worklet's heap went with the engine.
+   * A reload that carried the instance on (over the memory it ran in, nothing
+   * it was built for changed) lost nothing, and clockwork does not call this.
+   * A new instance has none of scsynth's own state, so the definitions go
+   * back. The samples are the client's: in SAB mode their frames are still in
+   * the assets area, and the engine hands every one the last instance held to
+   * the new one itself. In postMessage mode the worklet's memory went with
+   * it, frames and all, so each is loaded again from where it came from — a
+   * file from its path, bytes from the copy kept of them — into a pool for
+   * the new memory.
    */
   async restoreClientState() {
     // The reload may have made a new audio context (clockwork's own, when it made the last one): the buffers are
@@ -491,19 +495,16 @@ export class SuperSonic extends Clockwork {
       }
     }
 
-    const buffers = this.#bufferManager?.getAllocatedBuffers() || [];
-    for (const buf of buffers) {
+    if (this.mode !== "postMessage") return;
+    const loaded = this.#bufferManager?.getAllocatedBuffers() || [];
+    this.#forgetBuffers();
+    for (const { bufnum, source } of loaded) {
+      if (!source) continue;
       try {
-        if (this.mode === "postMessage" && buf.source?.type === "file") {
-          await this.loadSample(buf.bufnum, buf.source.path,
-                                buf.source.startFrame || 0, buf.source.numFrames || 0);
-        } else {
-          // the frames are still in the assets area: the rebuilt engine is bound to them again
-          await this.send("/clockwork/asset/commit", buf.bufnum, 1, buf.payloadOffset, buf.byteCount,
-                          buf.numChannels, buf.numFrames, buf.sampleRate);
-        }
+        await this.loadSample(bufnum, source.type === "file" ? source.path : source.bytes,
+                              source.startFrame || 0, source.numFrames || 0);
       } catch (e) {
-        console.error(`[SuperSonic] buffer ${buf.bufnum} did not survive the reload:`, e);
+        console.error(`[SuperSonic] buffer ${bufnum} did not survive the reload:`, e);
       }
     }
   }
@@ -518,13 +519,17 @@ export class SuperSonic extends Clockwork {
    */
   async shutdown(...args) {
     this.#loadedSynthDefs.clear();
-    // and what was allocated: the buffer manager belongs to the engine it was built against (its memory, its pool, its
-    // table of buffers), so the next engine gets a new one, built on first use as the first did
+    this.#forgetBuffers();
+    return super.shutdown(...args);
+  }
+
+  // The buffer manager belongs to the memory it was built against (its pool, its table of buffers): memory that has
+  // gone gets a new one, built on first use as the first was.
+  #forgetBuffers() {
     if (this.#onBufferReply) this.off("in:osc", this.#onBufferReply);
     this.#onBufferReply = null;
     this.#bufferManager = null;
     this.#rewriter = null;
-    return super.shutdown(...args);
   }
 
   /** Settle any queued buffer commands — tests and shutdown both need this. */

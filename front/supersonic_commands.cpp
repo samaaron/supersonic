@@ -521,20 +521,6 @@ void Commands::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
 
-void Commands::notice(const uint8_t* data, uint32_t size) {
-    if (!isMessage(data, size, "/clockwork/setup")) return;
-    // The guest is new: nothing the old one held is held. The old instance
-    // released its assets as it went (/clockwork/asset/released, ahead of
-    // setup); a slot still held here is one whose release the ring had no
-    // room for, and goes back to the pool now. Nothing else is settled here: everything the old instance was sent is answered or
-    // refused before setup (clockwork's docs/RESTARTS.md), so an ask still
-    // waiting now went to the new instance, or has yet to go, and its own
-    // answer settles it.
-    std::lock_guard<std::mutex> lock(mMut);
-    if (mPool) for (auto& live : mLive) clockwork_asset_pool_free(mPool, live.second);
-    mLive.clear();
-}
-
 bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
     if (token == kFreeToken) return true;   // what is said to the front's own frees is the front's, and goes no further
     if (size < 8 || data[0] != '/') return false;
