@@ -588,7 +588,9 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
 
     // A refusal of anything else we had in flight on this token — a sample's
     // commit, a read, a query, a publish — fails that ask to its asker, in
-    // scsynth's words, and frees what the ask held. Not ours: left for
+    // scsynth's words, and frees what the ask held: the oldest such ask, since
+    // a refusal names the message and not which ask sent it, and clockwork
+    // refuses what waited in the order it was sent. Not ours: left for
     // whoever is.
     if (kind == Error) {
         // A definition refused is not one scsynth skipped (its own /fail,
@@ -625,23 +627,18 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         else if (cmd == "/b_query")                   what = Pending::WriteQuery;
         else if (cmd == "/supersonic/buffer/publish") what = Pending::WritePublish;
         if (what < 0) return false;
-        std::vector<std::pair<uint32_t, Pending>> failed;
+        Pending failed;
         {
             std::lock_guard<std::mutex> lock(mMut);
-            for (auto it = mPending.begin(); it != mPending.end();) {
-                if (it->token == token && it->what == what) {
-                    if (mPool && (it->what == Pending::Commit || it->what == Pending::ReadInto))
-                        clockwork_asset_pool_free(mPool, it->slot);
-                    failed.emplace_back(it->token, std::move(*it));
-                    it = mPending.erase(it);
-                } else {
-                    ++it;
-                }
-            }
+            auto it = std::find_if(mPending.begin(), mPending.end(),
+                                   [&](const Pending& p) { return p.token == token && p.what == what; });
+            if (it == mPending.end()) return false;
+            if (mPool && (it->what == Pending::Commit || it->what == Pending::ReadInto))
+                clockwork_asset_pool_free(mPool, it->slot);
+            failed = std::move(*it);
+            mPending.erase(it);
         }
-        if (failed.empty()) return false;
-        for (auto& f : failed)
-            sendFail(f.first, f.second.cmd.c_str(), "the engine refused it: " + why, f.second.bufnum);
+        sendFail(token, failed.cmd.c_str(), "the engine refused it: " + why, failed.bufnum);
         return true;
     }
     // /d_recv replies: the definition in flight for that token, oldest load

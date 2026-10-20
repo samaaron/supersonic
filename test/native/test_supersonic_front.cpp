@@ -712,9 +712,10 @@ void coldSwap(Rig& rig) {
 
 TEST_CASE("front: a cold swap hands every slot back",
           "[front][load_sample][ColdSwap]") {
-    // scsynth rebuilt is scsynth with no buffers: the engine never says /clockwork/asset/released for a World
-    // that is gone, so the front hears the rebuild itself (/clockwork/setup, through the fronted transport's
-    // notice) or the lane fills with the slots of samples no one can play — as it did, two swaps in, in Sonic Pi.
+    // scsynth rebuilt is scsynth with no buffers: the old instance releases its assets as it goes
+    // (/clockwork/asset/released, ahead of setup), and a slot whose release found no room on the ring goes back
+    // when the front hears setup (the fronted transport's notice) — or the lane fills with the slots of samples no
+    // one can play, as it did, two swaps in, in Sonic Pi.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
@@ -768,12 +769,12 @@ TEST_CASE("front: a load the old instance took just before the rebuild is done t
     CHECK(rig.laneWholeWithin(100));
 }
 
-TEST_CASE("front: a load whose commit is still waiting when the engine is rebuilt lands in the new instance",
+TEST_CASE("front: a load whose commit is still waiting when the engine is rebuilt fails to its asker, and its slot goes back",
           "[front][load_sample][ColdSwap]") {
-    // Staged and committed, and the rebuild comes before any block has taken the commit. The front's /b_free of
-    // what the buffer held went to the old instance's World, and is refused with it; the commit is clockwork's
-    // own, an asset hand-off, and is carried to the new instance (clockwork's docs/RESTARTS.md). The load is the
-    // new instance's: the asker hears /done and nothing of the front's own free, and the slot stays held.
+    // Staged and committed, and the rebuild comes before any block has taken the commit. The commit hands the old
+    // instance an asset, so it was written for that instance as much as scsynth's own messages beside it, and is
+    // refused with them (clockwork's docs/RESTARTS.md, rule 2): the load fails to its asker in scsynth's words, its
+    // slot goes back, and the asker hears none of clockwork's refusals — of the commit, or of the front's own free.
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     Rig rig;
     REQUIRE(rig.testMovesAll());
@@ -781,16 +782,34 @@ TEST_CASE("front: a load whose commit is still waiting when the engine is rebuil
     rig.front.runPending();   // the free and the commit, waiting in the in ring with no block to take them
     coldSwap(rig);
 
-    REQUIRE(rig.waitFor("/done", kSpider, "/b_allocRead", nullptr));
-    CHECK(rig.queryFrames(0) == static_cast<int32_t>(framesOf(samplePath("bd_haus.flac"))));
-    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
+    OscReply fail;
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_allocRead", &fail));
+    CHECK(fail.parsed().argString(1).find("rebuil") != std::string::npos);
+    CHECK(rig.laneWholeWithin(100));
     rig.fx.pumpBlock(8);
-    std::lock_guard<std::mutex> lock(rig.sink.mu);
-    for (const auto& r : rig.sink.sent) {
-        if (r.token != kSpider) continue;
-        INFO("the asker heard " << r.reply.address);
-        CHECK(r.reply.address == "/done");
-    }
+    CHECK(rig.sink.count("/fail", kSpider) == 1);
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+    CHECK(rig.sink.count("/clockwork/error", kSpider) == 0);
+}
+
+TEST_CASE("front: loads whose commits are waiting when the engine is rebuilt each fail to their asker once",
+          "[front][load_sample][ColdSwap]") {
+    // A refusal names the message it refuses, not the load that sent it. Clockwork refuses what waited in the order
+    // it was sent, so each refusal settles the oldest load still waiting for its commit's answer, and every one is
+    // the front's to settle: none reaches the asker as clockwork's.
+    if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
+    Rig rig;
+    REQUIRE(rig.testMovesAll());
+    REQUIRE(rig.ingress(allocRead(0, samplePath("bd_haus.flac"))));
+    REQUIRE(rig.ingress(allocRead(1, samplePath("bd_haus.flac"))));
+    rig.front.runPending();
+    coldSwap(rig);
+
+    REQUIRE(rig.waitFor("/fail", kSpider, "/b_allocRead", nullptr));
+    rig.fx.pumpBlock(8);
+    CHECK(rig.sink.count("/fail", kSpider) == 2);
+    CHECK(rig.sink.count("/clockwork/error", kSpider) == 0);
+    CHECK(rig.laneWholeWithin(100));
 }
 
 TEST_CASE("front: a definition load in flight when the engine is rebuilt fails to its asker, and sends no more",
