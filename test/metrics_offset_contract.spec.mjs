@@ -68,6 +68,7 @@ const CPP_TO_JS = {
   guest_mallocs_processing:      'GUEST_MALLOCS_PROCESSING',
   mallocs_after_boot:            'MALLOCS_AFTER_BOOT',
   malloc_bytes_after_boot:       'MALLOC_BYTES_AFTER_BOOT',
+  egress_frames_undelivered:     'EGRESS_FRAMES_UNDELIVERED',
 };
 
 // Pure padding slots — asserted in C++ for alignment but have no JS counterpart.

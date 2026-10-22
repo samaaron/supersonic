@@ -42,8 +42,8 @@ struct RecordingSink final : IOscTransport {
         sent.push_back({ token, OscReply{ osc_test::parseAddress(d, n), std::vector<uint8_t>(d, d + n) } });
         return true;
     }
-    void broadcastNotify(const uint8_t*, uint32_t) override {}
-    void broadcastLink(const uint8_t*, uint32_t) override {}
+    uint32_t broadcastNotify(const uint8_t*, uint32_t) override { return 0; }
+    uint32_t broadcastLink(const uint8_t*, uint32_t) override { return 0; }
     bool hasNotifySubscribers() const override { return false; }
     bool subscribeNotify(uint32_t) override { return false; }
     bool subscribeNotifyPort(int) override { return false; }
@@ -51,10 +51,10 @@ struct RecordingSink final : IOscTransport {
     void clearNotify() override {}
     bool subscribeLink(uint32_t) override { return false; }
     void unsubscribeLink(uint32_t) override {}
-    void broadcastMidi(const uint8_t*, uint32_t) override {}
+    uint32_t broadcastMidi(const uint8_t*, uint32_t) override { return 0; }
     bool subscribeMidi(uint32_t) override { return false; }
     void unsubscribeMidi(uint32_t) override {}
-    void broadcastGamepad(const uint8_t*, uint32_t) override {}
+    uint32_t broadcastGamepad(const uint8_t*, uint32_t) override { return 0; }
     bool subscribeGamepad(uint32_t) override { return false; }
     void unsubscribeGamepad(uint32_t) override {}
 

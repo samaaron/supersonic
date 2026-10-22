@@ -33,9 +33,11 @@ class CallbackPeerTransport final : public IOscTransport {
 public:
     explicit CallbackPeerTransport(EmbeddedHost::Callbacks* cb) : mCb(cb) {}
 
+    // The application is the one peer: a send reaches it or not, and a
+    // broadcast meant for it misses it when there is no callback to take it.
     bool send(uint32_t, const uint8_t* data, uint32_t size, bool /*networkOnly*/) override { return deliver(data, size); }
-    void broadcastNotify(const uint8_t* data, uint32_t size) override { deliver(data, size); }
-    void broadcastLink(const uint8_t* data, uint32_t size) override { if (mLink.load()) deliver(data, size); }
+    uint32_t broadcastNotify(const uint8_t* data, uint32_t size) override { return deliver(data, size) ? 0 : 1; }
+    uint32_t broadcastLink(const uint8_t* data, uint32_t size) override { return broadcastIf(mLink, data, size); }
     bool hasNotifySubscribers() const override { std::lock_guard<std::mutex> lk(mMutex); return !mNotify.empty(); }
     bool subscribeNotify(uint32_t token) override { std::lock_guard<std::mutex> lk(mMutex); return mNotify.insert(token).second; }
     bool subscribeNotifyPort(int) override { return false; }   // an in-process peer has no port: the caller is subscribed
@@ -43,17 +45,20 @@ public:
     void clearNotify() override { std::lock_guard<std::mutex> lk(mMutex); mNotify.clear(); }
     bool subscribeLink(uint32_t) override { mLink = true; return true; }
     void unsubscribeLink(uint32_t) override { mLink = false; }
-    void broadcastMidi(const uint8_t* data, uint32_t size) override { if (mMidi.load()) deliver(data, size); }
+    uint32_t broadcastMidi(const uint8_t* data, uint32_t size) override { return broadcastIf(mMidi, data, size); }
     bool subscribeMidi(uint32_t) override { mMidi = true; return true; }
     void unsubscribeMidi(uint32_t) override { mMidi = false; }
-    void broadcastGamepad(const uint8_t* data, uint32_t size) override { if (mGamepad.load()) deliver(data, size); }
+    uint32_t broadcastGamepad(const uint8_t* data, uint32_t size) override { return broadcastIf(mGamepad, data, size); }
     bool subscribeGamepad(uint32_t) override { mGamepad = true; return true; }
     void unsubscribeGamepad(uint32_t) override { mGamepad = false; }
-    void broadcastOsc(const uint8_t* data, uint32_t size) override { if (mOsc.load()) deliver(data, size); }
+    uint32_t broadcastOsc(const uint8_t* data, uint32_t size) override { return broadcastIf(mOsc, data, size); }
     bool subscribeOsc(uint32_t) override { mOsc = true; return true; }
     void unsubscribeOsc(uint32_t) override { mOsc = false; }
 
 private:
+    uint32_t broadcastIf(const std::atomic<bool>& subscribed, const uint8_t* data, uint32_t size) {
+        return subscribed.load() && !deliver(data, size) ? 1u : 0u;
+    }
     bool deliver(const uint8_t* data, uint32_t size) {
         if (!mCb || !mCb->onMessage) return false;
         mCb->onMessage(data, size);

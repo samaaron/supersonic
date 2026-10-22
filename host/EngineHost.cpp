@@ -468,9 +468,12 @@ void EgressPump::run() {
         uint32_t taken = 0;
         for (;;) {
             const uint32_t n = clockwork_client_poll(c, batch, sizeof batch / sizeof batch[0]);
+            // What the transport could not deliver is counted in the engine's
+            // metrics, as the engine's own gateway counts it.
             for (uint32_t i = 0; i < n; ++i)
-                clockwork_route_egress(mTransport, batch[i].origin, batch[i].route,
-                                       batch[i].bytes, batch[i].length, mLog);
+                clockwork_client_count_undelivered(c,
+                    clockwork_route_egress(mTransport, batch[i].origin, batch[i].route,
+                                           batch[i].bytes, batch[i].length, mLog));
             taken += n;
             if (n < sizeof batch / sizeof batch[0]) break;
         }
