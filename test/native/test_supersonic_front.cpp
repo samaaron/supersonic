@@ -35,6 +35,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -359,8 +360,7 @@ TEST_CASE("front: /d_loadDir reads the synthdefs off the audio thread; no block 
           "[front][synthdef]") {
     // What keeps a block from carrying the directory, counted rather than timed: the files are read as the front's
     // work, never in a block (AudioThreadWitness.h; this thread renders the blocks, manualAudioPump), and the
-    // definitions go to the engine one at a time, the next only on the reply to the last, so no block parses more
-    // than one.
+    // definitions go to the engine a batch a callback, no more than the callback's share of bytes (or one alone).
     if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
     cfg.manualAudioPump = true;
@@ -373,7 +373,7 @@ TEST_CASE("front: /d_loadDir reads the synthdefs off the audio thread; no block 
     REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
     rig.fx.pumpBlock(50);
     CHECK(audio_thread_witness::fileWorkCount() == before);
-    CHECK(rig.front.defsInFlightPeak() == 1);
+    CHECK(rig.front.defBatchesOverShare() == 0);
 
     // One /done for the whole directory — the /d_recv replies stayed behind
     // the front — and the synthdefs are really there.
@@ -415,6 +415,149 @@ TEST_CASE("front, benchmark: blocks rendered while /d_loadDir loads stay within 
         CHECK(synthKnown(rig, "sonic-pi-piano", kSpider));
         return timer.maxMs;
     });
+}
+
+namespace {
+// The audio a /d_loadDir of the synthdefs takes with a device of `frames` a
+// callback, in frames, counted from the ask to the answer rather than timed:
+// this thread renders each callback (manualAudioPump), then runs the control
+// pass and the front's work, which is when a device's host gets to them.
+uint64_t framesToLoadDefs(uint32_t frames) {
+    Rig rig;
+    REQUIRE(rig.testMovesAll());
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    uint64_t rendered = 0;
+    while (rig.sink.count("/done", kSpider) == 0) {
+        REQUIRE(rig.sink.count("/fail", kSpider) == 0);
+        REQUIRE(rendered < uint64_t{48000} * 60);   // a minute of audio: stuck, not slow
+        rig.fx.pumpCallback(frames);
+        rendered += frames;
+    }
+    return rendered;
+}
+} // namespace
+
+TEST_CASE("front: a /d_loadDir takes no more audio with a bigger device buffer", "[front][synthdef]") {
+    // Sonic Pi's boot waits 5 s for its synthdefs. Handed over one a callback,
+    // they took as many callbacks as there are definitions, so a bigger buffer
+    // made the load longer: Sonic Pi's 164 on a headless engine, 3.5 s at 1024
+    // frames and 7 s at 2048, past the boot's wait.
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    const uint64_t at128  = framesToLoadDefs(128);
+    const uint64_t at1024 = framesToLoadDefs(1024);
+    const uint64_t at4096 = framesToLoadDefs(4096);
+    INFO("frames to load: " << at128 << " at 128, " << at1024 << " at 1024, " << at4096 << " at 4096");
+    // Within two callbacks of the smallest buffer's: a load's first definition
+    // goes alone, with no callback yet measured to share out, and its last
+    // batch takes a callback however little is left for it.
+    CHECK(at1024 <= at128 + 2 * 1024);
+    CHECK(at4096 <= at128 + 2 * 4096);
+}
+
+TEST_CASE("front: a callback is handed definitions up to its share of bytes, and always at least one",
+          "[front][synthdef]") {
+    // The definitions go to the engine a batch a callback: as many as fit the callback's share, 64 bytes for each
+    // frame it renders (Commands::kDefBytesPerFrame, measured from the callback before), and always at least one, so
+    // one bigger than the share goes alone. A bigger buffer takes more a callback rather than one each, and no
+    // callback is handed more than its share.
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    for (const uint32_t frames : { 128u, 1024u }) {
+        INFO(frames << " frames a callback");
+        Rig rig;
+        REQUIRE(rig.testMovesAll());
+        REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+        for (int i = 0; rig.sink.count("/done", kSpider) == 0; ++i) {
+            REQUIRE(rig.sink.count("/fail", kSpider) == 0);
+            REQUIRE(i < 100000);
+            rig.fx.pumpCallback(frames);
+        }
+        const auto batch = rig.front.largestDefBatch();
+        INFO("largest batch: " << batch.defs << " definitions, " << batch.bytes << " bytes, under a share of "
+             << batch.budget);
+        CHECK(rig.front.defBatchesOverShare() == 0);
+        if (frames == 1024) {
+            CHECK(batch.defs > 1);
+            CHECK(batch.budget == supersonic::Commands::kDefBytesPerFrame * frames);
+        }
+    }
+}
+
+TEST_CASE("front, measure: what each definition costs the block that parses it", "[front][synthdef][benchmark]") {
+    // By hand, for a design question: how many definitions a block can take.
+    // Each definition in the directory (SUPERSONIC_MEASURE_SYNTHDEFS, or the
+    // package's) goes to the engine as /d_recv on its own, and the block that
+    // answers it is timed against a quiet block just before; seven rounds, and
+    // the median of each.
+    const char* asked = std::getenv("SUPERSONIC_MEASURE_SYNTHDEFS");
+    const std::filesystem::path dir = asked && *asked ? asked : CLOCKWORK_SYNTHDEFS_DIR;
+    if (!std::filesystem::is_directory(dir)) SKIP("no synthdef dir");
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> defs;
+    for (const auto& e : std::filesystem::recursive_directory_iterator(dir)) {
+        if (!e.is_regular_file() || e.path().extension() != ".scsyndef") continue;
+        std::ifstream f(e.path(), std::ios::binary);
+        defs.push_back({ std::filesystem::relative(e.path(), dir).string(),
+                         std::vector<uint8_t>(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()) });
+    }
+    std::sort(defs.begin(), defs.end());
+    REQUIRE(!defs.empty());
+
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.manualAudioPump   = true;
+    cfg.hostDrivesControl = true;
+    EngineFixture fx(cfg);
+    auto answered = [&] {
+        size_t n = 0;
+        for (const auto& r : fx.routedReplies()) if (r.origin == kSpider && r.address == "/done") ++n;
+        return n;
+    };
+    auto timedBlock = [&] {
+        const auto t0 = std::chrono::steady_clock::now();
+        fx.engine().pumpAudioBlock();
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        fx.engine().controlPass();
+        return ms;
+    };
+    auto median = [](std::vector<double> v) {
+        std::sort(v.begin(), v.end());
+        return v[v.size() / 2];
+    };
+
+    constexpr int kRounds = 7;
+    std::vector<std::vector<double>> parsing(defs.size()), quiet(defs.size());
+    for (int round = 0; round < kRounds; ++round) {
+        for (size_t i = 0; i < defs.size(); ++i) {
+            quiet[i].push_back(timedBlock());
+            const size_t before = answered();
+            const auto pkt = osc_test::messageWithBlob("/d_recv", defs[i].second.data(), defs[i].second.size());
+            REQUIRE(fx.engine().ingest(pkt.ptr(), pkt.size(), kSpider) == CLOCKWORK_OK);
+            double longest = 0.0;
+            for (int blocks = 0; answered() == before; ++blocks) {
+                REQUIRE(blocks < 16);
+                longest = std::max(longest, timedBlock());
+            }
+            parsing[i].push_back(longest);
+        }
+    }
+
+    struct Cost { std::string name; size_t bytes; double ms; };
+    std::vector<Cost> costs;
+    std::vector<double> quietAll;
+    double total = 0.0;
+    for (size_t i = 0; i < defs.size(); ++i) {
+        const double ms = std::max(0.0, median(parsing[i]) - median(quiet[i]));
+        costs.push_back({ defs[i].first, defs[i].second.size(), ms });
+        quietAll.insert(quietAll.end(), quiet[i].begin(), quiet[i].end());
+        total += ms;
+    }
+    std::sort(costs.begin(), costs.end(), [](const Cost& a, const Cost& b) { return a.ms > b.ms; });
+    std::vector<double> each;
+    for (const auto& c : costs) each.push_back(c.ms);
+    std::printf("\n%zu definitions from %s; a quiet 128-frame block: %.3f ms (budget %.3f ms)\n",
+                defs.size(), dir.string().c_str(), median(quietAll), block_budget::kBlockMs);
+    std::printf("parse cost: median %.3f ms, 90th %.3f ms, most %.3f ms, all %.1f ms\n",
+                median(each), each[each.size() / 10], costs.front().ms, total);
+    for (size_t i = 0; i < std::min<size_t>(10, costs.size()); ++i)
+        std::printf("  %7.3f ms  %7zu bytes  %s\n", costs[i].ms, costs[i].bytes, costs[i].name.c_str());
 }
 
 TEST_CASE("front: on threads of its own, as the server runs it, a sample and a directory of definitions load",
@@ -822,25 +965,54 @@ TEST_CASE("front: loads whose commits are waiting when the engine is rebuilt eac
 
 TEST_CASE("front: a definition load in flight when the engine is rebuilt fails to its asker, and sends no more",
           "[front][synthdef][ColdSwap]") {
-    // The front hands a directory's definitions to the engine one /d_recv at a time, the next on the reply to the
-    // last. When the World they are going into is torn down mid-way, the one in flight is refused by clockwork
-    // rather than answered by scsynth. The definitions already in are gone with the old World and the rest have no
-    // World to go to: the whole load fails to its asker, in scsynth's words, so it asks the new World — nothing is
-    // sent on, and the asker never hears a /done for a directory the new World has none of.
+    // The front hands a directory's definitions to the engine a batch at a time, the next on the answers to the
+    // last; a load's first batch is one /d_recv. When the World they are going into is torn down mid-way, what is
+    // in flight is refused by clockwork rather than answered by scsynth. The definitions already in are gone with
+    // the old World and the rest have no World to go to: the whole load fails to its asker, in scsynth's words, so
+    // it asks the new World — nothing is sent on, and the asker never hears a /done for a directory the new World
+    // has none of.
     if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
     Rig rig;
     REQUIRE(rig.testMovesAll());
     REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
     rig.front.runPending();   // the first definition handed over, and no block to take it
-    REQUIRE(rig.front.defsInFlightPeak() == 1);
+    REQUIRE(rig.front.largestDefBatch().defs == 1);
     coldSwap(rig);
 
     OscReply fail;
     REQUIRE(rig.waitFor("/fail", kSpider, "/d_loadDir", &fail));
     CHECK(fail.parsed().argString(1).find("rebuil") != std::string::npos);
     rig.fx.pumpBlock(50);
-    CHECK(rig.front.defsInFlightPeak() == 1);
+    CHECK(rig.front.largestDefBatch().defs == 1);
     CHECK(rig.sink.count("/fail", kSpider) == 1);
     CHECK(rig.sink.count("/done", kSpider) == 0);
     CHECK_FALSE(synthKnown(rig, "sonic-pi-beep", kSpider));
+}
+
+TEST_CASE("front: a batch of definitions in flight when the engine is rebuilt fails its load once, and none of its answers is the next load's",
+          "[front][synthdef][ColdSwap]") {
+    // A batch after the first carries more than one /d_recv, and a rebuild refuses every one still in flight: the
+    // load fails to its asker once, and the rest of the batch's answers are its own, swallowed, not taken for the
+    // next load's. A load sent after the rebuild then loads the whole directory into the new World.
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    Rig rig;
+    REQUIRE(rig.testMovesAll());
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    // The first batch, one definition, answered at the pass after the first callback; the second, measured from
+    // that callback, goes at that pass and is in flight once it returns.
+    rig.fx.pumpCallback(1024);
+    rig.fx.pumpCallback(1024);
+    REQUIRE(rig.front.largestDefBatch().defs > 1);
+    coldSwap(rig);
+
+    REQUIRE(rig.waitFor("/fail", kSpider, "/d_loadDir", nullptr));
+    rig.fx.pumpBlock(50);
+    CHECK(rig.sink.count("/fail", kSpider) == 1);
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+
+    rig.sink.clear();
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+    CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
 }

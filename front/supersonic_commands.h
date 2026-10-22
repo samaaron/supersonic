@@ -117,9 +117,14 @@ public:
     // The session recording, if one is running.
     bool     recording() const { return mRecorder.recording(); }
     uint64_t recordingFramesLost() const { return mRecorder.framesLost(); }
-    // The most /d_recv definitions ever with the engine at once, unanswered. One per asker by design (loadDefs): the
-    // next goes only on the reply to the last, so no block parses more than one of an asker's definitions.
-    uint32_t defsInFlightPeak() { std::lock_guard<std::mutex> lock(mMut); return mDefsInFlightPeak; }
+    // The bytes of definitions a callback may be handed, for each frame it renders (loadDefs).
+    static constexpr uint32_t kDefBytesPerFrame = 64;
+    // The batch with the most /d_recv definitions ever handed to the engine at once (loadDefs): how many, their
+    // bytes, and the share of a callback they were sent under (0 for a load's first batch: no callback measured).
+    struct DefBatch { uint32_t defs = 0, bytes = 0, budget = 0; };
+    DefBatch largestDefBatch() { std::lock_guard<std::mutex> lock(mMut); return mLargestDefBatch; }
+    // Batches of more than one definition whose bytes were over their share: none, by design (loadDefs).
+    uint32_t defBatchesOverShare() { std::lock_guard<std::mutex> lock(mMut); return mDefBatchesOverShare; }
 
 private:
     enum class Kind { AllocRead, AllocReadChannel, ReadInto, ReadIntoChannel, Write, Encode,
@@ -160,15 +165,20 @@ private:
         uint32_t             failed;      // a def the engine refused is skipped, as the engine's own
         std::vector<uint8_t> completion;  // directory load skipped it; only nothing at all is a failure
         std::deque<std::vector<uint8_t>> pending;   // defs not yet handed over, in order
-        bool                 inFlight = false;       // one is with the engine, unanswered
+        uint32_t             inFlight = 0;           // the batch with the engine, unanswered
+        uint32_t             batches = 0;            // batches handed over so far
+        uint32_t             batchSentAt = 0;        // the engine's block count when the last one went
+        bool                 refused = false;        // failed by a rebuild: its batch's answers are swallowed
     };
-    // The next definition to hand over for `token`, if one is waiting and
-    // none is in flight: the oldest load's, marked in flight. Under mMut.
-    bool takeNextDef(uint32_t token, std::vector<uint8_t>& out);
-    // The load whose definition the engine has just answered (or refused)
-    // for `token`, no longer in flight; end() if none was. Under mMut.
+    // The next batch to hand over for `token`, if its oldest load has
+    // definitions waiting and no batch in flight: as many as fit the share of
+    // the callback the last batch took, and at least one, marked in flight.
+    // Under mMut.
+    bool takeNextDefs(uint32_t token, std::vector<std::vector<uint8_t>>& out);
+    // The load whose batch the engine is answering for `token`; end() if
+    // none is out. Under mMut.
     std::deque<DefLoad>::iterator defInFlight(uint32_t token);
-    void sendDef(uint32_t token, const std::vector<uint8_t>& bytes);
+    void sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>& defs);
 
     void run();
     void runJobs();
@@ -218,7 +228,8 @@ private:
     std::map<int32_t, uint32_t>   mLive;       // bufnum → lane slot the guest holds
     std::deque<Pending>           mPending;    // in send order
     std::deque<DefLoad>           mDefLoads;   // in order; a /d_recv reply answers the oldest for its token
-    uint32_t                      mDefsInFlight = 0, mDefsInFlightPeak = 0;   // /d_recv with the engine, unanswered
+    DefBatch                      mLargestDefBatch;          // largestDefBatch()
+    uint32_t                      mDefBatchesOverShare = 0;  // defBatchesOverShare()
 
     // LAST, and it must stay last. The constructor starts this thread (under
     // Work::Own) in its member-init list, and members are constructed in

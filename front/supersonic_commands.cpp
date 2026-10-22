@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -453,13 +454,19 @@ void Commands::encode(const Job& job) {
     finish(job.token, "/b_write", job.bufnum, job.completion);
 }
 
-// /d_load, /d_loadDir: read the synthdefs, hand each over as /d_recv — one
+// /d_load, /d_loadDir: read the synthdefs, hand them over as /d_recv a batch
 // at a time, the next only once the engine has answered the last. The engine
 // parses a definition on its audio thread (scsynth's stage 2, on the one
-// thread there is), so what keeps a block from carrying the whole directory
-// is that no block ever sees more than one: a pace the engine sets, not a
-// sleep guessed here, which stacked definitions into one block whenever the
-// audio thread ran slower than the guess.
+// thread there is), a batch all in the callback after it was handed over, and
+// the answers come back at the pass that follows. So a batch is what one
+// callback carries: as many definitions as fit its share, kDefBytesPerFrame
+// for each frame the callback before took (measured, the engine's own block
+// count, not assumed), and always at least one, so a definition bigger than
+// the share goes alone. One a callback, whatever its size, made a big
+// buffer's load as many callbacks long as there were definitions (Sonic Pi's
+// 164 took 7 s at 2048 frames, past its boot's wait); a sleep guessed here
+// before that stacked them into one block whenever the audio thread ran
+// slower than the guess.
 void Commands::loadDefs(const Job& job) {
     const char* cmd = job.kind == Kind::SynthDefDir ? "/d_loadDir" : "/d_load";
     std::vector<std::vector<uint8_t>> defs;
@@ -474,49 +481,67 @@ void Commands::loadDefs(const Job& job) {
     {
         std::lock_guard<std::mutex> lock(mMut);
         const auto n = static_cast<uint32_t>(defs.size());
-        DefLoad load{ job.token, cmd, job.path, n, n, 0, job.completion, {}, false };
+        DefLoad load{ job.token, cmd, job.path, n, n, 0, job.completion, {} };
         for (auto& d : defs) load.pending.push_back(std::move(d));
         mDefLoads.push_back(std::move(load));
     }
-    // The first goes now; egress() sends each next one on the reply to it. A
-    // load queued behind another for the same token waits its turn.
-    std::vector<uint8_t> first;
-    bool go;
+    // The first batch goes now; egress() sends each next one on the last
+    // answer to the one before. A load queued behind another for the same
+    // token waits its turn.
+    std::vector<std::vector<uint8_t>> batch;
     {
         std::lock_guard<std::mutex> lock(mMut);
-        go = takeNextDef(job.token, first);
+        takeNextDefs(job.token, batch);
     }
-    if (go) sendDef(job.token, first);
+    sendDefs(job.token, batch);
 }
 
 std::deque<Commands::DefLoad>::iterator Commands::defInFlight(uint32_t token) {
-    auto it = mDefLoads.begin();
-    for (; it != mDefLoads.end(); ++it) if (it->token == token && it->inFlight) break;
-    if (it != mDefLoads.end()) { it->inFlight = false; --mDefsInFlight; }
-    return it;
+    return std::find_if(mDefLoads.begin(), mDefLoads.end(),
+                        [token](const DefLoad& load) { return load.token == token && load.inFlight > 0; });
 }
 
-bool Commands::takeNextDef(uint32_t token, std::vector<uint8_t>& out) {
+bool Commands::takeNextDefs(uint32_t token, std::vector<std::vector<uint8_t>>& out) {
     for (auto& load : mDefLoads) {
         if (load.token != token) continue;
-        if (load.inFlight) return false;          // the oldest is busy: wait for its reply
-        if (load.pending.empty()) continue;       // fully handed over, replies outstanding
-        out = std::move(load.pending.front());
-        load.pending.pop_front();
-        load.inFlight = true;
-        mDefsInFlightPeak = std::max(mDefsInFlightPeak, ++mDefsInFlight);
+        if (load.inFlight) return false;          // the oldest's batch is out: wait for its answers
+        if (load.pending.empty()) continue;       // fully handed over, answers outstanding
+        // The share: the frames the engine rendered while the last batch was
+        // with it — the callback it was parsed in — at kDefBytesPerFrame. A
+        // load's first batch has no callback to go by, and goes as one.
+        const PerformanceMetrics& m = mEngine.getMetrics();
+        const uint32_t blocksNow = m.process_count.load(std::memory_order_relaxed);
+        const uint64_t share = load.batches == 0 ? 0
+            : uint64_t{ blocksNow - load.batchSentAt } * m.audio_block_size.load(std::memory_order_relaxed)
+                  * kDefBytesPerFrame;
+        uint64_t bytes = 0;
+        do {
+            bytes += load.pending.front().size();
+            out.push_back(std::move(load.pending.front()));
+            load.pending.pop_front();
+        } while (!load.pending.empty() && bytes + load.pending.front().size() <= share);
+        load.inFlight = static_cast<uint32_t>(out.size());
+        load.batchSentAt = blocksNow;
+        ++load.batches;
+        const DefBatch batch{ load.inFlight, static_cast<uint32_t>(bytes),
+                              static_cast<uint32_t>(std::min<uint64_t>(share, UINT32_MAX)) };
+        if (batch.defs > 1 && bytes > share) ++mDefBatchesOverShare;
+        if (batch.defs > mLargestDefBatch.defs) mLargestDefBatch = batch;
         return true;
     }
     return false;
 }
 
-void Commands::sendDef(uint32_t token, const std::vector<uint8_t>& bytes) {
-    std::vector<char> buf(bytes.size() + 64);
-    osc::OutboundPacketStream p(buf.data(), buf.size());
-    p << osc::BeginMessage("/d_recv")
-      << osc::Blob(bytes.data(), static_cast<osc::osc_bundle_element_size_t>(bytes.size()))
-      << osc::EndMessage;
-    mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), token);
+void Commands::sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>& defs) {
+    std::vector<char> buf;
+    for (const auto& bytes : defs) {
+        buf.resize(bytes.size() + 64);
+        osc::OutboundPacketStream p(buf.data(), buf.size());
+        p << osc::BeginMessage("/d_recv")
+          << osc::Blob(bytes.data(), static_cast<osc::osc_bundle_element_size_t>(bytes.size()))
+          << osc::EndMessage;
+        mEngine.ingest(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), token);
+    }
 }
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
@@ -585,24 +610,36 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         // World to go to. The whole load fails to its asker, nothing more is
         // sent for it, and the next load queued for the token takes its turn
         // — to be refused in turn, until the new World is up.
+        // The rest of its batch is answered too, refused or not, before the
+        // next load takes its turn: swallowed (the /d_recv path below), so
+        // none is taken for the next load's.
         if (cmd == "/d_recv") {
-            DefLoad refused;
-            std::vector<uint8_t> next;
-            bool found = false, sendNext = false;
+            std::string failCmd, failPath;
+            std::vector<std::vector<uint8_t>> next;
+            bool found = false, first = false;
             {
                 std::lock_guard<std::mutex> lock(mMut);
                 auto it = defInFlight(token);
                 if (it != mDefLoads.end()) {
-                    refused = std::move(*it);
-                    mDefLoads.erase(it);
                     found = true;
-                    sendNext = takeNextDef(token, next);
+                    if (!it->refused) {
+                        it->refused = true;
+                        it->pending.clear();
+                        first = true;
+                        failCmd = it->cmd;
+                        failPath = it->path;
+                    }
+                    if (--it->inFlight == 0) {
+                        mDefLoads.erase(it);
+                        takeNextDefs(token, next);
+                    }
                 }
             }
             if (!found) return false;
-            sendFailCmd(token, refused.cmd.c_str(),
-                        "the engine was rebuilt while '" + refused.path + "' was loading (" + why + ")");
-            if (sendNext) sendDef(token, next);
+            if (first)
+                sendFailCmd(token, failCmd.c_str(),
+                            "the engine was rebuilt while '" + failPath + "' was loading (" + why + ")");
+            sendDefs(token, next);
             return true;
         }
         // The refusal names the message WE sent; a pending ask remembers the
@@ -627,20 +664,25 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         sendFail(token, failed.cmd.c_str(), "the engine refused it: " + why, failed.bufnum);
         return true;
     }
-    // /d_recv replies: the definition in flight for that token, oldest load
-    // first — and the reply is what sends the next one.
+    // /d_recv replies: the batch in flight for that token, oldest load first
+    // — and the last answer to a batch is what sends the next one. An answer
+    // for a load a rebuild has already failed to its asker is swallowed.
     if ((kind == Done || kind == Fail) && cmd == "/d_recv") {
         DefLoad finished;
         bool last = false;
-        std::vector<uint8_t> next;
-        bool sendNext = false;
+        std::vector<std::vector<uint8_t>> next;
         {
             std::lock_guard<std::mutex> lock(mMut);
             auto it = defInFlight(token);
             if (it == mDefLoads.end()) return false;
-            if (kind == Fail) ++it->failed;
-            if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
-            sendNext = takeNextDef(token, next);
+            --it->inFlight;
+            if (it->refused) {
+                if (it->inFlight == 0) mDefLoads.erase(it);
+            } else {
+                if (kind == Fail) ++it->failed;
+                if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
+            }
+            takeNextDefs(token, next);
         }
         if (last) {
             if (finished.failed == finished.total) {
@@ -651,7 +693,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
                 sendDoneCmd(token, finished.cmd.c_str());
             }
         }
-        if (sendNext) sendDef(token, next);
+        sendDefs(token, next);
         return true;
     }
 
