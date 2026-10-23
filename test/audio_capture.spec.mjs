@@ -23,6 +23,25 @@ test.beforeEach(async ({ sonicMode }) => {
 
 // Audio analysis helpers (inlined for page.evaluate)
 const AUDIO_HELPERS = `
+
+// The engine's time for an AudioContext time, from the line the engine publishes in its sample clock
+// (clockwork/js/lib/sample_clock.js): dac_ntp less the output latency is the render time of engine_frames, and the
+// context's frames count on from there at the sample rate. The engine keeps its own clock (clockwork/src/clock/TimeSource.h).
+function engineNtpAt(sonic, contextTime) {
+  const u32 = new Uint32Array(sonic.sharedBuffer, sonic.arenaBase + sonic.bufferConstants.SAMPLE_CLOCK_START, 12);
+  const f64 = new Float64Array(sonic.sharedBuffer, sonic.arenaBase + sonic.bufferConstants.SAMPLE_CLOCK_START, 6);
+  for (let tries = 0; tries < 8; tries++) {
+    const s0 = Atomics.load(u32, 0);
+    if (s0 === 0) throw new Error("the engine has published no block yet");
+    if (s0 & 1) continue;
+    const rate = Atomics.load(u32, 1);
+    const frames = Atomics.load(u32, 2) + Atomics.load(u32, 3) * 4294967296;
+    const dac = f64[2], latency = Atomics.load(u32, 6);
+    if (Atomics.load(u32, 0) !== s0) continue;
+    return dac - latency / rate + (contextTime * rate - frames) / rate;
+  }
+  throw new Error("the sample clock would not settle");
+}
 function calculateRMS(samples, start = 0, end = samples.length) {
   if (end <= start || samples.length === 0) return 0;
   let sum = 0;
@@ -608,33 +627,14 @@ test.describe("OSC Bundle Timing", () => {
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
 
-        // Get NTP start time and drift from SharedArrayBuffer (same reference as WASM uses)
-        const sharedBuffer = sonic.sharedBuffer;
-        const arenaBase = sonic.arenaBase;
-        const ntpStartView = new Float64Array(
-          sharedBuffer,
-          arenaBase + sonic.bufferConstants.NTP_START_TIME_START,
-          1
-        );
-        const driftView = new Int32Array(
-          sharedBuffer,
-          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
-          1
-        );
-        const ntpStartTime = ntpStartView[0];
-        const driftUs = Atomics.load(driftView, 0);
-        const driftSeconds = driftUs / 1000000;
-
         // Start capture and record AudioContext time at that moment
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
 
-        // Schedule synth 100ms in the future using AudioContext-based NTP
-        // Must include drift to match WASM's calculation:
-        // current_ntp = contextTime + ntpStart + drift
+        // Schedule synth 100ms in the future on the engine's clock, read for that context time
         const scheduledDelayMs = 100;
         const delaySeconds = scheduledDelayMs / 1000;
-        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
+        const captureStartNTP = engineNtpAt(sonic, captureStartContextTime);
         const scheduledNTP = captureStartNTP + delaySeconds;
 
         // Create bundle with raw NTP timetag (seconds and fraction)
@@ -699,17 +699,10 @@ test.describe("OSC Bundle Timing", () => {
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
 
-        const sharedBuffer = sonic.sharedBuffer;
-        const arenaBase = sonic.arenaBase;
-        const ntpStartTime = new Float64Array(
-          sharedBuffer, arenaBase + sonic.bufferConstants.NTP_START_TIME_START, 1)[0];
-        const driftSeconds = Atomics.load(new Int32Array(
-          sharedBuffer, arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START, 1), 0) / 1000000;
-
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
         const scheduledDelayMs = 100;
-        const scheduledNTP = captureStartContextTime + ntpStartTime + driftSeconds + scheduledDelayMs / 1000;
+        const scheduledNTP = engineNtpAt(sonic, captureStartContextTime) + scheduledDelayMs / 1000;
         const ntpSeconds = Math.floor(scheduledNTP);
         const ntpFraction = Math.floor((scheduledNTP % 1) * 0x100000000);
 
@@ -864,30 +857,10 @@ test.describe("OSC Bundle Timing", () => {
 
         const sampleRate = sonic.sampleRate || 48000;
 
-        // Get NTP start time from SharedArrayBuffer
-        const sharedBuffer = sonic.sharedBuffer;
-        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const arenaBase = sonic.arenaBase;
-        const ntpStartView = new Float64Array(
-          sharedBuffer,
-          arenaBase + ntpStartOffset,
-          1
-        );
-        const ntpStartTime = ntpStartView[0];
-
-        // Read drift from SAB
-        const driftView = new Int32Array(
-          sharedBuffer,
-          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
-          1
-        );
-        const driftUs = Atomics.load(driftView, 0);
-        const driftSeconds = driftUs / 1000000;
-
-        // Start capture
+        // Start capture, and the engine's time for that moment
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
-        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
+        const captureStartNTP = engineNtpAt(sonic, captureStartContextTime);
 
         // Schedule two synths with a precise 500-sample gap
         // First synth at 50ms, second synth at 50ms + 500 samples
@@ -1009,30 +982,10 @@ test.describe("OSC Bundle Timing", () => {
         const sampleRate = sonic.sampleRate || 48000;
         const bufferSize = 128; // AudioWorklet quantum
 
-        // Get NTP start time
-        const sharedBuffer = sonic.sharedBuffer;
-        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const arenaBase = sonic.arenaBase;
-        const ntpStartView = new Float64Array(
-          sharedBuffer,
-          arenaBase + ntpStartOffset,
-          1
-        );
-        const ntpStartTime = ntpStartView[0];
-
-        // Read drift from SAB
-        const driftView = new Int32Array(
-          sharedBuffer,
-          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
-          1
-        );
-        const driftUs = Atomics.load(driftView, 0);
-        const driftSeconds = driftUs / 1000000;
-
-        // Start capture and record precise time
+        // Start capture, and the engine's time for that moment
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
-        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
+        const captureStartNTP = engineNtpAt(sonic, captureStartContextTime);
 
         // Schedule synth at a non-buffer-aligned offset
         // Use 50ms + 50 samples (not a multiple of 128)
@@ -1125,30 +1078,10 @@ test.describe("OSC Bundle Timing", () => {
         const sampleRate = sonic.sampleRate || 48000;
         const bufferSize = 128; // AudioWorklet quantum
 
-        // Get NTP start time
-        const sharedBuffer = sonic.sharedBuffer;
-        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const arenaBase = sonic.arenaBase;
-        const ntpStartView = new Float64Array(
-          sharedBuffer,
-          arenaBase + ntpStartOffset,
-          1
-        );
-        const ntpStartTime = ntpStartView[0];
-
-        // Read drift from SAB
-        const driftView = new Int32Array(
-          sharedBuffer,
-          arenaBase + sonic.bufferConstants.DRIFT_OFFSET_START,
-          1
-        );
-        const driftUs = Atomics.load(driftView, 0);
-        const driftSeconds = driftUs / 1000000;
-
-        // Start capture and record precise time
+        // Start capture, and the engine's time for that moment
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
-        const captureStartNTP = captureStartContextTime + ntpStartTime + driftSeconds;
+        const captureStartNTP = engineNtpAt(sonic, captureStartContextTime);
 
         // Schedule synth at a non-buffer-aligned offset
         // Use 50ms + 50 samples (not a multiple of 128)

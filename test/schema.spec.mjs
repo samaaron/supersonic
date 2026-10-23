@@ -164,7 +164,7 @@ test.describe('Schema Validation', () => {
 
       // Keys in getMetrics() that aren't in schema.metrics (derived objects):
       const derivedKeys = new Set([
-        'inBufferUsed', 'outBufferUsed', 'nrtOutBufferUsed', 'ntpStartTime',
+        'inBufferUsed', 'outBufferUsed', 'nrtOutBufferUsed',
       ]);
 
       const schemaKeys = Object.keys(schema.metrics)

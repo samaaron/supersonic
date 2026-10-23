@@ -167,18 +167,9 @@ test.describe("Scheduler Queue Overflow", () => {
         // Start capture BEFORE sending messages so we capture the scheduled synths
         sonic.startCapture();
 
-        // Get NTP time the CORRECT way - using AudioContext + ntpStartTime
-        // This matches how the WASM scheduler calculates time
-        const ntpStartOffset = sonic.bufferConstants.NTP_START_TIME_START;
-        const arenaBase = sonic.arenaBase;
-        const ntpStartView = new Float64Array(
-          sonic.sharedBuffer,
-          arenaBase + ntpStartOffset,
-          1
-        );
-        const ntpStartTime = ntpStartView[0];
+        // The engine's own clock, as its scheduler keeps it: the sample clock it publishes every block
         const currentContextTime = sonic.node.context.currentTime;
-        const currentNTP = currentContextTime + ntpStartTime;
+        const currentNTP = sonic.clock.now();
 
         // Schedule bundles 300ms in the future
         const baseNTP = currentNTP + 0.3;
@@ -186,7 +177,6 @@ test.describe("Scheduler Queue Overflow", () => {
         // Log timing for debugging
         const timingDebug = {
           audioContextTime: currentContextTime,
-          ntpStartTime: ntpStartTime,
           currentNTP: currentNTP,
           targetNTP: baseNTP
         };
@@ -346,7 +336,6 @@ test.describe("Scheduler Queue Overflow", () => {
     if (result.timingDebug) {
       console.log(`\nTiming Debug:`);
       console.log(`  AudioContext time: ${result.timingDebug.audioContextTime?.toFixed(3)}s`);
-      console.log(`  NTP start time: ${result.timingDebug.ntpStartTime?.toFixed(3)}`);
       console.log(`  Current NTP: ${result.timingDebug.currentNTP?.toFixed(3)}`);
       console.log(`  Target NTP: ${result.timingDebug.targetNTP?.toFixed(3)}`);
     }

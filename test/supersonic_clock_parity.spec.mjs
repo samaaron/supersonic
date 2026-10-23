@@ -230,32 +230,32 @@ test.describe('ClockworkClock parity (cross-build)', () => {
     expect(result.t2 - result.t1).toBeLessThan(0.3);
   });
 
-  test('nowAt() applies drift / clock-offset with correct units', async ({ page, sonicConfig }) => {
-    // Regression: nowAt previously divided getDriftOffset()/1_000_000
-    // treating it as microseconds, but the JS API returns milliseconds.
-    // Forces a known drift via setClockOffset (which writes the SAB
-    // global_offset in ms) and verifies nowAt reflects it at the right scale.
+  test('setClockOffset() moves now() by the offset, in seconds', async ({ page, sonicConfig }) => {
+    // Regression: the offset was once read as microseconds where the JS API
+    // keeps milliseconds. A known offset via setClockOffset (the engine's
+    // global offset, in ms) must move the engine's clock, as now() reads it,
+    // by that much against the wall clock — the audio thread applies it at
+    // its next block, so each reading settles for a moment first.
     const result = await page.evaluate(async (config) => {
       const sonic = new window.SuperSonic(config);
       await sonic.init();
       const sc = sonic.clock;
+      const settle = () => new Promise((r) => setTimeout(r, 200));
+      const lead = () => sc.now() - sc.wallNow();
 
-      // Capture nowAt at a fixed audioCurrentTime with zero offsets first.
       sc.setClockOffset(0);
-      const baseline = sc.nowAt(10.0);
-
-      // Inject 200ms clock offset — nowAt should grow by exactly 0.2s.
+      await settle();
+      const baseline = lead();
       sc.setClockOffset(0.2);
-      const shifted = sc.nowAt(10.0);
+      await settle();
+      const shifted = lead();
 
       await sonic.destroy();
       return { baseline, shifted, delta: shifted - baseline };
     }, sonicConfig);
 
-    // Expect delta = 0.2s (200ms clock offset → 0.2s in nowAt). Tolerance
-    // is bounded by float64 ULP at the NTP-magnitude (~3.988e9) of the
-    // sums inside nowAt — about 5e-7.
-    expect(Math.abs(result.delta - 0.2)).toBeLessThan(1e-6);
+    // 200 ms of offset is 0.2 s more lead, give or take the clock's own few ms against the wall.
+    expect(Math.abs(result.delta - 0.2)).toBeLessThan(0.02);
   });
 
   test('wallNow() advances with elapsed wall-clock time', async ({ page, sonicConfig }) => {

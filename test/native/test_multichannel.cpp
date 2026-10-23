@@ -15,8 +15,8 @@
 #include <cmath>
 
 extern "C" {
-    bool process_audio(double current_time, uint32_t active_output_channels,
-                       uint32_t active_input_channels);
+    bool process_audio(double current_time, double wall_ntp, double monotonic_secs,
+                       uint32_t active_output_channels, uint32_t active_input_channels);
     uintptr_t get_audio_output_bus();
     uintptr_t get_audio_input_bus();
 }
@@ -127,7 +127,7 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
 
     // Pump one block (this thread is the sole caller of process_audio).
     double baseNTP = wallClockNTP();
-    process_audio(baseNTP, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
+    process_audio(baseNTP, baseNTP, 0.0, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
 
     // Every channel's full span must read exact silence.
     for (int ch = 0; ch < outCh; ++ch) {
@@ -180,7 +180,7 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
 
     // Pump one block (this thread is the sole caller of process_audio).
     double baseNTP = wallClockNTP();
-    process_audio(baseNTP, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
+    process_audio(baseNTP, baseNTP, 0.0, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
 
     // Output is exact silence across every channel.
     for (int ch = 0; ch < outCh; ++ch) {

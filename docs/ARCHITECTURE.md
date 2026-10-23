@@ -44,7 +44,7 @@ Both modes are first-class citizens. All tests must pass in both modes. See [Com
 
 OSC bundles carry NTP timestamps indicating when they should execute. All timestamps throughout SuperSonic are NTP-based (seconds since 1900-01-01), on every host. On the web, however, the AudioWorklet has no access to `performance.now()` or the system clock - it only receives the audio clock timestamp (`currentTime`) passed into `process()`.
 
-The AudioWorklet must translate between audio clock and NTP to know when to dispatch scheduled bundles to scsynth. The rest of this section is about that translation, so it is web-only: natively there is no AudioContext, and each audio callback takes the block's NTP time from the system clock, smoothed from one callback to the next.
+The AudioWorklet must translate between audio clock and NTP to know when to dispatch scheduled bundles to scsynth. The engine does that translation itself, the same way on every host (`clockwork/src/clock/TimeSource.h`): the host hands each block its wall-clock time along with the audio time, and the audio thread keeps the clock.
 
 ### OSC Bundle Timestamps
 
@@ -58,64 +58,45 @@ ntpTime = (performance.timeOrigin + performance.now()) / 1000 + NTP_EPOCH_OFFSET
 
 where `NTP_EPOCH_OFFSET = 2208988800` (seconds between 1900 and 1970).
 
-### Clock Translation
+### The Engine's Clock
 
-At AudioContext boot, we record the **NTP start time** - the NTP timestamp when `audioContext.currentTime` was zero:
+The engine's clock is its render time: the sample counter of the audio it has rendered, anchored to the host's wall clock. The worklet passes `Date.now()` with every block (natively the callback reads the system clock; an embedded host passes its own), and the audio thread anchors the clock at its first block and then keeps it:
 
-```
-ntpStartTime = currentNTP - audioContext.currentTime
-```
+- **Drift** (hardware crystals aren't perfect: at a typical 100 ppm the two clocks diverge ~0.1 ms per second) is absorbed by an IIR converging on the wall clock at 1% per block — bounded to a few microseconds a block, so the clock is a stable ruler: a bundle scheduled 50 ms ahead lands within a couple of samples of where its sender worked it out, whatever the wall clock is doing.
+- **A gap** — no block rendered while the wall moved on by more than `kClockStepSeconds` (the context suspended, a reload, a stall) — steps the clock on to the wall at once, as a fresh anchor. A clock that converged from seconds behind would run fast until it had caught up, and everything scheduled against it would play compressed.
+- **Never back.** A new worklet over the same memory goes on from the time the old one published; a wall clock that went back is followed no faster than the clock can stand still.
 
-The AudioWorklet can then convert audio time to NTP:
+`clockOffset`, zero unless set with `setClockOffset()` for syncing with another system, is added to every reading.
 
-```
-currentNTP = audioContextTime + ntpStartTime + driftOffset + clockOffset
-```
-
-`clockOffset` is zero unless set with `setClockOffset()`, for syncing with another system.
-
-### Drift Management
-
-The audio clock and system clock drift relative to each other (hardware crystals aren't perfect). At typical 100ppm drift, clocks can diverge ~0.1ms per second.
-
-We measure and correct for drift:
-
-1. **Main thread** periodically (every 1000ms) compares expected vs actual `contextTime`:
-   ```
-   expectedContextTime = currentNTP - ntpStartTime
-   driftUs = (expectedContextTime - actualContextTime) * 1000000
-   ```
-
-2. **Drift offset** is written to shared memory (SAB mode) or sent via postMessage (PM mode), in microseconds
-
-3. **AudioWorklet** applies drift correction when converting timestamps
+The clock is published every block in shared memory (the sample clock: this block's first frame and its NTP time), which is how the main thread reads it — `sonic.clock.now()` — and what `getMetrics()` reports as `clockDriftUs` (the clock against the wall clock, smoothed) and `clockAnchors`.
 
 ### Time Data Flow
 
 ```
 Main Thread                          AudioWorklet
     │                                     │
-    │  ntpStartTime (at boot)             │
-    ├────────────────────────────────────▶│
-    │                                     │
-    │  driftOffset (every 1s)             │
+    │  Date.now(), with every block       │
     ├────────────────────────────────────▶│
     │                                     │
     │                     currentTime ────┤
     │                           +         │
-    │                   ntpStartTime      │
-    │                           +         │
-    │                    driftOffset      │
+    │                  anchor (IIR, or    │
+    │                   a step after a    │
+    │                        gap)         │
     │                           =         │
     │                     currentNTP ─────┤──▶ "Is this bundle ready?"
     │                                     │
+    │◀────────────────────────────────────┤
+    │  the sample clock, every block      │
+    │  (sonic.clock.now())                │
 ```
 
 ### Key Files
 
 | Component | File |
 |-----------|------|
-| NTP timing and drift | `clockwork/js/lib/ntp_timing.js` |
+| The engine's clock (every host) | `clockwork/src/clock/TimeSource.h` |
+| Reading it from the main thread | `clockwork/js/lib/clockwork_clock.js` |
 
 ## Component Overview
 
@@ -224,7 +205,6 @@ Debug lines from the engine ride the egress as `/clockwork/debug` messages, on e
 | Reply worker (SAB only) | `clockwork/js/workers/osc_in_worker.js` |
 | OSC-out log worker (SAB only) | `clockwork/js/workers/osc_out_log_sab_worker.js` |
 | AudioWorklet | `clockwork/js/workers/clockwork_audio_worklet.js` |
-| NTP timing | `clockwork/js/lib/ntp_timing.js` |
 | Engine entry (every host) | `clockwork/src/audio_processor.cpp` |
 | Scheduler (every host) | `clockwork/src/scheduler/engine_schedule.h` (`EngineScheduler`) |
 | scsynth guest | `dsp/scsynth/scsynth_dsp.cpp` |

@@ -69,10 +69,12 @@ const CPP_TO_JS = {
   mallocs_after_boot:            'MALLOCS_AFTER_BOOT',
   malloc_bytes_after_boot:       'MALLOC_BYTES_AFTER_BOOT',
   egress_frames_undelivered:     'EGRESS_FRAMES_UNDELIVERED',
+  clock_drift_us:                'CLOCK_DRIFT_US',
+  clock_anchors:                 'CLOCK_ANCHORS',
 };
 
 // Pure padding slots — asserted in C++ for alignment but have no JS counterpart.
-const CPP_PADDING = new Set(['_metrics_reserved', '_metrics_reserved2', '_client_side']);
+const CPP_PADDING = new Set(['_metrics_reserved2', '_client_side']);
 
 test('metrics_offsets.js mirrors the authoritative C++ PerformanceMetrics layout', () => {
   const hdr = readFileSync(join(ROOT, 'clockwork/src/shared_memory.h'), 'utf8');

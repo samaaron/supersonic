@@ -3045,30 +3045,21 @@ ignored with a console warning, `isLinkEnabled()` is always false and
 | [`getBeatOriginNtp()`](#getbeatoriginntp)   |                                                                                             |
 | [`getBpm()`](#getbpm)                       |                                                                                             |
 | [`getClockOffset()`](#getclockoffset)       | The clock offset set by setClockOffset, in milliseconds.                                    |
-| [`getDriftOffset()`](#getdriftoffset)       | Drift between the AudioContext and the wall clock, in milliseconds (signed).                |
 | [`getGeneration()`](#getgeneration)         | One more each time the beat grid moves (a tempo change, a new origin), by any writer.       |
 | [`getIsPlayingAtNtp()`](#getisplayingatntp) |                                                                                             |
 | [`getMeter()`](#getmeter)                   | The meter set by setMeter.                                                                  |
-| [`getNTPStartTime()`](#getntpstarttime)     | NTP time (seconds since 1900) when the AudioContext started.                                |
-| [`initialize()`](#initialize)               | Measure the NTP start time and the first drift.                                             |
 | [`isLinkEnabled()`](#islinkenabled)         | Always false on the web.                                                                    |
 | [`isPlaying()`](#isplaying)                 |                                                                                             |
 | [`now()`](#now)                             | Current NTP time as seen by the audio thread.                                               |
-| [`nowAt()`](#nowat)                         | Compute audio-thread NTP for a specific AudioContext.currentTime.                           |
 | [`numPeers()`](#numpeers)                   | Always 0 on the web.                                                                        |
 | [`phaseAtTime()`](#phaseattime)             |                                                                                             |
 | [`requestBeatAtTime()`](#requestbeatattime) |                                                                                             |
-| [`reset()`](#reset)                         | Stop the drift timer and forget the timing state.                                           |
-| [`resync()`](#resync)                       | Re-measure the NTP start time and drift, as after a suspend.                                |
 | [`setBpm()`](#setbpm)                       | Change the tempo without moving the beat playing at the instant it changes.                 |
 | [`setClockOffset()`](#setclockoffset)       | Set the clock offset for multi-system sync, in seconds (stored rounded to the millisecond). |
 | [`setIsPlaying()`](#setisplaying)           |                                                                                             |
 | [`setLinkEnabled()`](#setlinkenabled)       | Ignored on the web (with a console warning when true): Link is native only.                 |
 | [`setMeter()`](#setmeter)                   | Set the meter: how quarter-note beats group into bars.                                      |
-| [`startDriftTimer()`](#startdrifttimer)     | Start re-measuring the drift periodically.                                                  |
-| [`stopDriftTimer()`](#stopdrifttimer)       | Stop re-measuring the drift.                                                                |
 | [`timeAtBeat()`](#timeatbeat)               |                                                                                             |
-| [`updateDriftOffset()`](#updatedriftoffset) | Re-measure the drift now.                                                                   |
 | [`wallNow()`](#wallnow)                     | Current NTP time from the system wall clock.                                                |
 
 #### Methods
@@ -3132,16 +3123,6 @@ The clock offset set by [setClockOffset](#setclockoffset-1), in milliseconds.
 
 `number`
 
-##### getDriftOffset()
-
-> **getDriftOffset**(): `number`
-
-Drift between the AudioContext and the wall clock, in milliseconds (signed).
-
-###### Returns
-
-`number`
-
 ##### getGeneration()
 
 > **getGeneration**(): `number`
@@ -3178,26 +3159,6 @@ The meter set by [setMeter](#setmeter).
 | `den` | `number` |
 | `num` | `number` |
 
-##### getNTPStartTime()
-
-> **getNTPStartTime**(): `number`
-
-NTP time (seconds since 1900) when the AudioContext started.
-
-###### Returns
-
-`number`
-
-##### initialize()
-
-> **initialize**(): `Promise`<`void`>
-
-Measure the NTP start time and the first drift. `init()` does this; a client does not need to.
-
-###### Returns
-
-`Promise`<`void`>
-
 ##### isLinkEnabled()
 
 > **isLinkEnabled**(): `boolean`
@@ -3224,24 +3185,6 @@ Current NTP time as seen by the audio thread. Use this for scheduling:
 `sonic.clock.now() + 0.05` gives a timestamp 50ms in audio-clock
 future, which the audio thread reaches in 50ms of audio time —
 independent of any wall-clock-vs-audio-clock skew.
-
-###### Returns
-
-`number`
-
-##### nowAt()
-
-> **nowAt**(`audioCurrentTime`): `number`
-
-Compute audio-thread NTP for a specific `AudioContext.currentTime`.
-Lower-level than [now](#now-1) — pass a value obtained from
-`audioContext.getOutputTimestamp()` for sample-aligned scheduling.
-
-###### Parameters
-
-| Parameter          | Type     |
-| ------------------ | -------- |
-| `audioCurrentTime` | `number` |
 
 ###### Returns
 
@@ -3283,26 +3226,6 @@ Always `0` on the web.
 | `beat`         | `number` |
 | `atNtpSeconds` | `number` |
 | `quantum`      | `number` |
-
-###### Returns
-
-`void`
-
-##### reset()
-
-> **reset**(): `void`
-
-Stop the drift timer and forget the timing state.
-
-###### Returns
-
-`void`
-
-##### resync()
-
-> **resync**(): `void`
-
-Re-measure the NTP start time and drift, as after a suspend.
 
 ###### Returns
 
@@ -3392,26 +3315,6 @@ The beat grid is not moved.
 
 false, and nothing changed, for any other meter
 
-##### startDriftTimer()
-
-> **startDriftTimer**(): `void`
-
-Start re-measuring the drift periodically.
-
-###### Returns
-
-`void`
-
-##### stopDriftTimer()
-
-> **stopDriftTimer**(): `void`
-
-Stop re-measuring the drift.
-
-###### Returns
-
-`void`
-
 ##### timeAtBeat()
 
 > **timeAtBeat**(`beat`, `quantum`): `number`
@@ -3426,16 +3329,6 @@ Stop re-measuring the drift.
 ###### Returns
 
 `number`
-
-##### updateDriftOffset()
-
-> **updateDriftOffset**(): `void`
-
-Re-measure the drift now.
-
-###### Returns
-
-`void`
 
 ##### wallNow()
 
@@ -3766,7 +3659,7 @@ differ: the schema's flat ring-buffer numbers (`inBufferUsedBytes`,
 `nrtOut`) are grouped here as `inBufferUsed`, `outBufferUsed` and
 `nrtOutBufferUsed`; `mode` and `audioContextState` are strings here and
 enum indexes in the array; `hasPlaybackStats` is a boolean here and 0 or 1
-in the array; `ntpStartTime` is only here.
+in the array.
 
 #### Properties
 
@@ -3786,7 +3679,9 @@ in the array; `ntpStartTime` is only here.
 | <a id="bufferpoolpoolcount"></a> `bufferPoolPoolCount`                 | `number`                                                                     | Pool segments; 1 means it has never grown.                                                                |
 | <a id="bufferpooltotalcapacity"></a> `bufferPoolTotalCapacity`         | `number`                                                                     | Committed capacity across all pool segments, in bytes.                                                    |
 | <a id="bufferpoolusedbytes"></a> `bufferPoolUsedBytes`                 | `number`                                                                     | Sample buffer pool bytes in use.                                                                          |
+| <a id="clockanchors"></a> `clockAnchors`                               | `number`                                                                     | Times the audio clock was re-anchored since boot.                                                         |
 | <a id="clockbeatcenti"></a> `clockBeatCenti`                           | `number`                                                                     | Beat position \* 100. Divide by 100 for the beat.                                                         |
+| <a id="clockdriftus"></a> `clockDriftUs`                               | `number`                                                                     | The difference between the audio clock and the wall clock (µs, signed), smoothed.                         |
 | <a id="clockoffsetms"></a> `clockOffsetMs`                             | `number`                                                                     | Clock offset for multi-system sync (ms, signed).                                                          |
 | <a id="clockphasecenti"></a> `clockPhaseCenti`                         | `number`                                                                     | Phase within the quantum \* 100. Divide by 100 for the phase.                                             |
 | <a id="clockplaying"></a> `clockPlaying`                               | `number`                                                                     | Transport playing (0 = stopped, 1 = playing).                                                             |
@@ -3794,7 +3689,6 @@ in the array; `ntpStartTime` is only here.
 | <a id="clockworkcommit"></a> `clockworkCommit`                         | `number`                                                                     | The Clockwork commit the engine was built from: its first 8 hex digits, read as a number; 0 when unknown. |
 | <a id="debugbytesreceived"></a> `debugBytesReceived`                   | `number`                                                                     | Debug bytes received from the engine.                                                                     |
 | <a id="debugmessagesreceived"></a> `debugMessagesReceived`             | `number`                                                                     | Debug messages received from the engine.                                                                  |
-| <a id="driftoffsetms"></a> `driftOffsetMs`                             | `number`                                                                     | Clock drift between AudioContext and wall clock (ms, signed).                                             |
 | <a id="enginemessagesdropped"></a> `engineMessagesDropped`             | `number`                                                                     | Messages dropped (ring buffer full).                                                                      |
 | <a id="enginemessagesprocessed"></a> `engineMessagesProcessed`         | `number`                                                                     | Messages drained from the IN ring and dispatched.                                                         |
 | <a id="engineprocesscount"></a> `engineProcessCount`                   | `number`                                                                     | Audio process() calls (cumulative).                                                                       |
@@ -3829,7 +3723,6 @@ in the array; `ntpStartTime` is only here.
 | <a id="maxlatencyus"></a> `maxLatencyUs`                               | `number`                                                                     | Maximum audio output latency in microseconds (Chrome playbackStats; 0 elsewhere).                         |
 | <a id="mode-4"></a> `mode`                                             | [`TransportMode`](#transportmode)                                            | Transport mode.                                                                                           |
 | <a id="nrtoutbufferused"></a> `nrtOutBufferUsed?`                      | [`RingBufferUsage`](#ringbufferusage)                                        | The NRT-out ring (replies, notifications, debug).                                                         |
-| <a id="ntpstarttime"></a> `ntpStartTime`                               | `number`                                                                     | NTP time (seconds since 1900) when the AudioContext started; 0 before boot.                               |
 | <a id="oscinbytesreceived"></a> `oscInBytesReceived`                   | `number`                                                                     | Total bytes received from the engine.                                                                     |
 | <a id="oscincorrupted"></a> `oscInCorrupted`                           | `number`                                                                     | Corrupted messages detected in the ring buffer.                                                           |
 | <a id="oscinmessagesdropped"></a> `oscInMessagesDropped`               | `number`                                                                     | Replies lost in transit from the engine to JS.                                                            |

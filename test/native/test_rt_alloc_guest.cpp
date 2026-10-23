@@ -42,8 +42,8 @@ TEST_CASE("rt-alloc: unsupported under ThreadSanitizer", "[rt_alloc]") {
 #else
 
 extern "C" {
-    bool process_audio(double current_time, uint32_t active_output_channels,
-                       uint32_t active_input_channels);
+    bool process_audio(double current_time, double wall_ntp, double monotonic_secs,
+                       uint32_t active_output_channels, uint32_t active_input_channels);
 }
 
 // ─── Allocation hooks ──────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ AllocSnapshot runGuarded(int blocks, double startNTP = 4'000'000'000.0) {
     {
         rt_alloc::Guard g;
         for (int i = 0; i < blocks; ++i) {
-            process_audio(ntp, 2, 0);
+            process_audio(ntp, ntp, 0.0, 2, 0);
             ntp += blockSecs;
         }
     }
@@ -138,7 +138,7 @@ void warmup(int blocks = 200) {
     constexpr double blockSecs = 128.0 / 48000.0;
     double ntp = startNTP;
     for (int i = 0; i < blocks; ++i) {
-        process_audio(ntp, 2, 0);
+        process_audio(ntp, ntp, 0.0, 2, 0);
         ntp += blockSecs;
     }
 }

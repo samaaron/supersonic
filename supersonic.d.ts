@@ -333,7 +333,7 @@ export interface RingBufferUsage {
  * `nrtOut`) are grouped here as `inBufferUsed`, `outBufferUsed` and
  * `nrtOutBufferUsed`; `mode` and `audioContextState` are strings here and
  * enum indexes in the array; `hasPlaybackStats` is a boolean here and 0 or 1
- * in the array; `ntpStartTime` is only here.
+ * in the array.
  */
 export interface SuperSonicMetrics {
   // Engine
@@ -420,6 +420,10 @@ export interface SuperSonicMetrics {
   clockPhaseCenti: number;
   /** Transport playing (0 = stopped, 1 = playing). */
   clockPlaying: number;
+  /** The difference between the audio clock and the wall clock (µs, signed), smoothed. */
+  clockDriftUs: number;
+  /** Times the audio clock was re-anchored since boot. */
+  clockAnchors: number;
 
   // Link (native only; 0 on the web, where there is no Link session)
   /** Connected Ableton Link peers on the network. */
@@ -450,12 +454,8 @@ export interface SuperSonicMetrics {
   linkAudioSinks: number;
 
   // Context (main thread)
-  /** Clock drift between AudioContext and wall clock (ms, signed). */
-  driftOffsetMs: number;
   /** Clock offset for multi-system sync (ms, signed). */
   clockOffsetMs: number;
-  /** NTP time (seconds since 1900) when the AudioContext started; 0 before boot. */
-  ntpStartTime: number;
   /** AudioContext state; `'unknown'` when there is no context. */
   audioContextState: 'running' | 'suspended' | 'closed' | 'interrupted' | 'unknown';
   /** Transport mode. */
@@ -818,28 +818,12 @@ export interface BootStats {
  * `numPeers()` always 0.
  */
 export interface ClockworkClock {
-  // ── Time / drift ─────────────────────────────────────────────────────
+  // ── Time ─────────────────────────────────────────────────────────────
 
-  /** Measure the NTP start time and the first drift. `init()` does this; a client does not need to. */
-  initialize(): Promise<void>;
-  /** Re-measure the NTP start time and drift, as after a suspend. */
-  resync(): void;
-  /** Start re-measuring the drift periodically. */
-  startDriftTimer(): void;
-  /** Stop re-measuring the drift. */
-  stopDriftTimer(): void;
-  /** Re-measure the drift now. */
-  updateDriftOffset(): void;
-  /** Drift between the AudioContext and the wall clock, in milliseconds (signed). */
-  getDriftOffset(): number;
-  /** NTP time (seconds since 1900) when the AudioContext started. */
-  getNTPStartTime(): number;
   /** The clock offset set by {@link setClockOffset}, in milliseconds. */
   getClockOffset(): number;
   /** Set the clock offset for multi-system sync, in seconds (stored rounded to the millisecond). */
   setClockOffset(offsetS: number): void;
-  /** Stop the drift timer and forget the timing state. */
-  reset(): void;
 
   // ── Session mutators ─────────────────────────────────────────────────
 
@@ -891,13 +875,6 @@ export interface ClockworkClock {
    * independent of any wall-clock-vs-audio-clock skew.
    */
   now(): number;
-
-  /**
-   * Compute audio-thread NTP for a specific `AudioContext.currentTime`.
-   * Lower-level than {@link now} — pass a value obtained from
-   * `audioContext.getOutputTimestamp()` for sample-aligned scheduling.
-   */
-  nowAt(audioCurrentTime: number): number;
 
   /**
    * Current NTP time from the system wall clock. Use only when matching

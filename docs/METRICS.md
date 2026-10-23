@@ -162,13 +162,11 @@ All hosts. Written once when the engine starts.
 
 ### Timing
 
-Web client only.
-
 | Property | Description |
 |----------|-------------|
-| `driftOffsetMs` | Clock drift between AudioContext and performance.now() |
-| `clockOffsetMs` | Clock offset for syncing with another system (`setClockOffset()`) |
-| `ntpStartTime` | NTP time when the AudioContext's clock was zero (`getMetrics()` only) |
+| `clockDriftUs` | The difference between the audio clock and the wall clock (µs, signed), smoothed. All hosts |
+| `clockAnchors` | Times the audio clock was re-anchored since boot. All hosts |
+| `clockOffsetMs` | Clock offset for syncing with another system (`setClockOffset()`). Web client only |
 
 ### Client State
 

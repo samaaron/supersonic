@@ -49,7 +49,7 @@ test.describe('Scheduled bundle timing (web engine scheduler)', () => {
     await sonic.sync(); // engine is up and draining
     if (settleMs > 0) await new Promise((r) => setTimeout(r, settleMs));
 
-    const driftAtSend = sonic.getMetrics().driftOffsetMs;
+    const driftAtSend = sonic.getMetrics().clockDriftUs;
     const peakBefore = sonic.getMetrics().engineSchedulerPeakDepth;
 
     const t0 = performance.now();

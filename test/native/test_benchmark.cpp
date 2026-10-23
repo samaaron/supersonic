@@ -23,8 +23,8 @@
 #include <thread>
 
 extern "C" {
-    bool process_audio(double current_time, uint32_t active_output_channels,
-                       uint32_t active_input_channels);
+    bool process_audio(double current_time, double wall_ntp, double monotonic_secs,
+                       uint32_t active_output_channels, uint32_t active_input_channels);
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ static BenchResult runBenchmark(const char* label, int numBlocks, int warmupBloc
 
     // Warmup — let caches settle and CPU frequency stabilise
     for (int i = 0; i < warmupBlocks; i++) {
-        process_audio(fakeNTP, 2, 0);
+        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
         fakeNTP += blockIncrement;
     }
 
@@ -122,7 +122,7 @@ static BenchResult runBenchmark(const char* label, int numBlocks, int warmupBloc
 
     for (int i = 0; i < numBlocks; i++) {
         int64_t t0 = nowNs();
-        process_audio(fakeNTP, 2, 0);
+        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
         int64_t t1 = nowNs();
         timings[i] = (double)(t1 - t0);
         fakeNTP += blockIncrement;
@@ -174,7 +174,7 @@ static void tickBlocks(int n) {
     double fakeNTP = 4500000000.0;
     const double inc = 128.0 / 48000.0;
     for (int i = 0; i < n; i++) {
-        process_audio(fakeNTP, 2, 0);
+        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
         fakeNTP += inc;
     }
 }
@@ -190,11 +190,11 @@ static double measureBlockCostNs(int numBlocks = 200) {
     double fakeNTP = 4600000000.0;
     const double inc = 128.0 / 48000.0;
     // Small warmup
-    for (int i = 0; i < 50; i++) { process_audio(fakeNTP, 2, 0); fakeNTP += inc; }
+    for (int i = 0; i < 50; i++) { process_audio(fakeNTP, fakeNTP, 0.0, 2, 0); fakeNTP += inc; }
 
     int64_t t0 = nowNs();
     for (int i = 0; i < numBlocks; i++) {
-        process_audio(fakeNTP, 2, 0);
+        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
         fakeNTP += inc;
     }
     int64_t t1 = nowNs();
@@ -421,7 +421,7 @@ TEST_CASE("benchmark: callback jitter (simulated real-time)", "[.][benchmark]") 
         intervals[i] = (double)(now - prevNs) / 1000.0;  // store as microseconds
         prevNs = now;
 
-        process_audio(fakeNTP, 2, 0);
+        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
         fakeNTP += 128.0 / 48000.0;
     }
 
