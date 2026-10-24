@@ -262,6 +262,12 @@ export interface SuperSonicOptions {
   snapshotIntervalMs?: number;
 
   /**
+   * The latest a timed event may play, in ms: one that comes due later is dropped and counted
+   * (`engineSchedulerLateDropped`). Default 0: everything plays, however late. A page that can be flooded sets a limit.
+   */
+  schedulerLateLimitMs?: number;
+
+  /**
    * What the page going away, or out of sight, does to the engine.
    * `pagehide`: `'shutdown'` (default — an engine left running after its page is audio with no page to stop it) or
    * `'none'`. `hidden`: `'keep'` (default — a tab behind another plays on) or `'suspend'` (and resume when shown).
@@ -355,6 +361,8 @@ export interface SuperSonicMetrics {
   engineWasmErrors: number;
   /** Bundles executed after their scheduled time. */
   engineSchedulerLates: number;
+  /** Timed events dropped for coming due later than the host allows (`schedulerLateLimitMs`); 0 unless a limit is set. */
+  engineSchedulerLateDropped: number;
   /** Maximum lateness observed in the scheduler (ms). */
   engineSchedulerMaxLateMs: number;
   /** Most recent late magnitude in the scheduler (ms). */

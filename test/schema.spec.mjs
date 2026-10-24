@@ -84,9 +84,9 @@ test.describe('Schema Validation', () => {
           outOfBounds.push(`Duplicate offset ${def.offset}: ${offsets.get(def.offset)} and ${key}`);
         }
         offsets.set(def.offset, key);
-        // Bound = MERGED_ARRAY_SIZE in js/lib/metrics_offsets.js.
-        if (def.offset < 0 || def.offset >= 93) {
-          outOfBounds.push(`${key}: offset ${def.offset} out of bounds [0, 92]`);
+        // Bound = MERGED_ARRAY_SIZE in js/lib/metrics_offsets.js: GUEST_METRICS_BASE (91) + scsynth's 18.
+        if (def.offset < 0 || def.offset >= 109) {
+          outOfBounds.push(`${key}: offset ${def.offset} out of bounds [0, 108]`);
         }
       }
 

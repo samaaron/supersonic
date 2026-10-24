@@ -62,6 +62,7 @@ All hosts. clockwork's scheduler holds timed bundles and hands them to scsynth a
 | `engineSchedulerDropped` | Events dropped because the scheduler queue overflowed |
 | `engineSequenceGaps` | Sequence gaps seen on the rings: messages lost in transit to or from the engine |
 | `engineSchedulerLates` | Bundles executed after their scheduled time |
+| `engineSchedulerLateDropped` | Timed events dropped for coming due later than the host allows (`schedulerLateLimitMs`); 0 unless a limit is set |
 | `engineSchedulerMaxLateMs` | Worst lateness seen (ms) |
 | `engineSchedulerLastLateMs` | Most recent lateness (ms) |
 | `engineSchedulerLastLateTick` | `engineProcessCount` when the last late bundle ran |
