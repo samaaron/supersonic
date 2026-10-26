@@ -538,6 +538,29 @@ export interface NativeStatDefinition {
   description: string;
 }
 
+/** One window of a metric's history: see {@link SuperSonic.getMetricsHistory}. */
+export interface MetricHistoryWindow {
+  /** The lowest value seen in the window. */
+  low: number;
+  /** The highest value seen in the window. */
+  high: number;
+  /** The last value recorded. */
+  last: number;
+  /** The change across the window: for a counter, what it counted in that time. */
+  delta: number;
+  /** How many buckets the window found recorded: 0 means nothing yet. */
+  covered: number;
+}
+
+/** A metric's windows: the last second, ten seconds and minute, the last ten minutes, the last hour. */
+export interface MetricHistoryWindows {
+  s1: MetricHistoryWindow;
+  s10: MetricHistoryWindow;
+  m1: MetricHistoryWindow;
+  m10: MetricHistoryWindow;
+  h1: MetricHistoryWindow;
+}
+
 /**
  * Metrics schema returned by {@link SuperSonic.getMetricsSchema}.
  *
@@ -2135,6 +2158,19 @@ export class SuperSonic {
    * console.log(`Scheduler depth: ${m.engineSchedulerDepth}`);
    */
   getMetrics(): SuperSonicMetrics;
+
+  /**
+   * What every counter and gauge did over the last hour, kept by the engine (so it survives a reload): for each metric
+   * with a history — every one but the constants — the windows `s1`, `s10`, `m1` (the last second, ten seconds and
+   * minute), `m10` and `h1`. Each is the lowest and highest value seen in the window, the last, the change across it
+   * (a counter's count in that time) and how many buckets it found recorded. `{}` before the engine is up. In
+   * postMessage mode the windows are from the last heartbeat's copy. See docs/METRICS.md.
+   *
+   * @example
+   * const h = sonic.getMetricsHistory();
+   * console.log(`lates in the last minute: ${h.engineSchedulerLates.m1.delta}`);
+   */
+  getMetricsHistory(): Record<string, MetricHistoryWindows>;
 
   /**
    * Get metrics as a flat Uint32Array for zero-allocation reading.

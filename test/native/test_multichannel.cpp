@@ -8,15 +8,12 @@
 
 #include <thread>
 #include <chrono>
-#include "clock/clock_math.h"   // wallClockNTP
 #include <filesystem>
 #include <cstring>
 #include <algorithm>
 #include <cmath>
 
 extern "C" {
-    bool process_audio(double current_time, double wall_ntp, double monotonic_secs,
-                       uint32_t active_output_channels, uint32_t active_input_channels);
     uintptr_t get_audio_output_bus();
     uintptr_t get_audio_input_bus();
 }
@@ -34,8 +31,8 @@ static ClockworkEngine::Config channels(int outCh, int inCh) {
 static void bootAndVerify(int outCh, int inCh) {
     EngineFixture fx(channels(outCh, inCh));
     REQUIRE(fx.engine().isRunning());
-    // Blocks rendered at this width: a channel config process_audio() cannot
-    // take crashes here.
+    // Render a few blocks at this width: a channel count the renderer cannot
+    // handle crashes here.
     REQUIRE(fx.waitForBlocks(4));
     CHECK(fx.engine().isRunning());
 }
@@ -104,10 +101,9 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
     ClockworkEngine::Config cfg = channels(outCh, inCh);
-    // Manual pump: this test drives process_audio() directly on the test
-    // thread, so the engine must NOT start its own headless driver thread —
-    // otherwise both threads call process_audio() concurrently (data race).
-    // Pinned, as SUPERSONIC_TEST_REALTIME=1 would otherwise start one.
+    // Manual pump: this test renders blocks on the test thread, so the engine
+    // must not start its own headless driver thread; two renderers would be a
+    // data race. Pinned, as SUPERSONIC_TEST_REALTIME=1 would otherwise start one.
     cfg.manualAudioPump   = true;
     engine.init(cfg);
 
@@ -117,17 +113,16 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     REQUIRE(outputBus != nullptr);
 
     // Poison the entire channel-major output region with a sentinel. A
-    // correctly-striding process_audio() must overwrite every channel's full
-    // 128-sample (QUANTUM_SIZE) span; with no synths running it produces exact
-    // silence, so any surviving sentinel would expose a clearing/layout gap.
-    // Exact equality is sound here: this thread is the only process_audio()
-    // caller, so nothing races writes to the bus.
+    // correctly-striding renderer overwrites every channel's full 128-sample
+    // (QUANTUM_SIZE) span; with no synths running it produces exact silence,
+    // so any surviving sentinel would expose a clearing/layout gap. Exact
+    // equality is sound here: this thread is the only renderer, so nothing
+    // races writes to the bus.
     constexpr float kSentinel = 1234.5f;
     for (int i = 0; i < outCh * 128; ++i) outputBus[i] = kSentinel;
 
-    // Pump one block (this thread is the sole caller of process_audio).
-    double baseNTP = wallClockNTP();
-    process_audio(baseNTP, baseNTP, 0.0, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
+    // Render one block on this thread.
+    engine.pumpAudioBlock();
 
     // Every channel's full span must read exact silence.
     for (int ch = 0; ch < outCh; ++ch) {
@@ -151,10 +146,9 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     engine.onReply = [](const uint8_t*, uint32_t) {};
 
     ClockworkEngine::Config cfg = channels(outCh, inCh);
-    // Manual pump: this test drives process_audio() directly on the test
-    // thread, so the engine must NOT start its own headless driver thread —
-    // otherwise both threads call process_audio() concurrently (data race).
-    // Pinned, as SUPERSONIC_TEST_REALTIME=1 would otherwise start one.
+    // Manual pump: this test renders blocks on the test thread, so the engine
+    // must not start its own headless driver thread; two renderers would be a
+    // data race. Pinned, as SUPERSONIC_TEST_REALTIME=1 would otherwise start one.
     cfg.manualAudioPump   = true;
     engine.init(cfg);
 
@@ -178,9 +172,8 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     constexpr float kSentinel = 1234.5f;
     for (int i = 0; i < outCh * 128; ++i) outputBus[i] = kSentinel;
 
-    // Pump one block (this thread is the sole caller of process_audio).
-    double baseNTP = wallClockNTP();
-    process_audio(baseNTP, baseNTP, 0.0, static_cast<uint32_t>(outCh), static_cast<uint32_t>(inCh));
+    // Render one block on this thread.
+    engine.pumpAudioBlock();
 
     // Output is exact silence across every channel.
     for (int ch = 0; ch < outCh; ++ch) {

@@ -22,11 +22,6 @@
 #include <chrono>
 #include <thread>
 
-extern "C" {
-    bool process_audio(double current_time, double wall_ntp, double monotonic_secs,
-                       uint32_t active_output_channels, uint32_t active_input_channels);
-}
-
 // ---------------------------------------------------------------------------
 // Nanosecond clock helper
 // ---------------------------------------------------------------------------
@@ -109,23 +104,18 @@ static BenchResult runBenchmark(const char* label, int numBlocks, int warmupBloc
     const double budgetNs = (128.0 / 48000.0) * 1e9;  // ~2,666,667 ns
 
     double fakeNTP = 4000000000.0;
-    const double blockIncrement = 128.0 / 48000.0;
 
     // Warmup — let caches settle and CPU frequency stabilise
-    for (int i = 0; i < warmupBlocks; i++) {
-        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
-        fakeNTP += blockIncrement;
-    }
+    for (int i = 0; i < warmupBlocks; i++) tickBlock(fakeNTP);
 
     // Measure individual block times in nanoseconds
     std::vector<double> timings(numBlocks);
 
     for (int i = 0; i < numBlocks; i++) {
         int64_t t0 = nowNs();
-        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
+        tickBlock(fakeNTP);
         int64_t t1 = nowNs();
         timings[i] = (double)(t1 - t0);
-        fakeNTP += blockIncrement;
     }
 
     // Statistics
@@ -172,11 +162,7 @@ static void stopHeadlessDriver(EngineFixture& fx) {
 // Manually tick the engine to process pending OSC messages
 static void tickBlocks(int n) {
     double fakeNTP = 4500000000.0;
-    const double inc = 128.0 / 48000.0;
-    for (int i = 0; i < n; i++) {
-        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
-        fakeNTP += inc;
-    }
+    for (int i = 0; i < n; i++) tickBlock(fakeNTP);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,15 +174,11 @@ static void tickBlocks(int n) {
 
 static double measureBlockCostNs(int numBlocks = 200) {
     double fakeNTP = 4600000000.0;
-    const double inc = 128.0 / 48000.0;
     // Small warmup
-    for (int i = 0; i < 50; i++) { process_audio(fakeNTP, fakeNTP, 0.0, 2, 0); fakeNTP += inc; }
+    for (int i = 0; i < 50; i++) tickBlock(fakeNTP);
 
     int64_t t0 = nowNs();
-    for (int i = 0; i < numBlocks; i++) {
-        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
-        fakeNTP += inc;
-    }
+    for (int i = 0; i < numBlocks; i++) tickBlock(fakeNTP);
     int64_t t1 = nowNs();
     return (double)(t1 - t0) / numBlocks;
 }
@@ -345,6 +327,11 @@ TEST_CASE("benchmark: linearity check", "[.][benchmark]") {
 
     stopHeadlessDriver(fx);
 
+    // The block's fixed cost with nothing playing: the ingress drain, the
+    // clock update and the sample-clock publish run every block whatever
+    // plays. The synths' cost is what each run adds above it.
+    auto idle = runBenchmark("idle (for linearity)", 2000);
+
     // 10 synths (sustained so they stay alive through warmup + measurement)
     for (int i = 0; i < 10; i++)
         fx.send(sNewSustained("sonic-pi-beep", 1000 + i, 0, 1, "note", 60.0f + i));
@@ -374,11 +361,12 @@ TEST_CASE("benchmark: linearity check", "[.][benchmark]") {
     // Verify synths were alive: cost should be well above 10x
     CHECK(hi.avgNs > lo.avgNs * 3);  // at least 3x more expensive
 
-    double ratio = hi.avgNs / lo.avgNs;
+    double ratio = (hi.avgNs - idle.avgNs) / (lo.avgNs - idle.avgNs);
 
-    fprintf(stderr, "\n    10-synth avg:  %.0f ns\n", lo.avgNs);
+    fprintf(stderr, "\n    idle avg:      %.0f ns\n", idle.avgNs);
+    fprintf(stderr, "    10-synth avg:  %.0f ns\n", lo.avgNs);
     fprintf(stderr, "    100-synth avg: %.0f ns\n", hi.avgNs);
-    fprintf(stderr, "    ratio: %.1fx (ideal: 10.0x)\n", ratio);
+    fprintf(stderr, "    ratio above idle: %.1fx (ideal: 10.0x)\n", ratio);
 
     // Should be roughly linear. Super-linear scaling (>10x) is expected due
     // to L1/L2 cache pressure at high synth counts. Sub-linear (<10x) would
@@ -421,8 +409,7 @@ TEST_CASE("benchmark: callback jitter (simulated real-time)", "[.][benchmark]") 
         intervals[i] = (double)(now - prevNs) / 1000.0;  // store as microseconds
         prevNs = now;
 
-        process_audio(fakeNTP, fakeNTP, 0.0, 2, 0);
-        fakeNTP += 128.0 / 48000.0;
+        tickBlock(fakeNTP);
     }
 
     // Skip first few intervals (warmup)

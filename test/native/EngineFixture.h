@@ -12,6 +12,7 @@
 #include "ClockworkEngine.h"
 #include "GuestConfigText.h"
 #include "OscTestUtils.h"
+#include "lanes/lanes.h"
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
 #include <vector>
@@ -30,6 +31,22 @@ inline void setGuestOption(ClockworkEngine::Config& cfg, const char* name, long 
 }
 inline std::string guestOption(const ClockworkEngine::Config& cfg, const char* name) {
     return clockwork::guest_config_text::get(cfg.guestConfig, name);
+}
+
+// Render one stereo block on the calling thread through the public tick
+// (clockwork_tick, lanes.h) on the caller's own timeline: `ntp` is the block's
+// wall-clock time and advances by one block, and the frame count advances
+// with it. For a test that stopped the driver and renders the blocks itself;
+// the engine must have no other renderer running.
+inline void tickBlock(double& ntp) {
+    static uint64_t frames = 0;
+    ClockworkBlockTime time {};
+    time.struct_bytes = sizeof time;
+    time.audio_frames = frames;
+    time.wall_ntp     = ntp;
+    clockwork_tick(&time, 2, 0);
+    frames += 128;
+    ntp    += 128.0 / 48000.0;
 }
 #include <functional>
 

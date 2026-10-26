@@ -35,6 +35,16 @@ Web only. Get a metrics snapshot on demand, as an object. This is a local memory
 const metrics = supersonic.getMetrics();
 ```
 
+### `getMetricsHistory()`
+
+What every counter and gauge did over the last hour. The engine keeps, for each metric that is not a constant, three rings of sixty buckets — a second, ten seconds and a minute each — holding the lowest, highest and last value seen in the bucket, so nothing between two reads is lost and the history survives a reload of the page's engine. A read returns, per metric, the windows `s1`, `s10`, `m1` (the last second, ten seconds and minute), `m10` and `h1`; each gives `low`, `high`, `last`, `delta` (the change across the window: for a counter, what it counted in that time) and `covered` (how many buckets it found recorded). In postMessage mode the windows are from the last heartbeat's copy.
+
+```javascript
+const h = supersonic.getMetricsHistory();
+console.log(`lates in the last minute: ${h.engineSchedulerLates.m1.delta}`);
+console.log(`worst clock drift this hour: ${h.clockDriftUs.h1.high} µs`);
+```
+
 ## Available Metrics
 
 The engine's metrics are written by the same C++ on every host. In postMessage mode the worklet posts a copy of them on a heartbeat, so they can be up to one heartbeat old.

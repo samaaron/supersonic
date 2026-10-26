@@ -8,7 +8,7 @@
 
 * [osc](#osc)
 
-* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [ClockworkClock](#clockworkclock) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricsSchema](#metricsschema) · [NativeStatDefinition](#nativestatdefinition) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [RingBufferUsage](#ringbufferusage) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
+* **Interfaces** — [ActivityLineConfig](#activitylineconfig) · [BootStats](#bootstats) · [ClockworkClock](#clockworkclock) · [LoadedBufferInfo](#loadedbufferinfo) · [LoadSampleResult](#loadsampleresult) · [LoadSynthDefResult](#loadsynthdefresult) · [MetricDefinition](#metricdefinition) · [MetricHistoryWindow](#metrichistorywindow) · [MetricHistoryWindows](#metrichistorywindows) · [MetricsSchema](#metricsschema) · [NativeStatDefinition](#nativestatdefinition) · [OscBundle](#oscbundle) · [OscChannelMetrics](#oscchannelmetrics) · [OscChannelPMTransferable](#oscchannelpmtransferable) · [OscChannelSABTransferable](#oscchannelsabtransferable) · [RawTree](#rawtree) · [RawTreeNode](#rawtreenode) · [RingBufferUsage](#ringbufferusage) · [SampleInfo](#sampleinfo-1) · [Snapshot](#snapshot) · [SuperSonicInfo](#supersonicinfo) · [SuperSonicMetrics](#supersonicmetrics) · [SystemReport](#systemreport) · [Tree](#tree) · [TreeNode](#treenode)
 
 * **Type Aliases** — [AddAction](#addaction) · [EngineState](#enginestate) · [NodeID](#nodeid) · [NTPTimeTag](#ntptimetag) · [OscBundlePacket](#oscbundlepacket) · [OscChannelTransferable](#oscchanneltransferable) · [OscMessage](#oscmessage) · [SuperSonicEvent](#supersonicevent) · [TransportMode](#transportmode) · [UUID](#uuid)
 
@@ -97,31 +97,32 @@ scsynth with low latency inside a web page.
 
 **Advanced**
 
-| Member                                          | Description                                                                                                      |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| [`arenaBase`](#arenabase)                       | Ring buffer base offset in SharedArrayBuffer.                                                                    |
-| [`bufferConstants`](#bufferconstants)           | Buffer layout constants from the WASM build.                                                                     |
-| [`clock`](#clock)                               | Session-timeline service: tempo, beat origin, transport, NTP "now." See ClockworkClock for the full API surface. |
-| [`gamepad`](#gamepad)                           | The gamepad manager, when the gamepad option is on and it came up; otherwise null (gamepadError says why).       |
-| [`gamepadError`](#gamepaderror)                 | Why gamepad is null although it was asked for: the error its start-up threw.                                     |
-| [`midi`](#midi)                                 | The Web MIDI manager, when MIDI is enabled (the midi option, or enableMidi) and came up.                         |
-| [`midiError`](#midierror)                       | Why midi is null although MIDI was asked for: the error its start-up threw.                                      |
-| [`mode`](#mode)                                 | Active transport mode ('sab' or 'postMessage').                                                                  |
-| [`sharedBuffer`](#sharedbuffer)                 | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                                                     |
-| [`allocSample()`](#allocsample)                 | Allocate an empty buffer, as loadSample does for a file: resolves once the engine has it.                        |
-| [`enableMidi()`](#enablemidi)                   | Bring Web MIDI up after init.                                                                                    |
-| [`getEngineState()`](#getenginestate)           | Returns the current engine lifecycle state.                                                                      |
-| [`getLoadedBuffers()`](#getloadedbuffers)       | Get info about all loaded audio buffers.                                                                         |
-| [`getScope()`](#getscope)                       | Copy the newest frames frames of a ScopeOut2 scope stream.                                                       |
-| [`getScopeActivations()`](#getscopeactivations) | How many times a scope slot has gone live.                                                                       |
-| [`getScopes()`](#getscopes)                     | List the scope slots in use.                                                                                     |
-| [`getSystemReport()`](#getsystemreport)         | Get a comprehensive system performance report.                                                                   |
-| [`isRunning()`](#isrunning)                     | Returns true if the engine has finished booting and is ready to send and receive messages.                       |
-| [`nextNodeId()`](#nextnodeid)                   | Get the next unique node ID.                                                                                     |
-| [`request()`](#request)                         | Send a message and wait for its reply.                                                                           |
-| [`getRawTreeSchema()`](#getrawtreeschema)       | Get schema describing the raw flat node tree structure.                                                          |
-| [`getScopeSchema()`](#getscopeschema)           | Scope geometry: slot count, per-slot ring frames, channels.                                                      |
-| [`getTreeSchema()`](#gettreeschema)             | Get schema describing the hierarchical node tree structure.                                                      |
+| Member                                          | Description                                                                                                                                                                                                                                      |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`arenaBase`](#arenabase)                       | Ring buffer base offset in SharedArrayBuffer.                                                                                                                                                                                                    |
+| [`bufferConstants`](#bufferconstants)           | Buffer layout constants from the WASM build.                                                                                                                                                                                                     |
+| [`clock`](#clock)                               | Session-timeline service: tempo, beat origin, transport, NTP "now." See ClockworkClock for the full API surface.                                                                                                                                 |
+| [`gamepad`](#gamepad)                           | The gamepad manager, when the gamepad option is on and it came up; otherwise null (gamepadError says why).                                                                                                                                       |
+| [`gamepadError`](#gamepaderror)                 | Why gamepad is null although it was asked for: the error its start-up threw.                                                                                                                                                                     |
+| [`midi`](#midi)                                 | The Web MIDI manager, when MIDI is enabled (the midi option, or enableMidi) and came up.                                                                                                                                                         |
+| [`midiError`](#midierror)                       | Why midi is null although MIDI was asked for: the error its start-up threw.                                                                                                                                                                      |
+| [`mode`](#mode)                                 | Active transport mode ('sab' or 'postMessage').                                                                                                                                                                                                  |
+| [`sharedBuffer`](#sharedbuffer)                 | The SharedArrayBuffer (SAB mode) or null (postMessage mode).                                                                                                                                                                                     |
+| [`allocSample()`](#allocsample)                 | Allocate an empty buffer, as loadSample does for a file: resolves once the engine has it.                                                                                                                                                        |
+| [`enableMidi()`](#enablemidi)                   | Bring Web MIDI up after init.                                                                                                                                                                                                                    |
+| [`getEngineState()`](#getenginestate)           | Returns the current engine lifecycle state.                                                                                                                                                                                                      |
+| [`getLoadedBuffers()`](#getloadedbuffers)       | Get info about all loaded audio buffers.                                                                                                                                                                                                         |
+| [`getMetricsHistory()`](#getmetricshistory)     | What every counter and gauge did over the last hour, kept by the engine (so it survives a reload): for each metric with a history — every one but the constants — the windows s1, s10, m1 (the last second, ten seconds and minute), m10 and h1. |
+| [`getScope()`](#getscope)                       | Copy the newest frames frames of a ScopeOut2 scope stream.                                                                                                                                                                                       |
+| [`getScopeActivations()`](#getscopeactivations) | How many times a scope slot has gone live.                                                                                                                                                                                                       |
+| [`getScopes()`](#getscopes)                     | List the scope slots in use.                                                                                                                                                                                                                     |
+| [`getSystemReport()`](#getsystemreport)         | Get a comprehensive system performance report.                                                                                                                                                                                                   |
+| [`isRunning()`](#isrunning)                     | Returns true if the engine has finished booting and is ready to send and receive messages.                                                                                                                                                       |
+| [`nextNodeId()`](#nextnodeid)                   | Get the next unique node ID.                                                                                                                                                                                                                     |
+| [`request()`](#request)                         | Send a message and wait for its reply.                                                                                                                                                                                                           |
+| [`getRawTreeSchema()`](#getrawtreeschema)       | Get schema describing the raw flat node tree structure.                                                                                                                                                                                          |
+| [`getScopeSchema()`](#getscopeschema)           | Scope geometry: slot count, per-slot ring frames, channels.                                                                                                                                                                                      |
+| [`getTreeSchema()`](#gettreeschema)             | Get schema describing the hierarchical node tree structure.                                                                                                                                                                                      |
 
 #### Examples
 
@@ -710,6 +711,27 @@ Use [SuperSonic.getMetricsSchema](#getmetricsschema) for offset mappings.
 const schema = SuperSonic.getMetricsSchema();
 const arr = sonic.getMetricsArray();
 const sent = arr[schema.metrics.oscOutMessagesSent.offset];
+```
+
+##### getMetricsHistory()
+
+> **getMetricsHistory**(): `Record`<`string`, [`MetricHistoryWindows`](#metrichistorywindows)>
+
+What every counter and gauge did over the last hour, kept by the engine (so it survives a reload): for each metric
+with a history — every one but the constants — the windows `s1`, `s10`, `m1` (the last second, ten seconds and
+minute), `m10` and `h1`. Each is the lowest and highest value seen in the window, the last, the change across it
+(a counter's count in that time) and how many buckets it found recorded. `{}` before the engine is up. In
+postMessage mode the windows are from the last heartbeat's copy. See docs/METRICS.md.
+
+###### Returns
+
+`Record`<`string`, [`MetricHistoryWindows`](#metrichistorywindows)>
+
+###### Example
+
+```ts
+const h = sonic.getMetricsHistory();
+console.log(`lates in the last minute: ${h.engineSchedulerLates.m1.delta}`);
 ```
 
 ##### getRawTree()
@@ -3422,6 +3444,38 @@ Schema entry describing a single metric field.
 | <a id="type"></a> `type`               | `"counter"` \| `"gauge"` \| `"constant"` \| `"enum"` \| `"u32"` | Metric type: counter (cumulative), gauge (current), constant, or enum; `'u32'` for the metrics SuperSonic declares (the sample buffer pool and `loadedSynthDefs`). |
 | <a id="unit"></a> `unit?`              | `string`                                                        | Unit of measurement.                                                                                                                                               |
 | <a id="values"></a> `values?`          | `string`\[]                                                     | Enum value names (for type 'enum').                                                                                                                                |
+
+***
+
+### MetricHistoryWindow
+
+One window of a metric's history: see [SuperSonic.getMetricsHistory](#getmetricshistory).
+
+#### Properties
+
+| Property                       | Type     | Description                                                                |
+| ------------------------------ | -------- | -------------------------------------------------------------------------- |
+| <a id="covered"></a> `covered` | `number` | How many buckets the window found recorded: 0 means nothing yet.           |
+| <a id="delta"></a> `delta`     | `number` | The change across the window: for a counter, what it counted in that time. |
+| <a id="high"></a> `high`       | `number` | The highest value seen in the window.                                      |
+| <a id="last"></a> `last`       | `number` | The last value recorded.                                                   |
+| <a id="low"></a> `low`         | `number` | The lowest value seen in the window.                                       |
+
+***
+
+### MetricHistoryWindows
+
+A metric's windows: the last second, ten seconds and minute, the last ten minutes, the last hour.
+
+#### Properties
+
+| Property               | Type                                          |
+| ---------------------- | --------------------------------------------- |
+| <a id="h1"></a> `h1`   | [`MetricHistoryWindow`](#metrichistorywindow) |
+| <a id="m1"></a> `m1`   | [`MetricHistoryWindow`](#metrichistorywindow) |
+| <a id="m10"></a> `m10` | [`MetricHistoryWindow`](#metrichistorywindow) |
+| <a id="s1"></a> `s1`   | [`MetricHistoryWindow`](#metrichistorywindow) |
+| <a id="s10"></a> `s10` | [`MetricHistoryWindow`](#metrichistorywindow) |
 
 ***
 
