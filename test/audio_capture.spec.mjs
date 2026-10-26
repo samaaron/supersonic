@@ -42,6 +42,17 @@ function engineNtpAt(sonic, contextTime) {
   }
   throw new Error("the sample clock would not settle");
 }
+// The engine's clock settles 64 blocks after its first (kAnchorSettleBlocks, clockwork/src/clock/clock_math.h):
+// it holds its first wall-clock reading until then and moves once to the median of the readings it took
+// (TimeSource.h). A measurement that needs sample accuracy waits for that, or the correction lands between
+// scheduling and playing: 17 samples on a loaded CI runner (2026-10-26).
+async function clockSettled(sonic, blocks = 2 * 64) {
+  const deadline = performance.now() + 5000;
+  while ((sonic.getMetrics().engineProcessCount || 0) < blocks && performance.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  return sonic.getMetrics().engineProcessCount || 0;
+}
 function calculateRMS(samples, start = 0, end = samples.length) {
   if (end <= start || samples.length === 0) return 0;
   let sum = 0;
@@ -626,6 +637,7 @@ test.describe("OSC Bundle Timing", () => {
         const sonic = new window.SuperSonic(config.sonic);
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
+        await clockSettled(sonic);   // the note is placed by the engine's clock: on a settled one
 
         // Start capture and record AudioContext time at that moment
         sonic.startCapture();
@@ -698,6 +710,7 @@ test.describe("OSC Bundle Timing", () => {
         const sonic = new window.SuperSonic(config.sonic);
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
+        await clockSettled(sonic);   // the note is placed by the engine's clock: on a settled one
 
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
@@ -854,6 +867,7 @@ test.describe("OSC Bundle Timing", () => {
         const sonic = new window.SuperSonic(config.sonic);
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
+        await clockSettled(sonic);   // the note is placed by the engine's clock: on a settled one
 
         const sampleRate = sonic.sampleRate || 48000;
 
@@ -978,6 +992,7 @@ test.describe("OSC Bundle Timing", () => {
         const sonic = new window.SuperSonic(config.sonic);
         await sonic.init();
         await sonic.loadSynthDef("sonic-pi-beep");
+        await clockSettled(sonic);   // the note is placed by the engine's clock: on a settled one
 
         const sampleRate = sonic.sampleRate || 48000;
         const bufferSize = 128; // AudioWorklet quantum
@@ -1078,6 +1093,10 @@ test.describe("OSC Bundle Timing", () => {
         const sampleRate = sonic.sampleRate || 48000;
         const bufferSize = 128; // AudioWorklet quantum
 
+        // On a settled clock: the note is placed by the engine's clock, and
+        // the clock must not move between scheduling and playing.
+        const settledAt = await clockSettled(sonic);
+
         // Start capture, and the engine's time for that moment
         sonic.startCapture();
         const captureStartContextTime = sonic.node.context.currentTime;
@@ -1122,6 +1141,7 @@ test.describe("OSC Bundle Timing", () => {
         const nearestBufferBoundary = Math.round(actualSample / bufferSize) * bufferSize;
         const distanceToBufferBoundary = Math.abs(actualSample - nearestBufferBoundary);
 
+        const metrics = sonic.getMetrics();
         return {
           sampleRate,
           bufferSize,
@@ -1131,6 +1151,9 @@ test.describe("OSC Bundle Timing", () => {
           extraSamples,
           distanceToBufferBoundary,
           hasAudio: firstNonZero > 0,
+          settledAt,
+          clockDriftUs: metrics.clockDriftUs,
+          clockAnchors: metrics.clockAnchors,
         };
       },
       { sonic: sonicConfig, helpers: AUDIO_HELPERS }
@@ -1153,6 +1176,7 @@ test.describe("OSC Bundle Timing", () => {
     console.log(`  Actual within-buffer offset: ${actualWithinBufferOffset}`);
     console.log(`  Within-buffer error: ${adjustedWithinBufferError}`);
     console.log(`  Distance to nearest buffer boundary: ${result.distanceToBufferBoundary}`);
+    console.log(`  Clock: scheduled after ${result.settledAt} blocks, drift ${result.clockDriftUs} µs, ${result.clockAnchors} anchors`);
 
     expect(result.hasAudio).toBe(true);
 
