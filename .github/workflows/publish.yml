@@ -99,11 +99,12 @@ jobs:
           echo "Timed out after 2h waiting for CI to complete"
           exit 1
 
-      # The generated README stands in for the repository one on npm. Then it
-      # goes: npm packs every README* it finds whatever `files` says, and the
-      # 127 kB generated file was shipping twice.
+      # The generated README stands in for the repository one on npm. It is
+      # generated under build/, which is not packed: npm packs every README*
+      # it finds at the root whatever `files` says, and a generated file at the
+      # root shipped twice (the build inside `npm publish` made it again).
       - name: Generate npm README
-        run: cp README.npm.md README.md && rm README.npm.md
+        run: cp build/README.npm.md README.md
 
       - name: Publish supersonic-scsynth
         run: npm publish

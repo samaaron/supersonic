@@ -162,7 +162,8 @@ This will:
    `clockwork/dist/`, and copy them under `dist/`.
 3. Bundle the JavaScript client and the workers with esbuild.
 4. Copy the synthdefs and samples into `dist/`, the engine and the worklet into
-   `packages/supersonic-scsynth-core`, and generate `README.npm.md`.
+   `packages/supersonic-scsynth-core`, and generate `build/README.npm.md`, the
+   package's README on npm (under the registry's 64 KiB cap, or the build fails).
 
 The module alone, without the JavaScript, is plain CMake:
 

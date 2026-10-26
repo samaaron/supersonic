@@ -177,8 +177,8 @@ cp -r "$OUT" "$CORE_PKG_DIR/wasm"
 mkdir -p "$CORE_PKG_DIR/workers"
 cp "$OUT/../workers/clockwork_audio_worklet.js" "$CORE_PKG_DIR/workers/"
 
-# The npm README is the docs folded into one file, so the package page has no
-# dead links into docs/. Generated, not tracked (see .gitignore).
+# The npm README: the docs folded into one file under the registry's 64 KiB cap,
+# with links to the full references on GitHub. Generated under build/, not tracked.
 if [ -f "$ROOT/docs/API.md" ]; then
     "$NODE" "$ROOT/scripts/build-npm-readme.mjs"
 fi
