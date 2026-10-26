@@ -23,20 +23,20 @@ scsynth with low latency inside a web page.
 
 **Core**
 
-| Member                    | Description                                                                                                            |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| [`init()`](#init)         | Initialise the engine.                                                                                                 |
-| [`shutdown()`](#shutdown) | Shut down the engine.                                                                                                  |
-| [`destroy()`](#destroy)   | Destroy the engine completely.                                                                                         |
-| [`recover()`](#recover)   | Smart recovery — tries a quick resume first, falls back to full reload.                                                |
-| [`suspend()`](#suspend)   | Suspend the AudioContext and stop the drift timer.                                                                     |
-| [`resume()`](#resume)     | Quick resume.                                                                                                          |
-| [`reload()`](#reload)     | Full reload — recreates the worklet and WASM, and brings the engine back doing as little as it can.                    |
-| [`reset()`](#reset)       | Shutdown and immediately re-initialise.                                                                                |
-| [`send()`](#send)         | Send an OSC message to the engine.                                                                                     |
-| [`sendOSC()`](#sendosc)   | Send pre-encoded OSC bytes to the engine.                                                                              |
-| [`sync()`](#sync)         | A barrier: resolves once everything sent before it has reached the engine, in order.                                   |
-| [`purge()`](#purge)       | Flush all pending scheduled OSC: clears the engine's scheduler and the IN ring so nothing already in flight will fire. |
+| Member                    | Description                                                                                                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`init()`](#init)         | Initialise the engine.                                                                                                                                                        |
+| [`shutdown()`](#shutdown) | Shut down the engine.                                                                                                                                                         |
+| [`destroy()`](#destroy)   | Destroy the engine completely.                                                                                                                                                |
+| [`recover()`](#recover)   | Smart recovery — tries a quick resume first, falls back to full reload.                                                                                                       |
+| [`suspend()`](#suspend)   | Suspend the AudioContext and stop the drift timer.                                                                                                                            |
+| [`resume()`](#resume)     | Quick resume.                                                                                                                                                                 |
+| [`reload()`](#reload)     | Full reload — recreates the worklet and WASM, and brings the engine back doing as little as it can.                                                                           |
+| [`reset()`](#reset)       | Shutdown and immediately re-initialise.                                                                                                                                       |
+| [`send()`](#send)         | Send an OSC message to the engine.                                                                                                                                            |
+| [`sendOSC()`](#sendosc)   | Send pre-encoded OSC bytes to the engine.                                                                                                                                     |
+| [`sync()`](#sync)         | A barrier: resolves once everything sent before it has reached the engine, in order.                                                                                          |
+| [`purge()`](#purge)       | Drop everything the engine is holding: the bundles in its scheduler, and the messages waiting in the IN ring, which are refused to their senders as stale rather than played. |
 
 **Asset Loading**
 
@@ -1163,10 +1163,14 @@ Unsubscribe function — call it to remove the listener before it fires
 
 > **purge**(): `Promise`<`void`>
 
-Flush all pending scheduled OSC: clears the engine's scheduler and the IN
-ring so nothing already in flight will fire. Resolves when the worklet
-confirms — or after a second without an answer, when it emits `'warning'`
-(the worklet may be gone).
+Drop everything the engine is holding: the bundles in its scheduler, and
+the messages waiting in the IN ring, which are refused to their senders as
+stale rather than played. It covers what has reached the engine when the
+purge reaches it. A send still in transit on another port (an OscChannel
+in postMessage mode, a worker) is not covered and plays as new, so stop
+your senders first. Resolves when the worklet confirms — or after a
+second without an answer, when it emits `'warning'` (the worklet may be
+gone).
 
 ###### Returns
 

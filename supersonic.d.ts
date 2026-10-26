@@ -1911,10 +1911,14 @@ export class SuperSonic {
   ): Promise<OscMessage>;
 
   /**
-   * Flush all pending scheduled OSC: clears the engine's scheduler and the IN
-   * ring so nothing already in flight will fire. Resolves when the worklet
-   * confirms — or after a second without an answer, when it emits `'warning'`
-   * (the worklet may be gone).
+   * Drop everything the engine is holding: the bundles in its scheduler, and
+   * the messages waiting in the IN ring, which are refused to their senders as
+   * stale rather than played. It covers what has reached the engine when the
+   * purge reaches it. A send still in transit on another port (an OscChannel
+   * in postMessage mode, a worker) is not covered and plays as new, so stop
+   * your senders first. Resolves when the worklet confirms — or after a
+   * second without an answer, when it emits `'warning'` (the worklet may be
+   * gone).
    */
   purge(): Promise<void>;
 

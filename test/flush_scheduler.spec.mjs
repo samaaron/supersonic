@@ -402,7 +402,14 @@ test.describe("Flush Scheduler", () => {
     expect(result.finalPrescheduler).toBe(0);
   });
 
-  test("purge drains stale messages from IN ring buffer", async ({ page, sonicConfig }) => {
+  test("purge drops the bundles the engine holds, however they reached it", async ({ page, sonicConfig }) => {
+    // Purge covers what has reached the engine when the purge reaches it. A
+    // channel's sends travel on a port of their own in postMessage mode, and
+    // messages on two ports arrive in no fixed order relative to each other,
+    // so a send still in transit when the purge lands is not covered (it is
+    // new, and plays). The test therefore waits until the engine holds every
+    // bundle before purging, as a sender must: 13 of 20 overtook the purge on
+    // CI (2026-10-26) when it did not.
     const result = await page.evaluate(async (config) => {
       eval(config._helpers);
 
@@ -412,53 +419,53 @@ test.describe("Flush Scheduler", () => {
       await sonic.sync(1);
 
       const channel = sonic.createOscChannel();
+      const depth = () => sonic.getMetrics().engineSchedulerDepth || 0;
+      const depthBefore = depth();
+      const latesBaseline = sonic.getMetrics().engineSchedulerLates || 0;
 
-      // Record baseline metrics while engine is running
-      const metricsBaseline = sonic.getMetrics();
-      const latesBaseline = metricsBaseline.engineSchedulerLates || 0;
-
-      // Suspend AudioContext — process() stops, ring buffer won't be consumed
-      await sonic.suspend();
-
-      // Write 20 bundles directly to ring buffer with timestamps already in the past.
-      // Since process() isn't running, these sit in the ring buffer unconsumed.
-      const pastNTP = getCurrentNTP() - 5.0;
+      // 20 bundles for five seconds ahead, through the channel. The engine
+      // takes them off the IN ring into its scheduler as it renders.
+      const ahead = getCurrentNTP() + 5.0;
       let writeCount = 0;
       for (let i = 0; i < 20; i++) {
-        const ok = channel.send(createTimedBundle(pastNTP + (i * 0.01), 95000 + i));
-        if (ok) writeCount++;
+        if (channel.send(createTimedBundle(ahead + (i * 0.01), 95000 + i))) writeCount++;
       }
 
-      // Purge — should clear ring buffer contents alongside prescheduler and WASM scheduler
+      // Until the scheduler holds them all (postMessage mode hears the
+      // metrics from the running worklet, so this waits while it renders).
+      const deadline = performance.now() + 5000;
+      while (depth() < depthBefore + writeCount && performance.now() < deadline) {
+        await new Promise(r => setTimeout(r, 20));
+      }
+      const depthHeld = depth();
+
+      // Suspend, purge, resume: what recover() does when the context slept.
+      await sonic.suspend();
       await sonic.purge();
-
-      // Resume — process() starts running again
       await sonic.resume();
-
-      // Wait for several process() cycles
       await new Promise(r => setTimeout(r, 500));
 
       const metricsAfter = sonic.getMetrics();
-      const latesAfter = metricsAfter.engineSchedulerLates || 0;
-
       await sonic.shutdown();
       return {
         writeCount,
-        latesBaseline,
-        latesAfter,
-        newLates: latesAfter - latesBaseline,
+        depthBefore,
+        depthHeld,
+        depthAfter: metricsAfter.engineSchedulerDepth || 0,
+        newLates: (metricsAfter.engineSchedulerLates || 0) - latesBaseline,
       };
     }, { ...sonicConfig, _helpers: HELPERS });
 
-    console.log(`\npurge ring buffer drain test (${sonicConfig.mode}):`);
-    console.log(`  Bundles written to ring buffer: ${result.writeCount}`);
-    console.log(`  Lates baseline: ${result.latesBaseline}`);
-    console.log(`  Lates after resume: ${result.latesAfter}`);
+    console.log(`\npurge held bundles test (${sonicConfig.mode}):`);
+    console.log(`  Bundles sent: ${result.writeCount}`);
+    console.log(`  Scheduler depth: ${result.depthBefore} -> ${result.depthHeld} held -> ${result.depthAfter} after purge`);
     console.log(`  New lates: ${result.newLates}`);
 
-    // Bundles should have been written successfully
-    expect(result.writeCount).toBeGreaterThan(0);
-    // After purge, no stale bundles should fire when resuming — lates must not increase
+    expect(result.writeCount).toBe(20);
+    // The engine held every bundle before the purge
+    expect(result.depthHeld).toBe(result.depthBefore + 20);
+    // The purge dropped them all, and none fired, early or late
+    expect(result.depthAfter).toBe(0);
     expect(result.newLates).toBe(0);
   });
 
