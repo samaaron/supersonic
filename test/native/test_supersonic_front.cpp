@@ -505,11 +505,13 @@ TEST_CASE("front, measure: what each definition costs the block that parses it",
     cfg.manualAudioPump   = true;
     cfg.hostDrivesControl = true;
     EngineFixture fx(cfg);
-    auto answered = [&] {
+    auto count = [&](const char* address) {
         size_t n = 0;
-        for (const auto& r : fx.routedReplies()) if (r.origin == kSpider && r.address == "/done") ++n;
+        for (const auto& r : fx.routedReplies()) if (r.origin == kSpider && r.address == address) ++n;
         return n;
     };
+    auto answered = [&] { return count("/done"); };
+    auto refused  = [&] { return count("/fail"); };
     auto timedBlock = [&] {
         const auto t0 = std::chrono::steady_clock::now();
         fx.engine().pumpAudioBlock();
@@ -527,14 +529,17 @@ TEST_CASE("front, measure: what each definition costs the block that parses it",
     for (int round = 0; round < kRounds; ++round) {
         for (size_t i = 0; i < defs.size(); ++i) {
             quiet[i].push_back(timedBlock());
-            const size_t before = answered();
+            const size_t before = answered(), refusedBefore = refused();
             const auto pkt = osc_test::messageWithBlob("/d_recv", defs[i].second.data(), defs[i].second.size());
             REQUIRE(fx.engine().ingest(pkt.ptr(), pkt.size(), kSpider) == CLOCKWORK_OK);
             double longest = 0.0;
-            for (int blocks = 0; answered() == before; ++blocks) {
+            for (int blocks = 0; answered() == before && refused() == refusedBefore; ++blocks) {
+                INFO(defs[i].first);
                 REQUIRE(blocks < 16);
                 longest = std::max(longest, timedBlock());
             }
+            INFO(defs[i].first << " was refused: the engine answered /fail");
+            REQUIRE(refused() == refusedBefore);
             parsing[i].push_back(longest);
         }
     }

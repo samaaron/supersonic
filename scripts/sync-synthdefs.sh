@@ -10,14 +10,13 @@ set -e
 #   scripts/sync-synthdefs.sh <sonic-pi checkout> --check   say what differs, and fail if anything does
 #                                                           (scripts/bump-version.sh runs this before a release)
 #
-# Two lists say where the package and Sonic Pi part on purpose:
+# One list says where the package and Sonic Pi part on purpose:
 #   LEFT_OUT  Sonic Pi's, not SuperSonic's: winwood_lead reads buffer 0 as a mono buffer of random numbers, which
 #             only Sonic Pi's server sets up (removed 2026-01-28)
-#   OURS      SuperSonic's own, not Sonic Pi's: mixout, the mixer with an out bus (added 2026-04-10). Kept as it is;
-#             it has no Sonic Pi original to follow
+# The package has no definition of its own: every file is one of Sonic Pi's, and the native tests prove each
+# one loads.
 
 LEFT_OUT="sonic-pi-winwood_lead"
-OURS="sonic-pi-mixout"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/packages/supersonic-scsynth-synthdefs/synthdefs"
@@ -47,10 +46,9 @@ for f in "$COMPILED"/sonic-pi-*.scsyndef; do
         $CHECK || cp "$f" "$to"
     fi
 done
-# a synthdef Sonic Pi no longer has (and not one of SuperSonic's own): gone from the package too
+# a synthdef Sonic Pi no longer has: gone from the package too
 for f in "$PACKAGE"/sonic-pi-*.scsyndef; do
     name="$(basename "$f" .scsyndef)"
-    listed "$OURS" "$name" && continue
     if [ ! -f "$COMPILED/$name.scsyndef" ]; then
         echo "  gone:    $name"; removed=$((removed + 1))
         $CHECK || rm "$f"

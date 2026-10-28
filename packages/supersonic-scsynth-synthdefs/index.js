@@ -91,7 +91,6 @@ export const SYNTHDEF_NAMES = [
   "sonic-pi-live_audio_mono",
   "sonic-pi-live_audio_stereo",
   "sonic-pi-mixer",
-  "sonic-pi-mixout",
   "sonic-pi-mod_dsaw",
   "sonic-pi-mod_fm",
   "sonic-pi-mod_pulse",

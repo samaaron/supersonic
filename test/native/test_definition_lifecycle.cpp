@@ -31,8 +31,9 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 
-#include <fstream>
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <vector>
 
 namespace {
@@ -99,6 +100,34 @@ TEST_CASE("Definitions: /d_recv makes a definition known to the engine",
     // up in, and the engine's own tally is the thing that decides whether
     // /s_new will work.
     CHECK(synthDefCount(fix) == before + 1);
+}
+
+// Every definition the package ships loads. The front follows scsynth's rule
+// for a directory: a file the engine refuses costs the load one definition
+// and the /d_loadDir still answers /done, so a broken file fails at every
+// boot with nothing but a debug line to show for it. This case names the
+// file and gives the engine's reason.
+TEST_CASE("Definitions: every packaged definition loads", "[definitions]") {
+    EngineFixture fix;
+    std::vector<std::filesystem::path> files;
+    for (const auto& e : std::filesystem::directory_iterator(CLOCKWORK_SYNTHDEFS_DIR))
+        if (e.is_regular_file() && e.path().extension() == ".scsyndef") files.push_back(e.path());
+    std::sort(files.begin(), files.end());
+    REQUIRE(files.size() > 100);
+
+    for (const auto& path : files) {
+        std::ifstream f(path, std::ios::binary);
+        std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        REQUIRE(!bytes.empty());
+        fix.clearReplies();
+        fix.send(osc_test::messageWithBlob("/d_recv", bytes.data(), bytes.size()));
+        OscReply done, fail;
+        if (fix.waitForReply("/done", done)) continue;
+        std::string why = "no answer";
+        if (fix.waitForReply("/fail", fail, 0))
+            why = fail.parsed().argCount() > 1 ? fail.parsed().argString(1) : "refused";
+        FAIL(path.filename().string() << ": " << why);
+    }
 }
 
 // The engine reads no files, on any platform: a definition reaches it as
