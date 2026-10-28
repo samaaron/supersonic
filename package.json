@@ -78,7 +78,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.25.12",
     "fast-check": "^4.6.0",
     "remark-gfm": "^4.0.1",
     "tsd": "^0.33.0",
