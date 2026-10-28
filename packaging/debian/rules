@@ -1,9 +1,9 @@
 #!/usr/bin/make -f
 # Debian rules for supersonic.
 #
-# The build is fully offline: Catch2, zlib and stb come from Debian packages,
-# Ableton Link from the orig-link component tarball (patched via
-# debian/patches), and the Rust crates from the orig-rust-vendor component
+# The build is fully offline: Catch2 comes from Debian, Ableton Link from the
+# orig-link component tarball (patched via debian/patches), and the Rust
+# crates (the audio decoders among them) from the orig-rust-vendor component
 # tarball via the cargo source replacement written below. clockwork (the
 # substrate SuperSonic runs on) is part of the orig tarball, under clockwork/.
 # Plugin hosting is off: the CLAP and VST3 SDKs are fetched at configure time
@@ -35,8 +35,6 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-DBUILD_TESTS=ON \
 		-DCLOCKWORK_PLUGINS=OFF \
-		-DCLOCKWORK_SYSTEM_ZLIB=ON \
-		-DCLOCKWORK_SYSTEM_STB=ON \
 		-DSUPERSONIC_BRIDGE_INSTALL_DIR=libexec/supersonic \
 		-DCLOCKWORK_CARGO_OFFLINE=ON \
 		-DFETCHCONTENT_FULLY_DISCONNECTED=ON \

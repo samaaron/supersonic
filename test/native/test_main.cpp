@@ -1,7 +1,8 @@
 /*
- * test_main.cpp — Custom Catch2 main with JUCE initialisation.
+ * test_main.cpp — Custom Catch2 main: the platform started through Smoothie.
  *
- * JUCE requires COM init on Windows (ScopedJuceInitialiser_GUI)
+ * The device layer needs a message loop (smoothie::startPlatform, as
+ * clockwork's own tests start it)
  * before any AudioDeviceManager or Thread operations.
  *
  * Also installs a global RT-alloc listener: process_audio() sets a
@@ -18,7 +19,7 @@
 #include <catch2/catch_test_case_info.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
-#include <juce_events/juce_events.h>
+#include "smoothie_worklet.h"   // startPlatform
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -108,6 +109,6 @@ int main(int argc, char* argv[]) {
     // A fatal signal prints the last engine debug lines and a backtrace
     // (DebugTail.h); Catch2 reports first, then hands the signal back here.
     debug_tail::installFatalHandlers();
-    juce::ScopedJuceInitialiser_GUI juceInit;
+    smoothie::startPlatform();
     return runSession(argc, argv);
 }

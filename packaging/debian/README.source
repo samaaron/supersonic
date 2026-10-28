@@ -30,10 +30,13 @@ in .github/workflows/debian.yml, which then builds the package in a
 network-disconnected container, runs lintian and autopkgtest). A maintainer
 can reuse that script or assemble the components by hand as described above.
 
-Build dependencies come from the Debian archive: Catch2, zlib and stb are
-the system packages (-DCLOCKWORK_SYSTEM_ZLIB=ON, -DCLOCKWORK_SYSTEM_STB=ON). The audio-device layer is
-clockwork's in-tree smoothie (an ISC fork of four JUCE 7 modules); there is
-no JUCE build-dependency. Plugin hosting (CLAP/VST3) is compiled out because
-the SDKs are fetched at configure time and Debian ships neither. See
-docs/DEBIAN-PACKAGING.md in the upstream tree for the full rationale and the
-mapping table.
+Build dependencies come from the Debian archive: Catch2 is the system
+package. The audio file decoders are Rust crates in the rust-vendor
+component; the audio-device layer is clockwork's in-tree smoothie (an ISC
+fork of four JUCE 7 modules); there is no JUCE build-dependency. The one
+remaining vendored C library, libsamplerate (clockwork/src/vendor), has a
+system switch (-DCLOCKWORK_SYSTEM_SAMPLERATE=ON, libsamplerate0-dev) that
+this package does not yet turn on. Plugin hosting (CLAP/VST3) is compiled
+out because the SDKs are fetched at configure time and Debian ships neither.
+See docs/DEBIAN-PACKAGING.md in the upstream tree for the full rationale and
+the mapping table.

@@ -50,9 +50,9 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 |---|---|---|
 | clockwork (substrate) | git submodule `clockwork/` | same sources, archived into the orig tarball |
 | smoothie (audio layer) | `clockwork/smoothie/` (clockwork's vendored ISC fork of JUCE 7 modules) | same in-tree sources; no system JUCE, no juceaide |
-| zlib (inside smoothie) | vendored copy | `zlib1g-dev` via `-DCLOCKWORK_SYSTEM_ZLIB=ON` |
-| stb_vorbis (inside clockwork) | vendored copy (v1.22, unmodified) | `libstb-dev` via `-DCLOCKWORK_SYSTEM_STB=ON` |
-| Audio file codecs | clockwork's own (`clockwork_audio_file`, dr_libs, flac encoder) | same — no libsndfile; dr_libs has no distro package |
+| Audio file decoders | clockwork's Rust crate `clockwork-audio-decode` (symphonia, MPL-2.0) | same, from the vendored crates — no libsndfile |
+| Audio file writers | clockwork's own (`clockwork_audio_file`: WAV and FLAC) | same |
+| libsamplerate (Link Audio) | `clockwork/src/vendor/libsamplerate` (0.2.2, unmodified) | same for now; `-DCLOCKWORK_SYSTEM_SAMPLERATE=ON` with `libsamplerate0-dev` once a CI build exercises the switch |
 | Catch2 (tests) | an installed Catch2 3, else FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
 | Ableton Link | FetchContent Link-4.1 + clockwork's 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
 | CLAP / VST3 SDKs (plugin hosting) | installed headers, else fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
@@ -60,9 +60,8 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 | midir (patched fork) | `clockwork/external/midir` (cargo path dep) | same — path deps need no vendoring |
 | tlsf / oscpack / nova-simd | in-tree (as in Debian's own supercollider package) | same |
 
-The switches the Debian build turns on — `CLOCKWORK_SYSTEM_ZLIB`,
-`CLOCKWORK_SYSTEM_STB`, `CLOCKWORK_CARGO_OFFLINE` — are independent and
-default OFF, so macOS, Windows and developer builds are untouched by them.
+The switch the Debian build turns on, `CLOCKWORK_CARGO_OFFLINE`, defaults
+OFF, so macOS, Windows and developer builds are untouched by it.
 `CLOCKWORK_PLUGINS` is the other way round: it defaults ON, and the Debian
 build turns it off.
 
@@ -100,7 +99,7 @@ revision, `1~ci1`, sorts below `1`.
 
 - **During the build** (`debian/rules` `dh_auto_test` override): the full
   Catch2 suite (~everything except `[benchmark]`), compiled and run against
-  the *Debian* versions of Catch2, zlib and stb — this is the compatibility
+  the *Debian* Catch2 and the Debian toolchain — this is the compatibility
   proof for archive dependency versions.
 - **autopkgtest**: `supersonic -v` (superficial) plus the transport harness
   (`test/transport-harness/run.sh`) against the *installed*
@@ -158,9 +157,9 @@ Points a prospective maintainer will care about, and where they stand:
   is the honest representation.
 - **Rust crates are vendored** — accepted Debian practice for applications,
   but an archive maintainer may prefer `librust-*-dev` packages + `dh-cargo`.
-  The dependency surface is small (gilrs, socket2, alsa, plus clockwork's
-  in-tree midir fork) and the licence allow-list is machine-enforced by
-  `clockwork/rust/deny.toml`.
+  The dependency surface is small (gilrs, socket2, alsa, symphonia, plus
+  clockwork's in-tree midir fork) and the licence allow-list is
+  machine-enforced by `clockwork/rust/deny.toml`.
 - **Compiled synthdefs in the source tarball** — the `.scsyndef` files
   under `packages/supersonic-scsynth-synthdefs/` are compiled artifacts whose
   sclang sources live in the Sonic Pi repository (noted in
