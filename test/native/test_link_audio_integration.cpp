@@ -4,11 +4,13 @@
 // surface. Spawns a real out-of-process Link peer via
 // supersonic_test_link_peer and asserts on what the engine receives.
 //
-// Designed to fail today against the truncating renderer in
-// vendor/LinkAudioInputRenderer.hpp (F3): the peer publishes
-// 1024-frame buffers but the renderer caps storage at 512 and reports
-// a numFrames mismatch to Link, breaking beat-time continuity →
-// receive() returns 0 forever.
+// Two processes, real UDP and the machine's own timers: no case here can be
+// deterministic in outcome. What each can be is deterministic in verdict. A
+// case listens through the device, keeps the device's late wakes and the
+// peer's own timing by one clock, and judges what was heard against them: a
+// stall the machine made is excused with the reason, a stall the engine made
+// fails with both sides' accounts, the engine's log and the machine's state.
+// A failure here names its cause, or gives enough to find it.
 //
 // PEER AUDIO ARRIVES ON AN INPUT CHANNEL THE ENGINE CHOOSES. A subscription
 // used to name a bus in the DSP's private pool, and the bridge wrote there
@@ -35,10 +37,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -261,46 +267,6 @@ bool renderUntil(EngineFixture& fx, const std::function<bool()>& heard, std::chr
 }
 
 }  // namespace
-
-TEST_CASE("LinkAudio: receives audio from peer with 1024-frame buffers",
-          "[Link][LinkAudio][integration]") {
-    FakeLinkPeerProcess::Options peerOpts;
-    peerOpts.name         = "FakeLive";
-    peerOpts.blockSize    = 1024;   // matches Live's typical engine size
-    peerOpts.sampleRate   = 48000;
-    peerOpts.channels     = {{"Main", 2, "sine440-880"}};
-    FakeLinkPeerProcess peer{peerOpts};
-    REQUIRE(peer.ready());
-
-    EngineFixture fx{handDrivenConfig()};
-    EngineFixture::Device device{fx, 48000, 512};
-    // Link on (this machine only) + publish=1 so Link Audio is on and the
-    // engine can see other peers' channels via link.channels().
-    fx.send(osc_test::message("/clockwork/clock/visibility",         kThisMachineOnly));
-    fx.send(osc_test::message("/clockwork/clock/audio/publish/set",  int32_t{1}));
-
-    REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main",
-                                   std::chrono::seconds(30)));
-
-    const int32_t main = subscribe(fx, "FakeLive", "Main");
-    REQUIRE(main >= 0);
-
-    // Evolution diagnostics — print state every second for 10s.
-    InputSnapshot snap{};
-    for (int i = 0; i < 10; ++i) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        snap = snapshotInput(fx, "FakeLive", "Main");
-        std::fprintf(stderr,
-            "[t=%ds] state=%d sourceChans=%d bufferedMs=%.2f\n",
-            i + 1, snap.state, snap.sourceNumChannels, snap.bufferedMs);
-        if (snap.state == kStateConnected) break;
-    }
-
-    if (snap.state != kStateConnected) explainInput(fx, "not Connected within ten seconds", snap);
-    CHECK(snap.state == kStateConnected);
-    CHECK(snap.sourceNumChannels == 2);
-    CHECK(snap.bufferedMs > 5.0f);
-}
 
 namespace {
 
@@ -1412,16 +1378,69 @@ struct Hearing {
     std::string             engineLog;   // the engine's debug lines
     std::string             engineAccount;   // where it ran dry, and how much it held, as the judging went
     std::string             peerAccount;     // how late the peer was to publish and to send, as the judging went
+    std::string             machineAccount;  // the machine as the judging ended: load, power, pace
 
     // What a failure says of it: where the damage was heard, the engine's
     // and the peer's accounts of the same time, which between them say which
-    // of the two let the audio stop, and the engine's log, which says whether
-    // the session held more than this test's peer.
+    // of the two let the audio stop, the engine's log, which says whether
+    // the session held more than this test's peer, and the machine's state,
+    // which says whether anything was keeping time at all.
     std::string story() const {
         return "heard: " + heard.damage + "\nthe engine: " + engineAccount + "\nthe peer: " + peerAccount
-             + "\nengine log:\n" + engineLog;
+             + "\nthe machine: " + machineAccount + "\nengine log:\n" + engineLog;
     }
 };
+
+// The machine as it stood: its load averages, whether it was on mains or
+// battery and how charged, and the pace the device's thread kept against the
+// wall clock. On battery and low, macOS stretches timer wakes and a device
+// thread runs at a fraction of real time; under a heavy load an ordinary
+// thread starves. A failure that carries these is one that can be judged
+// from its own text, and one that lacks them has been chased for hours.
+std::string machineAccount(double pace, double worstLateSeconds) {
+    std::ostringstream s;
+    s.setf(std::ios::fixed);
+    s.precision(2);
+    s << "the device's thread kept " << pace << " of a device's pace, its worst wake "
+      << worstLateSeconds * 1e3 << " ms late";
+#if !defined(_WIN32)
+    double load[3] = {0.0, 0.0, 0.0};
+    if (getloadavg(load, 3) == 3)
+        s << "; load " << load[0] << ' ' << load[1] << ' ' << load[2];
+#endif
+#if defined(__APPLE__)
+    if (FILE* p = popen("pmset -g batt", "r")) {
+        std::string out;
+        char line[256];
+        while (std::fgets(line, sizeof line, p)) out += line;
+        pclose(p);
+        const auto from = out.find("drawing from '");
+        if (from != std::string::npos) {
+            const auto end = out.find('\'', from + 14);
+            s << "; on " << out.substr(from + 14, end == std::string::npos ? std::string::npos : end - from - 14);
+        }
+        const auto pct = out.find('%');
+        if (pct != std::string::npos) {
+            auto start = pct;
+            while (start > 0 && std::isdigit(static_cast<unsigned char>(out[start - 1]))) --start;
+            const auto semi = out.find(';', pct);
+            s << ", " << out.substr(start, (semi == std::string::npos ? pct + 1 : semi) - start);
+        }
+    }
+#elif defined(__linux__)
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator("/sys/class/power_supply", ec)) {
+        std::ifstream type(entry.path() / "type");
+        std::string kind;
+        if (!(type >> kind) || kind != "Mains") continue;
+        std::ifstream online(entry.path() / "online");
+        int on = -1;
+        online >> on;
+        s << "; on " << (on == 1 ? "mains" : on == 0 ? "battery" : "an unknown supply");
+    }
+#endif
+    return s.str();
+}
 
 // The peer's account of the judged time, from its own timing: in each tenth
 // of a second by the clock from `judgedFrom`, its latest wake to publish, the
@@ -1463,13 +1482,15 @@ uint64_t engineUnderruns(EngineFixture& fx) {
 }
 
 // With a `peerStall`, the peer's callback stalls for that long half a second
-// into the judged time.
+// into the judged time. `peerBlock` is the peer's own buffer: 64 as Sonic Pi
+// publishes, 1024 as Live does, bigger than most devices' and the size the
+// renderer once truncated.
 Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
                         std::chrono::milliseconds peerStall = std::chrono::milliseconds{0},
-                        DeviceStall deviceStall = {}) {
+                        DeviceStall deviceStall = {}, uint32_t peerBlock = 64) {
     FakeLinkPeerProcess::Options peerOpts;
     peerOpts.name       = "FakeSonicPi";
-    peerOpts.blockSize  = 64;
+    peerOpts.blockSize  = peerBlock;
     peerOpts.sampleRate = 48000;
     peerOpts.channels   = {{"Main", 2, "sine440-880"}};
     peerOpts.stallFor   = peerStall;
@@ -1575,6 +1596,7 @@ Hearing hearSonicPiPeer(int engineRate, uint32_t deviceFrames,
     out.atEnd  = inputStatus(fx, "FakeSonicPi", "Main");
     out.engineUnderrunsAtEnd = engineUnderruns(fx);
     out.engineLog = fx.debugMessagesDump();
+    out.machineAccount = machineAccount(out.heard.pace, out.heard.worstLateSeconds);
     out.report = snapshotInput(fx, "FakeSonicPi", "Main");
 
     // Removed, the input's count stays in the engine's: waited for, since the
@@ -1643,39 +1665,61 @@ TEST_CASE("LinkAudio: the input report says so when what was heard was damaged",
     }
 }
 
+namespace {
+
 // What arrives has to be the peer's audio, not just audio. The engine hears
 // it at its own rate, through whatever device it has: at a device's pace, but
 // a whole buffer at a time. The sine has to come out whole, at pitch, with
-// nothing missing.
+// nothing missing. One listening, judged; the two cases below are the peers.
+void heardWhole(int rate, uint32_t frames, uint32_t peerBlock) {
+    const Hearing hearing = hearSonicPiPeer(rate, frames, std::chrono::milliseconds{0}, {}, peerBlock);
+    const Heard& h = hearing.heard;
+    const auto& a = hearing.atStart;
+    const auto& b = hearing.atEnd;
+    INFO("engine " << rate << " Hz, device buffer " << frames << ", peer buffer " << peerBlock << ": " << h.frames
+         << " frames heard, peak " << h.peak << ", " << h.gaps << " gaps, "
+         << h.jumps << " jumps, " << h.hz << " Hz, at " << h.pace << " of a device's pace;"
+         << " the device's worst callback " << h.worstLateSeconds * 1e3 << " ms late;"
+         << " while judged the engine counted " << (b.underruns - a.underruns) << " underruns, "
+         << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps, drift "
+         << b.driftPpm << " ppm");
+    INFO(hearing.story());
+    // A dropout the machine made, by stalling the device, is not the
+    // engine's: the case did not get to test its claim, and says so.
+    if (h.gaps + h.jumps > 0) {
+        const std::string stalled = hostStalledBefore(h);
+        if (!stalled.empty())
+            SKIP("this machine stalled the " << frames << "-frame device at " << rate << " Hz: " << stalled
+                 << "; what was heard is the device's doing, not the engine's");
+    }
+    CHECK(h.frames > static_cast<size_t>(rate));
+    CHECK(h.peak > 0.5f);
+    CHECK(h.gaps == 0);
+    CHECK(h.jumps == 0);
+    CHECK(std::fabs(h.hz - 440.0) < 4.4);
+}
+
+}  // namespace
+
 TEST_CASE("LinkAudio: a peer's sine arrives whole at the engine's own rate and device buffer",
           "[Link][LinkAudio][integration]") {
     for (const auto& [rate, frames] : kListeners) {
       DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
-        const Hearing hearing = hearSonicPiPeer(rate, frames);
-        const Heard& h = hearing.heard;
-        const auto& a = hearing.atStart;
-        const auto& b = hearing.atEnd;
-        INFO("engine " << rate << " Hz, device buffer " << frames << ": " << h.frames
-             << " frames heard, peak " << h.peak << ", " << h.gaps << " gaps, "
-             << h.jumps << " jumps, " << h.hz << " Hz, at " << h.pace << " of a device's pace;"
-             << " the device's worst callback " << h.worstLateSeconds * 1e3 << " ms late;"
-             << " while judged the engine counted " << (b.underruns - a.underruns) << " underruns, "
-             << (b.resyncs - a.resyncs) << " resyncs and " << (b.warps - a.warps) << " warps, drift "
-             << b.driftPpm << " ppm");
-        INFO(hearing.story());
-        // A dropout the machine made, by stalling the device, is not the
-        // engine's: the case did not get to test its claim, and says so.
-        if (h.gaps + h.jumps > 0) {
-            const std::string stalled = hostStalledBefore(h);
-            if (!stalled.empty())
-                SKIP("this machine stalled the " << frames << "-frame device at " << rate << " Hz: " << stalled
-                     << "; what was heard is the device's doing, not the engine's");
-        }
-        CHECK(h.frames > static_cast<size_t>(rate));
-        CHECK(h.peak > 0.5f);
-        CHECK(h.gaps == 0);
-        CHECK(h.jumps == 0);
-        CHECK(std::fabs(h.hz - 440.0) < 4.4);
+        heardWhole(rate, frames, 64);
+      }
+    }
+}
+
+// Live publishes 1024-frame buffers, bigger than most devices' own, and the
+// renderer once held a buffer to 512 frames, told Link the count was wrong,
+// and received nothing from then on. Heard whole through each device, the
+// same way, and judged the same way: a failure says which side stopped the
+// audio, instead of polling a state for ten seconds and failing on it.
+TEST_CASE("LinkAudio: a peer publishing 1024-frame buffers is heard whole",
+          "[Link][LinkAudio][integration]") {
+    for (const auto& [rate, frames] : kListeners) {
+      DYNAMIC_SECTION("engine " << rate << " Hz, device buffer " << frames) {
+        heardWhole(rate, frames, 1024);
       }
     }
 }
