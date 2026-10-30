@@ -119,8 +119,6 @@ struct World {
 typedef struct World World;
 
 SC_INLINE SndBuf* World_GetBuf(World* inWorld, uint32 index) {
-    // mSndBufs holds exactly mNumSndBufs entries, so index == mNumSndBufs is
-    // already one past the end (must be >=, not >).
     if (index >= inWorld->mNumSndBufs)
         index = 0;
     return inWorld->mSndBufs + index;

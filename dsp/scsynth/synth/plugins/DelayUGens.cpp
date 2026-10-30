@@ -29,8 +29,6 @@
 #include <cstdio>
 
 
-using namespace std; // for math functions
-
 const int kMAXMEDIANSIZE = 32;
 
 static InterfaceTable* ft;

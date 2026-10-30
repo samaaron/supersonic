@@ -25,7 +25,7 @@ struct ReplyAddress;
 extern "C" {
 #endif
 
-int supersonic_meth_piano_wavetable(struct World* inWorld, int inSize, char* inData,
+int supersonic_meth_piano_wavetable(struct World* inWorld, int inSize, const char* inData,
                                     struct ReplyAddress* inReply);
 
 /* Frames in the table the plugin currently plays from; 0 while it has none. */

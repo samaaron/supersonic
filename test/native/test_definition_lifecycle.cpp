@@ -270,6 +270,54 @@ TEST_CASE("Definitions: /d_freeAll forgets all of them", "[definitions]") {
     CHECK(synthDefCount(fix) == 0);
 }
 
+TEST_CASE("Definitions: /d_free of a name that is not loaded fails", "[definitions]") {
+    EngineFixture fix;
+    fix.clearReplies();
+    fix.send(osc_test::message("/d_free", "no-such-definition"));
+    OscReply r;
+    REQUIRE(fix.waitForReply("/fail", r));
+    CHECK(r.parsed().argString(0) == "/d_free");
+}
+
+// A definition a synth is playing outlives /d_freeAll: the library forgets it
+// at once, the synth keeps it until the synth ends, and only then is it freed
+// and /d_removed sent to the clients registered with /notify.
+TEST_CASE("Definitions: /d_freeAll frees a definition a synth is playing when the synth ends",
+          "[definitions]") {
+    EngineFixture fix;
+    REQUIRE(fix.loadSynthDef("sonic-pi-beep"));
+    fix.send(osc_test::message("/notify", 1));
+    OscReply r;
+    REQUIRE(fix.waitForReply("/done", r));
+
+    osc_test::Builder play;
+    play.begin("/s_new") << "sonic-pi-beep" << 1000 << 0 << 0 << "sustain" << 1000.0f;
+    fix.send(play.end());
+
+    fix.clearReplies();
+    fix.send(osc_test::message("/d_freeAll"));
+    CHECK(synthDefCount(fix) == 0);
+    // /status is answered after /d_freeAll, so a /d_removed it sent is in by now.
+    for (const auto& reply : fix.allReplies())
+        CHECK(reply.parsed().address != "/d_removed");
+
+    // The synth's controls are found by name through its definition.
+    osc_test::Builder set;
+    set.begin("/n_set") << 1000 << "amp" << 0.25f;
+    fix.send(set.end());
+    osc_test::Builder get;
+    get.begin("/s_get") << 1000 << "amp";
+    fix.clearReplies();
+    fix.send(get.end());
+    REQUIRE(fix.waitForReply("/n_set", r));
+    CHECK(r.parsed().argFloat(2) == 0.25f);
+
+    fix.clearReplies();
+    fix.send(osc_test::message("/n_free", 1000));
+    REQUIRE(fix.waitForReply("/d_removed", r));
+    CHECK(r.parsed().argString(0) == "sonic-pi-beep");
+}
+
 // ── Across a rebuild ────────────────────────────────────────────────────────
 
 TEST_CASE("Definitions: a cold swap takes the definitions with it",

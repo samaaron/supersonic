@@ -109,7 +109,7 @@ int         supersonic_assets_contains(const void* ptr);
 #endif
 
 #ifdef NO_LIBSNDFILE
-struct SF_INFO {};
+typedef struct SF_INFO SF_INFO;
 #endif
 
 SCBool SendMsgToEngine(World* inWorld, FifoMsg* inMsg);
@@ -257,6 +257,16 @@ void sc_SetDenormalFlags() {
 #include "scsynth_tables.h"
 #include "scsynth_options.h"
 
+// C API version that takes the SF_INFO by pointer
+SCErr sndfileFormatInfoFromStrings(SF_INFO* info, const char* headerFormat, const char* sampleFormat) {
+    assert(info != nullptr);
+#ifdef NO_LIBSNDFILE
+    return kSCErr_Failed;
+#else
+    return sndfileFormatInfoFromStrings(*info, headerFormat, sampleFormat);
+#endif
+}
+
 void InterfaceTable_Init() {
     InterfaceTable* ft = &gInterfaceTable;
     ft->mSine = gSine;
@@ -294,11 +304,9 @@ void InterfaceTable_Init() {
 
     ft->fSendMsgFromRT = &SendMsgFromEngine;
     ft->fSendMsgToRT = &SendMsgToEngine;
-#ifdef NO_LIBSNDFILE
-    ft->fSndFileFormatInfoFromStrings = NULL;
-#else
+
     ft->fSndFileFormatInfoFromStrings = &sndfileFormatInfoFromStrings;
-#endif
+
     ft->fGetNode = &World_GetNode;
     ft->fGetGraph = &World_GetGraph;
 
@@ -1013,15 +1021,34 @@ void World_RemoveGraphDef(World* inWorld, GraphDef* inGraphDef) {
     inWorld->hw->mGraphDefLib->Remove(inGraphDef);
 }
 
+/** @brief implements the \c /d_freeAll command */
 void World_FreeAllGraphDefs(World* inWorld) {
     GrafDefTable* lib = inWorld->hw->mGraphDefLib;
     int size = lib->TableSize();
+    GraphDef* defList = nullptr;
+
     for (int i = 0; i < size; ++i) {
         GraphDef* def = lib->AtIndex(i);
-        if (def)
-            GraphDef_Free(def);
+        if (def) {
+            assert(def->mRefCount > 0);
+            if (--def->mRefCount == 0) {
+                // add to list
+                assert(def->mNext == nullptr);
+                def->mNext = defList;
+                defList = def;
+            }
+        }
     }
+
     lib->MakeEmpty();
+
+    if (defList) {
+        // free all released GraphDefs at once: see DeleteGraphDefMsg (SC_HiddenWorld.h)
+        DeleteGraphDefMsg msg;
+        msg.mWorld = inWorld;
+        msg.mDefList = defList;
+        msg.Perform();
+    }
 }
 
 GraphDef* World_GetGraphDef(World* inWorld, int32* inKey) { return inWorld->hw->mGraphDefLib->Get(inKey); }
@@ -1144,6 +1171,7 @@ void World_Cleanup(World* world, bool unload_plugins) {
     }
 
     HiddenWorld* hw = world->hw;
+    assert(hw != nullptr);
 
     // A World_New that threw after mRealTime was set but before the driver
     // was made has no driver to stop.
@@ -1377,7 +1405,29 @@ void NodeEndMsg::Perform() {
         SendReply(&addr, packet.data(), packet.size());
 }
 
-void NotifyNoArgs(World* inWorld, char* inString);
+void DeleteGraphDefMsg::Perform() {
+    for (GraphDef* def = mDefList; def != nullptr;) {
+        GraphDef* next = def->mNext;
+
+        // notify clients
+        small_scpacket packet;
+        packet.adds("/d_removed");
+        packet.maketags(2);
+        packet.addtag(',');
+        packet.addtag('s');
+        packet.adds((char*)def->mNodeDef.mName);
+
+        for (const auto& addr : *mWorld->hw->mUsers) {
+            // TODO: fix signature of SendReply and ReplyFunc
+            SendReply(const_cast<ReplyAddress*>(&addr), packet.data(), packet.size());
+        }
+
+        GraphDef_Free(def);
+
+        def = next;
+    }
+}
+
 void NotifyNoArgs(World* inWorld, char* inString) {
     small_scpacket packet;
     packet.adds(inString);

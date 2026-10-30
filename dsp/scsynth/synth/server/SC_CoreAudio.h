@@ -26,9 +26,9 @@
 #include "SC_SyncCondition.h"
 // SuperSonic: scsynth scheduler unused — SuperSonic schedules via EngineScheduler
 // #include "PriorityQueue.h"
-#include <optional>
 
-#include <SC_Lock.h>
+#include <optional>
+#include <thread>
 
 #define SC_AUDIO_API_COREAUDIO 1
 #define SC_AUDIO_API_JACK 2
@@ -157,7 +157,7 @@ protected:
     EngineFifo mFromEngine, mToEngine;
     EngineFifo mOscPacketsToEngine;
     SC_SyncCondition mAudioSync;
-    SC_Thread mThread;
+    std::thread mThread;
     bool mRunThreadFlag;
     uint32 mSafetyOffset;
     // PriorityQueueT<SC_ScheduledEvent, 2048> mScheduler;  // SuperSonic: unused

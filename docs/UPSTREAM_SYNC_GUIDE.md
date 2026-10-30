@@ -1,9 +1,9 @@
 # Supersonic ↔ SuperCollider Upstream Sync Guide
 
-**Last Updated**: 2026-10-08
-**Last Sync Commit**: 16be628
-**Upstream Branch**: supercollider/develop (tracked to 2026-10-08)
-**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD 16be628)
+**Last Updated**: 2026-10-30
+**Last Sync Commit**: 9a749de
+**Upstream Branch**: supercollider/develop (tracked to 2026-10-30)
+**Verified Against**: SuperCollider 3.15.0-dev (develop HEAD 9a749de)
 
 ---
 
@@ -122,7 +122,7 @@ date: upstream merges branches whose commits carry older dates, and a
 `--since` date filter can miss them.
 
 ```bash
-LAST_SYNC_COMMIT="16be628"   # top of this file
+LAST_SYNC_COMMIT="9a749de"   # top of this file
 
 # View all upstream commits since then
 git log --oneline "$LAST_SYNC_COMMIT"..supercollider/develop
@@ -529,7 +529,7 @@ git checkout main
 git status  # ensure clean working directory
 
 # 2. Find commits since last sync (Last Sync Commit, top of this file)
-LAST_SYNC_COMMIT="16be628"
+LAST_SYNC_COMMIT="9a749de"
 git log --reverse --oneline "$LAST_SYNC_COMMIT"..supercollider/develop -- \
     server/scsynth server/plugins \
     include/server include/plugin_interface include/common common/ \
@@ -652,6 +652,37 @@ server/scsynth/SC_Rate.cpp        # Rate structures
 ---
 
 ## Reference: Previous Sync Summary
+
+### Full sync — develop 9a749de (2026-10-30)
+
+Reviewed `16be628..9a749de` (44 upstream commits, 12 touching scsynth paths).
+Each was merged one commit at a time with `git merge-file` (SuperSonic's
+file, upstream's before the commit, upstream's after it), because every file
+these commits touch has diverged here. Where a fix lands in code SuperSonic
+compiles out or does not carry, its intent was checked against SuperSonic's
+own version of that job.
+
+**Applied:**
+- `9a749de` Server commands ([PR #7805](https://github.com/supercollider/supercollider/pull/7805)) — 🔴 `/d_freeAll` freed every definition even while a synth was playing it, a use-after-free; it now honours the reference count and a definition goes when its last synth ends. Also: `GraphDef_Release` replaces `GraphDef_DeleteMsg`; `/d_free` of a name that is not loaded is a `/fail`; `/status` and `/rtMemoryStatus` are gathered in the command; `/quit` fails a second time; command functions take `const char*`; the sequenced commands use in-class initialisers and lose `CallDestructor`. Adapted:
+  - upstream frees a released definition without `/d_removed` outside real-time mode, and SuperSonic is never in real-time mode, so `DeleteGraphDefMsg::Perform` (notify, then free) runs where the definition is released, and there is no FIFO for it. `/d_freeAll` now sends `/d_removed` too.
+  - upstream's `/status` calls the audio driver, which SuperSonic does not have: the CPU figures stay 0 and the rates the World's, as before.
+  - SuperSonic's own refusals (`/d_load`, `/d_loadDir`, `/quit`, the buffer file reads and `/b_write`) and its idempotent `/notify` are kept; `/b_setSampleRate` stays out.
+  - the C++20 build: `path.u8string()` is `std::u8string` there, so paths go through `SC_Codecvt::path_to_utf8_str`.
+- `65ff083` `World_GetBuf` and `World_GetNRTBuf` take `>=`, not `>` — SuperSonic already had this fix; upstream's line replaces ours.
+- `76db213` `/notify` messages unified — the wording only; SuperSonic's `/notify` stays idempotent.
+- `fe223bc`, `6b93e75`, `1cabab1`, `73181de` — code cleanup, `override`, no `using namespace std`, outdated C++ (`if constexpr` for `enable_if` in UnaryOpUGens). SuperSonic's boost-free replacements are kept where upstream still uses boost.
+- `4677617` `big_scpacket` holds a UDP payload: 65504 bytes.
+
+**Not applicable:**
+- `264e3eb` NRT synthesis — `World_NonRealTimeSynthesis` is compiled out (`NO_LIBSNDFILE`). Its intents hold here already: block time comes from Clockwork's frame clock, so nothing accumulates; the input buses are sized from the configured maximum, and a channel the device does not supply is not marked touched, so it reads as silence.
+- `9a749de`'s `/b_allocReadChannel` and `/b_readChannel` channel checks — those reads are the front's (`decodeFor` refuses a negative or missing channel) and the engine's `/supersonic/buffer/read` refuses a channel count that differs from the buffer's, which covers both of upstream's new rules.
+- `840f3af`, `76db213`'s supernova half, `4677617`'s `g_query_tree` — supernova. `94229d3` — CMake. The rest — sclang, class library, IDE, help.
+
+**Testing:**
+- `test/native/test_definition_lifecycle.cpp`: `/d_freeAll` with a synth playing keeps the definition until the synth ends, then sends `/d_removed`; against the pre-sync `World_FreeAllGraphDefs` it fails (no `/d_removed`: the definition was already freed). `/d_free` of an unknown name fails.
+- Native (`SuperSonicNativeTests "~[benchmark]"`) on the sync alone: 622/622.
+- Web (Playwright), on the sync together with the reader and SynthDef fixes committed after it: 1478 passed, 72 skipped, none failed.
+- NIF (`scripts/test-nif.sh`), on the same tree as the web run: 28 tests, 0 failures.
 
 ### Full sync — develop 16be628 (2026-10-08)
 
@@ -1150,6 +1181,6 @@ If uncertain about a commit:
 
 ---
 
-**Last Updated**: 2026-10-08
+**Last Updated**: 2026-10-30
 **Maintainer**: See git log for recent contributors
 **Upstream**: https://github.com/supercollider/supercollider

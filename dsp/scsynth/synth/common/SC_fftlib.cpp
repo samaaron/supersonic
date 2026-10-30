@@ -195,7 +195,7 @@ static inline float* scfft_create_fftwindow(int wintype, int log2n) {
 
 static void scfft_ensurewindow(unsigned short log2_fullsize, unsigned short log2_winsize, short wintype);
 
-static bool scfft_global_initialization(void) {
+static bool scfft_global_initialization() {
 #ifdef CLOCKWORK_GUEST
     // Nothing until the store is placed (the static constructor runs before any is); once per placement after.
     if (!gFftWindowStore || gFftTablesBuilt) return false;

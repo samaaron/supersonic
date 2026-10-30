@@ -95,8 +95,8 @@ void LinkUGen_Load(InterfaceTable* table);
 // match the PluginLoad() macro.
 void SPLimiterUGen_Load(InterfaceTable* table);
 
-extern void DiskIO_Unload(void);
-extern void UIUGens_Unload(void);
+extern void DiskIO_Unload();
+extern void UIUGens_Unload();
 #endif // STATIC_PLUGINS
 
 void deinitialize_library() {

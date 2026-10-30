@@ -140,14 +140,14 @@ template <bool shared1, bool shared2> struct buffer_lock2 {
         }
     }
 
-    ~buffer_lock2(void) {
+    ~buffer_lock2() {
         unlock1();
         if (buf1_ != buf2_)
             unlock2();
     }
 
 private:
-    void lock1(void) {
+    void lock1() {
         if (buf1_->isLocal)
             return;
 
@@ -157,7 +157,7 @@ private:
             buf1_->lock.lock_shared();
     }
 
-    bool lock2(void) {
+    bool lock2() {
         if (buf2_->isLocal)
             return true;
 
@@ -167,7 +167,7 @@ private:
             return buf2_->lock.try_lock_shared();
     }
 
-    void unlock1(void) {
+    void unlock1() {
         if (buf1_->isLocal)
             return;
 
@@ -177,7 +177,7 @@ private:
             buf1_->lock.unlock_shared();
     }
 
-    void unlock2(void) {
+    void unlock2() {
         if (buf2_->isLocal)
             return;
 
@@ -201,7 +201,7 @@ template <bool shared> struct buffer_lock {
         }
     }
 
-    ~buffer_lock(void) {
+    ~buffer_lock() {
         if (!buf_->isLocal) {
             if (shared)
                 buf_->lock.unlock_shared();

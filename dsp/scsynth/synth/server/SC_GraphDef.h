@@ -38,7 +38,7 @@ struct ParamSpec {
 typedef HashTable<ParamSpec, GuestMalloc> ParamSpecTable;
 
 /** \note Relevant scsynth code: `GraphDef_Read(World *, char*&, GraphDef*, int32)`
- *  \note Relevant supernova code: `sc_synthdef::prepare(void)`
+ *  \note Relevant supernova code: `sc_synthdef::prepare()`
  */
 struct GraphDef {
     NodeDef mNodeDef;
@@ -86,7 +86,7 @@ GraphDef* GraphDef_LoadDir(struct World* inWorld, const std::filesystem::path& p
 GraphDef* GraphDef_LoadGlob(World* inWorld, const char* pattern, GraphDef* inList);
 #endif
 SCErr GraphDef_Remove(World* inWorld, int32* inName);
-SCErr GraphDef_DeleteMsg(struct World* inWorld, GraphDef* inDef);
+SCErr GraphDef_Release(World* inWorld, GraphDef* inGraphDef);
 void GraphDef_Dump(GraphDef* inGraphDef);
 int32 GetHash(ParamSpec* inParamSpec);
 int32* GetKey(ParamSpec* inParamSpec);

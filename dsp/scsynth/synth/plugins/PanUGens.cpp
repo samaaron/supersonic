@@ -32,8 +32,6 @@ using nova::slope_argument;
 #endif
 
 
-using namespace std; // for math functions
-
 static InterfaceTable* ft;
 
 struct LinPan2 : public Unit {
@@ -1356,8 +1354,8 @@ FLATTEN void PanAz_next_ak_nova(PanAz* unit, int inNumSamples) {
 
     pos = pos * 0.5f * numOutputs + width * 0.5f + orientation;
 
-    float* __restrict__ in = IN(0);
-    float* __restrict__ chanamps = unit->m_chanamp;
+    float* RESTRICT in = IN(0);
+    float* RESTRICT chanamps = unit->m_chanamp;
 
     for (int i = 0; i < numOutputs; ++i) {
         float chanamp = chanamps[i];

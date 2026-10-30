@@ -83,7 +83,7 @@ extern "C" void supersonic_piano_wavetable_reset(void) {
     supersonic_set_piano_wavetable(nullptr, 0);
 }
 
-extern "C" int supersonic_meth_piano_wavetable(World* inWorld, int inSize, char* inData,
+extern "C" int supersonic_meth_piano_wavetable(World* inWorld, int inSize, const char* inData,
                                                ReplyAddress* inReply) {
     static const char* kName = "/supersonic/piano/wavetable";
     sc_msg_iter msg(inSize, inData);

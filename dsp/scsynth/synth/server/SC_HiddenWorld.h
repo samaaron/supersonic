@@ -83,6 +83,17 @@ struct NodeEndMsg {
     void Perform();
 };
 
+// Frees a list of GraphDefs (linked by mNext) and sends /d_removed for each
+// to every registered client. Upstream sends it to the NRT thread through a
+// FIFO in real-time mode; here every stage runs on one thread, so the release
+// performs it directly and there is no FIFO.
+struct DeleteGraphDefMsg {
+    World* mWorld;
+    struct GraphDef* mDefList;
+
+    void Perform();
+};
+
 // Fixed-capacity notification FIFOs, allocated inline in HiddenWorld. At the
 // default depths they dominate sizeof(HiddenWorld) (~120 KiB on 64-bit); the
 // depths come from memory_profile.h and default to upstream scsynth's fixed

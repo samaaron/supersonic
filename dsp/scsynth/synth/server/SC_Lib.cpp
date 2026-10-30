@@ -129,9 +129,9 @@ void SendFailureWithIntValue(ReplyAddress* inReply, const char* inCommandName, c
     packet.addtag(',');
     packet.addtag('s');
     packet.addtag('s');
+    packet.addtag('i');
     packet.adds(inCommandName);
     packet.adds(errString);
-    packet.addtag('i');
     packet.addi((int)index);
     SendReply(inReply, packet.data(), packet.size());
 }
@@ -168,8 +168,6 @@ void ReportLateness(ReplyAddress* inReply, float32 seconds) {
 
 SC_NamedObj::SC_NamedObj() { SetName("?"); }
 
-SC_NamedObj::~SC_NamedObj() {}
-
 void SC_NamedObj::SetName(const int32* inName) {
     if (str4len(inName) > (int)kSCNameLen)
         return;
@@ -186,7 +184,7 @@ void SC_NamedObj::SetName(const char* inName) {
 
 SC_LibCmd::SC_LibCmd(SC_CommandFunc inFunc): mFunc(inFunc) {}
 
-SCErr SC_LibCmd::Perform(struct World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+SCErr SC_LibCmd::Perform(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) {
     SCErr err;
     //	int kSendError = 1;		// i.e., 0x01 | 0x02;
     try {

@@ -166,7 +166,7 @@ void Unit_RunCommand(const UnitCmd* cmd, Unit* unit, sc_msg_iter* msg, ReplyAddr
     }
 }
 
-int PlugIn_DoCmd(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
+SCErr PlugIn_DoCmd(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) {
     sc_msg_iter msg(inSize, inData);
 
     int32* cmdName = msg.gets4();
