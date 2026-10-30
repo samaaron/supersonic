@@ -51,12 +51,12 @@ if(NOT DEFINED CLOCKWORK_LINK_AUDIO)
     set(CLOCKWORK_LINK_AUDIO ${CLOCKWORK_LINK} CACHE BOOL "Link peer audio in and publish out (needs CLOCKWORK_LINK)")
 endif()
 
-# The version the binary reports (banner, -v, the Windows version resource) is
-# this project's, not clockwork's. Set before add_subdirectory: clockwork
-# defaults CLOCKWORK_PRODUCT_VERSION to its own PROJECT_VERSION otherwise.
-if(NOT DEFINED CLOCKWORK_PRODUCT_VERSION)
-    set(CLOCKWORK_PRODUCT_VERSION "${PROJECT_VERSION}" CACHE STRING "Version the binary reports")
-endif()
+# The version the binary reports (banner, -v, /version, the Windows version
+# resource) is this project's, not clockwork's: PROJECT_VERSION, set on every
+# configure so a build directory follows each version bump. Set before
+# add_subdirectory: clockwork defaults CLOCKWORK_PRODUCT_VERSION to its own
+# PROJECT_VERSION otherwise.
+set(CLOCKWORK_PRODUCT_VERSION "${PROJECT_VERSION}" CACHE STRING "Version the binary reports" FORCE)
 
 # Where an install puts the plugin bridge. Beside the server (bin) by default,
 # which is how the engine finds it. A distribution that keeps helper programs

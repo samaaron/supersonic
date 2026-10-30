@@ -33,7 +33,8 @@
 #include "SC_Prototypes.h"
 #include "scsynthsend.h"
 #include "SC_WorldOptions.h"
-#include "SC_Version.hpp"
+#include "clockwork_product.h"   // CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_VERSION
+#include <cstdlib>
 
 extern int gMissingNodeID;
 
@@ -1478,24 +1479,32 @@ SCErr meth_dumpOSC(World* inWorld, int inSize, const char* inData, ReplyAddress*
     return kSCErr_None;
 }
 
+// SuperSonic: /version.reply keeps scsynth's format (program name, major,
+// minor, the rest of the version, branch, commit) and reports SuperSonic and
+// its version (package.json's, from the build). Branch and commit are empty.
 SCErr meth_version(World* inWorld, int /*inSize*/, const char* /*inData*/, ReplyAddress* inReply) {
+    const char* version = CLOCKWORK_PRODUCT_VERSION;
+    char* rest = nullptr;
+    const long major = std::strtol(version, &rest, 10);
+    const long minor = *rest == '.' ? std::strtol(rest + 1, &rest, 10) : 0;
+
     small_scpacket packet;
 
     packet.adds("/version.reply");
     packet.maketags(7);
     packet.addtag(',');
     packet.addtag('s');
-    packet.adds("scsynth");
+    packet.adds(CLOCKWORK_PRODUCT_NAME);
     packet.addtag('i');
-    packet.addi(SC_VersionMajor);
+    packet.addi((int)major);
     packet.addtag('i');
-    packet.addi(SC_VersionMinor);
+    packet.addi((int)minor);
     packet.addtag('s');
-    packet.adds(SC_VersionPostfix);
+    packet.adds(rest);
     packet.addtag('s');
-    packet.adds(SC_BranchOrTag);
+    packet.adds("");
     packet.addtag('s');
-    packet.adds(SC_CommitHash);
+    packet.adds("");
 
     CallSequencedCommand(SendReplyCmd, inWorld, packet.size(), packet.data(), inReply);
 

@@ -26,6 +26,7 @@
  */
 #include "dsp_api.h"
 #include "engine_api.h"
+#include "clockwork_product.h"   // CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_VERSION: how it describes itself
 #include "scsynth_config.h"
 #include "scsynth_options.h"
 #include "buffer_commands.h"
@@ -237,8 +238,8 @@ void notify_record(NotifyPersist* n, uint32_t origin, bool on) {
 }
 
 const DspInfo kInfo = {
-    /* name                    */ "scsynth",
-    /* version                 */ "3.14.1",
+    /* name                    */ CLOCKWORK_PRODUCT_NAME,
+    /* version                 */ CLOCKWORK_PRODUCT_VERSION,
     /* holds_schedule          */ 0,          // clockwork holds timed messages for us
     /* memory_bytes_wanted      */ 0,          // nothing static: the pool's size is in the options (dsp_memory_bytes), and SC_World.cpp carves it
     /* memory_bulk_bytes_wanted */ 0,

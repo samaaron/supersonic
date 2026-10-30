@@ -28,36 +28,36 @@ TEST_CASE("/sync returns /synced with matching id", "[boot]") {
     CHECK(r.parsed().argInt(0) == 42);
 }
 
-// The upstream SuperCollider commit the scsynth fork was last synced with,
-// from the "**Last Sync Commit**:" line of docs/UPSTREAM_SYNC_GUIDE.md.
-static std::string lastSyncCommit() {
-    std::ifstream guide(std::string(SUPERSONIC_SOURCE_DIR) + "/docs/UPSTREAM_SYNC_GUIDE.md");
-    const std::string key = "**Last Sync Commit**: ";
-    for (std::string line; std::getline(guide, line);)
-        if (line.rfind(key, 0) == 0) return line.substr(key.size());
+// SuperSonic's version, from the "version" field of package.json.
+static std::string packageVersion() {
+    std::ifstream pkg(std::string(SUPERSONIC_SOURCE_DIR) + "/package.json");
+    const std::string key = "\"version\": \"";
+    for (std::string line; std::getline(pkg, line);) {
+        const auto at = line.find(key);
+        if (at != std::string::npos) return line.substr(at + key.size(), line.find('"', at + key.size()) - at - key.size());
+    }
     return {};
 }
 
-// /version.reply: program name, major, minor, patch and tweak, branch, commit.
-// The version is the upstream base the fork tracks, and the commit is the
-// one the sync guide records.
-TEST_CASE("/version reports the upstream base the scsynth fork is synced to", "[boot]") {
+// /version.reply in scsynth's format (program name, major, minor, the rest of
+// the version, branch, commit), reporting SuperSonic.
+TEST_CASE("/version reports SuperSonic and its version, in scsynth's reply format", "[boot]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/version"));
     OscReply r;
     REQUIRE(fx.waitForReply("/version.reply", r));
 
+    const std::string version = packageVersion();   // e.g. 0.92.0
+    REQUIRE(!version.empty());
+    const auto dot1 = version.find('.');
+    const auto dot2 = version.find('.', dot1 + 1);
     auto p = r.parsed();
     REQUIRE(p.argCount() == 6);
-    CHECK(p.argString(0) == "scsynth");
-    CHECK(p.argInt(1) == 3);
-    CHECK(p.argInt(2) == 15);
-    CHECK(p.argString(3) == ".0-dev");
-    CHECK(p.argString(4) == "develop");
-    const std::string commit = lastSyncCommit();
-    REQUIRE(!commit.empty());
-    CHECK(p.argString(5) == commit);
+    CHECK(p.argString(0) == "SuperSonic");
+    CHECK(p.argInt(1) == std::stoi(version.substr(0, dot1)));
+    CHECK(p.argInt(2) == std::stoi(version.substr(dot1 + 1, dot2 - dot1 - 1)));
+    CHECK(p.argString(3) == version.substr(dot2));
 }
 
 TEST_CASE("/notify responds with /done", "[boot]") {

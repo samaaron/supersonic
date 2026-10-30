@@ -53,8 +53,6 @@ command -v emcc >/dev/null || {
 # emsdk ships its own node; prefer it so the build does not depend on a system
 # node that may not exist (this box has none on PATH).
 NODE="$(command -v node || ls -d "${EMSDK:-/nonexistent}"/node/*/bin/node 2>/dev/null | head -1)"
-# The version the engine says under its banner: package.json's, as the npm packages and the client say it.
-PRODUCT_VERSION="$("$NODE" -p "require('$ROOT/package.json').version")"
 [ -x "$NODE" ] || { echo "no node found for the memory config reader" >&2; exit 1; }
 
 mkdir -p "$OUT"
@@ -75,7 +73,6 @@ mkdir -p "$ROOT/build"   # the configure log goes beside the build dir, on a fre
 emcmake cmake -B "$BUILD_DIR" -S "$ROOT" \
     -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" \
     -DCLOCKWORK_SCHEDULER="$([ "$SCHEDULER" = 1 ] && echo ON || echo OFF)" \
-    -DCLOCKWORK_PRODUCT_VERSION="$PRODUCT_VERSION" \
     -DCLOCKWORK_WEB_AUDIO_FILES="$([ "${CLOCKWORK_WEB_AUDIO_FILES:-0}" = 1 ] && echo ON || echo OFF)" \
     -DCLOCKWORK_WEB_ASSERTIONS="${CLOCKWORK_ASSERTIONS:-0}" \
     -DCLOCKWORK_WEB_SAFE_HEAP="${CLOCKWORK_SAFE_HEAP:-0}" \

@@ -70,7 +70,6 @@ When syncing with upstream:
 - [ ] Cherry-pick or manually apply changes
 - [ ] Adapt for the guest (no threads, no malloc on the audio thread)
 - [ ] **Leave everything uncommitted** — never `git commit` (or amend, rebase, `cherry-pick --continue`) in this repository; hand the maintainer a suggested commit split with messages in the [format below](#commit-message-format)
-- [ ] Update `dsp/scsynth/synth/common/SC_Version.hpp` to the upstream version and commit synced to: `/version` reports it, and `test/native/test_boot.cpp` holds it to this guide's Last Sync Commit
 - [ ] Update this guide with new sync date
 
 ---
