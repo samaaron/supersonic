@@ -1,0 +1,136 @@
+# SuperSonic security CI
+#
+# What docs/THREATS.md and SECURITY.md promise, checked:
+#
+#   replay     each scsynth fuzz target over its corpus, the seeds and every
+#              crasher ever found, deterministically, under ASan and UBSan, on
+#              every push. Red here means a change broke something.
+#   fuzz       nightly only: each target under libFuzzer for two hours. A
+#              crasher is sealed to Clockwork's .github/fuzz-crasher.pub
+#              (clockwork/scripts/encrypt-crasher.sh) before it is uploaded,
+#              since an artifact on a public repository is readable by anyone
+#              signed in. A crasher, once fixed, is committed to the target's
+#              corpus/regressions and replayed on every push from then on.
+#
+# Clockwork's own fuzz targets (its OSC, sample, Link and ring readers) run in
+# Clockwork's security workflow, not here.
+
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "47 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A push supersedes the push before it. A scheduled or hand-started run is
+# two hours of fuzzing, and a push must not cancel it: those runs get a group
+# of their own, keyed on the run so they never cancel each other either.
+concurrency:
+  group: security-${{ (github.event_name == 'push' || github.event_name == 'pull_request') && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  # ----------------------------------------------------------------- replay --
+  # gcc has no libFuzzer, so each target is linked with Clockwork's replay
+  # main, which runs it once on every file it is given and prints the count.
+  # vptr is off for the reason given in native.yml's sanitize job;
+  # float-cast-overflow is on because gcc leaves it out of undefined.
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
+      - name: Build the fuzz targets under ASan and UBSan
+        run: |
+          flags="-fsanitize=address,undefined,float-cast-overflow -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          CC=gcc CXX=g++ cmake -S . -B build/fuzz -DSUPERSONIC_FUZZ=ON \
+            -DCLOCKWORK_LINK=OFF -DCLOCKWORK_PLUGINS=OFF -DCLOCKWORK_NIF=OFF \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" \
+            "-DCMAKE_EXE_LINKER_FLAGS=$flags"
+          cmake --build build/fuzz --target fuzz_synthdef fuzz_scsynth_commands --parallel 2
+      - name: Replay every corpus
+        env:
+          ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:allocator_may_return_null=1"
+          UBSAN_OPTIONS: "halt_on_error=1:print_stacktrace=1"
+        run: |
+          # Each target must report every file it was given: a corpus that
+          # moved or emptied would otherwise pass in silence.
+          replay() {
+            local target="$1"; shift
+            local expected
+            expected=$(find "$@" -type f | wc -l)
+            timeout -k 30 600 "build/fuzz/test/fuzz/$target" "$@" | tee "replay-$target.log"
+            grep -qx "$expected inputs run" "replay-$target.log"
+            test "$expected" -gt 0
+          }
+          replay fuzz_synthdef packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef
+          replay fuzz_scsynth_commands test/fuzz/corpus/scsynth_commands
+
+  # ------------------------------------------------------------------- fuzz --
+  # Nightly, and by hand. Not on a push: a run bounded by time can go red by
+  # chance, and a red push must always mean a change.
+  fuzz:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: fuzz_synthdef,         seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef" }
+          - { target: fuzz_scsynth_commands, seeds: "test/fuzz/corpus/scsynth_commands" }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
+      - name: Build ${{ matrix.target }}
+        # -fno-sanitize=function: see test/fuzz/CMakeLists.txt.
+        run: |
+          flags="-fsanitize=fuzzer-no-link,address,undefined -fno-sanitize=function,vptr -fno-sanitize-recover=undefined"
+          CC=clang CXX=clang++ cmake -S . -B build/fuzz -DSUPERSONIC_FUZZ=ON \
+            -DCLOCKWORK_LINK=OFF -DCLOCKWORK_PLUGINS=OFF -DCLOCKWORK_NIF=OFF \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags"
+          cmake --build build/fuzz --target ${{ matrix.target }} --parallel 2
+      - name: Fuzz ${{ matrix.target }} for two hours
+        env:
+          ASAN_OPTIONS: "detect_leaks=0:allocator_may_return_null=1"
+        run: |
+          mkdir -p corpus artifacts
+          build/fuzz/test/fuzz/${{ matrix.target }} corpus ${{ matrix.seeds }} \
+            -max_total_time=7200 -rss_limit_mb=4096 -malloc_limit_mb=256 -artifact_prefix=artifacts/
+      - name: Seal the crasher
+        if: failure()
+        run: |
+          # The artifact names the target and the hash of each input, which is
+          # enough to talk about it; the bytes travel sealed.
+          ls -la artifacts/ ; sha256sum artifacts/* || true
+          clockwork/scripts/encrypt-crasher.sh artifacts ${{ matrix.target }}-crasher
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ${{ matrix.target }}-crasher
+          path: |
+            ${{ matrix.target }}-crasher.tar.enc
+            ${{ matrix.target }}-crasher.key.enc

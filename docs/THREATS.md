@@ -41,20 +41,20 @@ already-trusted process.
 | The native host's start-up | in | the process that starts it | `host/SuperSonicMain.cpp` (options, the secret on stdin) | C++ | the secret must be 64 hex characters and a newline before any port opens, or the host exits | `test/native/test_supersonic_binary.cpp`, the transport harness | low |
 | The NIF | in | the BEAM that loads it | `front/supersonic_nif_commands.cpp` over Clockwork's NIF | C++ | the BEAM is the host | the NIF build | low |
 
+Each fuzz target is replayed over its corpus on every push and fuzzed for two
+hours every night (`.github/workflows/security.yml`).
+
 ## Known gaps
 
 Open items, most important first.
 
-1. **The fuzz targets run locally, not in CI.** `test/fuzz/CMakeLists.txt`
-   says how to build and run them; corpus replay on every push and a nightly
-   run are next.
-2. **A SynthDef is read under the fuzzer but never played.** A unit
+1. **A SynthDef is read under the fuzzer but never played.** A unit
    generator reads the inputs its code expects, and the reader does not check
    a unit's input count against its unit generator, as upstream does not.
-3. **The UGens trust their controls as upstream does.** A control value that
+2. **The UGens trust their controls as upstream does.** A control value that
    names a buffer or an index is checked by each UGen; nothing exercises them
    with hostile values systematically.
-4. **The buffer-read glue is not fuzzed.** `decodeFor` applies a client's
+3. **The buffer-read glue is not fuzzed.** `decodeFor` applies a client's
    start, frame count and channel picks to a decoded file.
 
 ## Supply chain
