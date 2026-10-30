@@ -20,6 +20,7 @@
 */
 
 
+#include "SC_FloatToInt.h"
 #include "FFT_UGens.h"
 
 // We include vDSP even if not using for FFT, since we want to use some vectorised add/mul tricks
@@ -78,21 +79,14 @@ void FFTTrigger_next(FFTTrigger* unit, int inNumSamples);
 static int FFTBase_Ctor(FFTBase* unit, int frmsizinput) {
     World* world = unit->mWorld;
 
-    uint32 bufnum = (uint32)ZIN0(0);
-    SndBuf* buf;
-    if (bufnum >= world->mNumSndBufs) {
-        int localBufNum = bufnum - world->mNumSndBufs;
-        Graph* parent = unit->mParent;
-        if (localBufNum <= parent->localMaxBufNum) {
-            buf = parent->mLocalSndBufs + localBufNum;
-        } else {
-            if (unit->mWorld->mVerbosity > -1) {
-                Print("FFTBase_Ctor error: invalid buffer number: %i.\n", bufnum);
-            }
-            return 0;
+    const float fbufnum = ZIN0(0);
+    uint32 bufnum = (uint32)sc_float_to_int32(fbufnum);
+    SndBuf* buf = sc_unit_buffer(unit, fbufnum);
+    if (!buf) {
+        if (unit->mWorld->mVerbosity > -1) {
+            Print("FFTBase_Ctor error: invalid buffer number: %i.\n", bufnum);
         }
-    } else {
-        buf = world->mSndBufs + bufnum;
+        return 0;
     }
 
     if (!buf->data) {
@@ -105,7 +99,7 @@ static int FFTBase_Ctor(FFTBase* unit, int frmsizinput) {
     unit->m_fftsndbuf = buf;
     unit->m_fftbufnum = bufnum;
     unit->m_fullbufsize = buf->samples;
-    int framesize = (int)ZIN0(frmsizinput);
+    int framesize = sc_float_to_int32(ZIN0(frmsizinput));
     if (framesize < 1)
         unit->m_audiosize = buf->samples;
     else
@@ -140,7 +134,7 @@ static int FFTBase_Ctor(FFTBase* unit, int frmsizinput) {
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
 void FFT_Ctor(FFT* unit) {
-    int winType = sc_clip((int)ZIN0(3), -1, 1); // wintype may be used by the base ctor
+    int winType = sc_clip(sc_float_to_int32(ZIN0(3)), -1, 1); // wintype may be used by the base ctor
     unit->m_wintype = winType;
     // These zeroes are to prevent the dtor freeing things that don't exist:
     unit->m_inbuf = nullptr;
@@ -151,7 +145,7 @@ void FFT_Ctor(FFT* unit) {
     }
     int audiosize = unit->m_audiosize * sizeof(float);
 
-    int hopsize = (int)(sc_max(sc_min(ZIN0(2), 1.f), 0.f) * unit->m_audiosize);
+    int hopsize = sc_float_to_int32(sc_max(sc_min(ZIN0(2), 1.f), 0.f) * unit->m_audiosize);
     if (hopsize < FULLBUFLENGTH) {
         Print("FFT_Ctor: hopsize smaller than SC's block size (%i) - automatically corrected.\n", hopsize,
               FULLBUFLENGTH);
@@ -231,7 +225,7 @@ void FFT_next(FFT* unit, int wrongNumSamples) {
 /////////////////////////////////////////////////////////////////////////////////////////////
 
 void IFFT_Ctor(IFFT* unit) {
-    int winType = sc_clip((int)ZIN0(1), -1, 1); // wintype may be used by the base ctor
+    int winType = sc_clip(sc_float_to_int32(ZIN0(1)), -1, 1); // wintype may be used by the base ctor
     unit->m_wintype = winType;
     // These zeroes are to prevent the dtor freeing things that don't exist:
     unit->m_olabuf = nullptr;
@@ -336,27 +330,19 @@ void FFTTrigger_Ctor(FFTTrigger* unit) {
     World* world = unit->mWorld;
 
     /*
-        uint32 bufnum = (uint32)IN0(0);
+        uint32 bufnum = (uint32)sc_float_to_int32(IN0(0));
         Print("FFTTrigger_Ctor: bufnum is %i\n", bufnum);
         if (bufnum >= world->mNumSndBufs) bufnum = 0;
         SndBuf *buf = world->mSndBufs + bufnum;
     */
 
 
-    uint32 bufnum = (uint32)IN0(0);
-    // Print("FFTTrigger_Ctor: bufnum is %i\n", bufnum);
-    SndBuf* buf;
-    if (bufnum >= world->mNumSndBufs) {
-        int localBufNum = bufnum - world->mNumSndBufs;
-        Graph* parent = unit->mParent;
-        if (localBufNum <= parent->localMaxBufNum) {
-            buf = parent->mLocalSndBufs + localBufNum;
-        } else {
-            bufnum = 0;
-            buf = world->mSndBufs + bufnum;
-        }
-    } else {
-        buf = world->mSndBufs + bufnum;
+    const float fbufnum = IN0(0);
+    uint32 bufnum = (uint32)sc_float_to_int32(fbufnum);
+    SndBuf* buf = sc_unit_buffer(unit, fbufnum);
+    if (!buf) {
+        bufnum = 0;
+        buf = world->mSndBufs;
     }
     LOCK_SNDBUF(buf);
 
@@ -367,7 +353,7 @@ void FFTTrigger_Ctor(FFTTrigger* unit) {
 
     int numSamples = FULLBUFLENGTH;
     float dataHopSize = IN0(1);
-    unit->m_numPeriods = unit->m_periodsRemain = (int)(((float)unit->m_fullbufsize * dataHopSize) / numSamples) - 1;
+    unit->m_numPeriods = unit->m_periodsRemain = sc_max(sc_float_to_int32(((float)unit->m_fullbufsize * dataHopSize) / numSamples), INT32_MIN + 1) - 1;
 
     buf->coord = (IN0(2) == 1.f) ? coord_Polar : coord_Complex;
 

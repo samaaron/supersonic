@@ -39,7 +39,7 @@ World* EngineCore_New(const WorldOptions* options, const char** outError) {
     if (!world->mRunning)
         World_Start(world);
 
-    if (!world->hw->mWireBufSpace)
+    if (!world->hw->mWireBufSpace || !world->hw->mMissingInputWire.mBuffer || !world->mMissingOutput)
         return fail("wire buffer allocation failed");
 
     return world;

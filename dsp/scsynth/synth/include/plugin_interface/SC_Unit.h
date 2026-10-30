@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include "SC_Types.h"
 #include "SC_SndBuf.h"
 
@@ -69,19 +70,24 @@ enum { kUnitDef_CantAliasInputsToOutputs = 1 };
 #    undef OUT
 #endif
 
-// These return float* pointers to input and output buffers.
-#define IN(index) (unit->mInBuf[index])
-#define OUT(index) (unit->mOutBuf[index])
+// These return float* pointers to input and output buffers. An input the
+// SynthDef did not give the unit reads as the constant 0, and an output it did
+// not give the unit is written where nothing reads it.
+#define IN(index) ((uint32)(index) < unit->mNumInputs ? unit->mInBuf[index] : unit->mWorld->mMissingInput->mBuffer)
+#define OUT(index) ((uint32)(index) < unit->mNumOutputs ? unit->mOutBuf[index] : unit->mWorld->mMissingOutput)
+
+// the wire an input comes in on
+#define INWIRE(index) ((uint32)(index) < unit->mNumInputs ? unit->mInput[index] : unit->mWorld->mMissingInput)
 
 // These return a float value. Used for control rate inputs and outputs.
 #define IN0(index) (IN(index)[0])
 #define OUT0(index) (OUT(index)[0])
 
 // get the rate of the input.
-#define INRATE(index) (unit->mInput[index]->mCalcRate)
+#define INRATE(index) (INWIRE(index)->mCalcRate)
 
-// get the blocksize of the input
-#define INBUFLENGTH(index) (unit->mInput[index]->mFromUnit->mBufLength)
+// get the blocksize of the input: 1 for a constant, which no unit computes
+#define INBUFLENGTH(index) (INWIRE(index)->mFromUnit ? INWIRE(index)->mFromUnit->mBufLength : 1)
 
 // set the calculation function
 #define SETCALC(func) (unit->mCalcFunc = (UnitCalcFunc)&func)
@@ -97,6 +103,22 @@ enum { kUnitDef_CantAliasInputsToOutputs = 1 };
     if (!(condition)) {                                                                                                \
         ClearUnitOnMemFailed                                                                                           \
     }
+
+// For a unit that reads a count from its own inputs (a name length, a number
+// of channels or stages) and then that many further inputs, or reads the
+// synth's controls: `condition` says the unit has them. A SynthDef can give any
+// count, and one it does not cover leaves the unit outputting zeros and doing
+// nothing else. `what` names what is missing.
+#define ClearUnitIfMissing(condition, what)                                                                            \
+    if (!(condition)) {                                                                                                \
+        Print("%s: the SynthDef gives this unit fewer %s than it reads, so it is silent\n", __func__, what);           \
+        SETCALC(ClearUnitOutputs);                                                                                     \
+        ClearUnitOutputs(unit, 1);                                                                                     \
+        unit->mDone = kSCTrue;                                                                                         \
+        return;                                                                                                        \
+    }
+
+#define ClearUnitIfInputsMissing(condition) ClearUnitIfMissing(condition, "inputs")
 
 #ifdef __cplusplus
 template <typename ToType, typename Value>
@@ -283,20 +305,8 @@ template <bool shared> struct buffer_lock {
         fbufnum = 0.f;                                                                                                 \
     }                                                                                                                  \
     if (fbufnum != unit->m_fbufnum) {                                                                                  \
-        uint32 bufnum = (int)fbufnum;                                                                                  \
-        World* world = unit->mWorld;                                                                                   \
-        if (bufnum >= world->mNumSndBufs) {                                                                            \
-            int localBufNum = bufnum - world->mNumSndBufs;                                                             \
-            Graph* parent = unit->mParent;                                                                             \
-            if (localBufNum <= parent->localBufNum) {                                                                  \
-                unit->m_buf = parent->mLocalSndBufs + localBufNum;                                                     \
-            } else {                                                                                                   \
-                bufnum = 0;                                                                                            \
-                unit->m_buf = world->mSndBufs + bufnum;                                                                \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            unit->m_buf = world->mSndBufs + bufnum;                                                                    \
-        }                                                                                                              \
+        SndBuf* named = sc_unit_buffer(unit, fbufnum);                                                                 \
+        unit->m_buf = named ? named : unit->mWorld->mSndBufs;                                                          \
         unit->m_fbufnum = fbufnum;                                                                                     \
     }                                                                                                                  \
     SndBuf* buf = unit->m_buf;                                                                                         \
@@ -314,20 +324,8 @@ template <bool shared> struct buffer_lock {
         fbufnum = 0.f;                                                                                                 \
     }                                                                                                                  \
     if (fbufnum != unit->m_fbufnum) {                                                                                  \
-        uint32 bufnum = (int)fbufnum;                                                                                  \
-        World* world = unit->mWorld;                                                                                   \
-        if (bufnum >= world->mNumSndBufs) {                                                                            \
-            int localBufNum = bufnum - world->mNumSndBufs;                                                             \
-            Graph* parent = unit->mParent;                                                                             \
-            if (localBufNum <= parent->localBufNum) {                                                                  \
-                unit->m_buf = parent->mLocalSndBufs + localBufNum;                                                     \
-            } else {                                                                                                   \
-                bufnum = 0;                                                                                            \
-                unit->m_buf = world->mSndBufs + bufnum;                                                                \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            unit->m_buf = world->mSndBufs + bufnum;                                                                    \
-        }                                                                                                              \
+        SndBuf* named = sc_unit_buffer(unit, fbufnum);                                                                 \
+        unit->m_buf = named ? named : unit->mWorld->mSndBufs;                                                          \
         unit->m_fbufnum = fbufnum;                                                                                     \
     }                                                                                                                  \
     const SndBuf* buf = unit->m_buf;                                                                                   \
@@ -343,20 +341,8 @@ template <bool shared> struct buffer_lock {
     float fbufnum = ZIN0(0);                                                                                           \
     fbufnum = sc_max(0.f, fbufnum);                                                                                    \
     if (fbufnum != unit->m_fbufnum) {                                                                                  \
-        uint32 bufnum = (int)fbufnum;                                                                                  \
-        World* world = unit->mWorld;                                                                                   \
-        if (bufnum >= world->mNumSndBufs) {                                                                            \
-            int localBufNum = bufnum - world->mNumSndBufs;                                                             \
-            Graph* parent = unit->mParent;                                                                             \
-            if (localBufNum <= parent->localBufNum) {                                                                  \
-                unit->m_buf = parent->mLocalSndBufs + localBufNum;                                                     \
-            } else {                                                                                                   \
-                bufnum = 0;                                                                                            \
-                unit->m_buf = world->mSndBufs + bufnum;                                                                \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            unit->m_buf = world->mSndBufs + bufnum;                                                                    \
-        }                                                                                                              \
+        SndBuf* named = sc_unit_buffer(unit, fbufnum);                                                                 \
+        unit->m_buf = named ? named : unit->mWorld->mSndBufs;                                                          \
         unit->m_fbufnum = fbufnum;                                                                                     \
     }                                                                                                                  \
     SndBuf* buf = unit->m_buf;

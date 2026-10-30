@@ -1156,6 +1156,18 @@ void World_Start(World* inWorld) {
 
     inWorld->hw->mWireBufSpace = (float*)malloc_alig(inWorld->hw->mMaxWireBufs * inWorld->mBufLength * sizeof(float));
 
+    // A graph's block is at most the whole wire buffer space (Graph_Ctor).
+    const size_t portBufferSize = (size_t)inWorld->hw->mMaxWireBufs * inWorld->mBufLength * sizeof(float);
+    Wire& missingInput = inWorld->hw->mMissingInputWire;
+    missingInput.mFromUnit = nullptr;
+    missingInput.mCalcRate = calc_ScalarRate;
+    missingInput.mBuffer = (float*)malloc_alig(portBufferSize);
+    missingInput.mScalarValue = 0.f;
+    if (missingInput.mBuffer)
+        memset(missingInput.mBuffer, 0, portBufferSize);
+    inWorld->mMissingInput = &missingInput;
+    inWorld->mMissingOutput = (float*)malloc_alig(portBufferSize);
+
     inWorld->hw->mTriggers.MakeEmpty();
     inWorld->hw->mNodeMsgs.MakeEmpty();
     inWorld->hw->mNodeEnds.MakeEmpty();
@@ -1193,6 +1205,8 @@ void World_Cleanup(World* world, bool unload_plugins) {
         reinterpret_cast<SC_Lock*>(world->mDriverLock)->lock();
     if (hw) {
         sc_free(hw->mWireBufSpace);
+        sc_free(hw->mMissingInputWire.mBuffer);
+        sc_free(world->mMissingOutput);
         delete hw->mAudioDriver;
         hw->mAudioDriver = nullptr;
     }

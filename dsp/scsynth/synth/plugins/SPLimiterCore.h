@@ -94,6 +94,7 @@
  */
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -138,7 +139,7 @@ public:
         if (!(seconds > 0.0f) || !(sampleRate > 0.0)) return kMinLookahead;
         const double n = std::floor(static_cast<double>(seconds) * sampleRate + 0.5);
         if (n > static_cast<double>(kMaxLookahead)) return kMaxLookahead;
-        return clampLookahead(static_cast<int>(n));
+        return clampLookahead(sc_float_to_int32(n));
     }
 
     // Box-filter length for a look-ahead of d samples. Three cascaded

@@ -220,10 +220,12 @@ void LocalOut_next_k(LocalOut* unit, int inNumSamples);
 // it is locked for write access. In addition, the constructor checks
 // whether the given bus number is indeed valid.
 template <bool LockShared> struct AudioBusGuard {
-    AudioBusGuard(const Unit* unit, int32 currentChannel, int32 maxChannel):
+    // The channel is a bus control plus an offset, as a float: any value a
+    // control can hold is either a valid channel or refused.
+    AudioBusGuard(const Unit* unit, float currentChannel, int32 maxChannel):
         unit(unit),
-        mCurrentChannel(currentChannel),
-        mIsValid(currentChannel < maxChannel) {
+        mCurrentChannel(sc_float_to_int32(currentChannel)),
+        mIsValid(currentChannel >= 0.f && currentChannel < (float)maxChannel) {
         if (mIsValid)
             lock();
     }
@@ -256,7 +258,7 @@ private:
     const bool mIsValid;
 };
 
-static inline float readControlBus(const float* bus, int channelIndex, int maxChannel) {
+static inline float readControlBus(const float* bus, int64 channelIndex, int maxChannel) {
     if (channelIndex < maxChannel) {
         return *bus;
     } else {
@@ -269,10 +271,10 @@ static inline void IO_a_update_channels(IOUnit* unit, const World* world, float 
                                         int bufLength) {
     if (fbusChannel != unit->m_fbusChannel) {
         unit->m_fbusChannel = fbusChannel;
-        int busChannel = (int32)fbusChannel;
-        int lastChannel = busChannel + numChannels;
+        const int64 busChannel = sc_float_to_int32(fbusChannel);
+        const int64 lastChannel = busChannel + numChannels;
 
-        if (!(busChannel < 0 || lastChannel > (int)world->mNumAudioBusChannels)) {
+        if (!(busChannel < 0 || lastChannel > (int64)world->mNumAudioBusChannels)) {
             unit->m_bus = world->mAudioBus + (busChannel * bufLength);
             unit->m_busTouched = world->mAudioBusTouched + busChannel;
         }
@@ -286,10 +288,10 @@ template <bool UpdateTouched>
 static inline void IO_k_update_channels(IOUnit* unit, const World* world, float fbusChannel, int numChannels) {
     if (fbusChannel != unit->m_fbusChannel) {
         unit->m_fbusChannel = fbusChannel;
-        int busChannel = (int)fbusChannel;
-        int lastChannel = busChannel + numChannels;
+        const int64 busChannel = sc_float_to_int32(fbusChannel);
+        const int64 lastChannel = busChannel + numChannels;
 
-        if (!(busChannel < 0 || lastChannel > (int)world->mNumControlBusChannels)) {
+        if (!(busChannel < 0 || lastChannel > (int64)world->mNumControlBusChannels)) {
             unit->m_bus = world->mControlBus + busChannel;
             if (UpdateTouched)
                 unit->m_busTouched = world->mControlBusTouched + busChannel;
@@ -312,7 +314,14 @@ void Control_next_1(Control* unit, int inNumSamples) {
     OUT0(0) = mapin[0][0];
 }
 
+// A control unit reads `count` of the synth's controls from mSpecialIndex on,
+// and the SynthDef gives both.
+static bool controlsInRange(const Unit* unit, uint32 count) {
+    return unit->mSpecialIndex >= 0 && (uint32)unit->mSpecialIndex + count <= unit->mParent->mNumControls;
+}
+
 void Control_Ctor(Control* unit) {
+    ClearUnitIfMissing(controlsInRange(unit, unit->mNumOutputs), "controls");
     // There is no need for dedicated reblocking calc functions.
     if (unit->mNumOutputs == 1) {
         SETCALC(Control_next_1);
@@ -347,7 +356,7 @@ inline void AudioControl_next_channel_reblock(AudioControl* unit, int i, float* 
         float valSlope = (nextVal - curVal) * unit->mWorld->mFullRate.mSlopeFactor;
         int offset = tick * inNumSamples;
         for (int j = 0; j < inNumSamples; j++) {
-            int index = (offset + j) * resample;
+            int index = sc_float_to_int32((offset + j) * resample);
             out[j] = curVal + valSlope * index;
         }
         // only update on last tick
@@ -362,7 +371,7 @@ inline void AudioControl_next_channel_reblock(AudioControl* unit, int i, float* 
         int32* channelOffsets = unit->mParent->mAudioBusOffsets;
         int thisChannelOffset = channelOffsets[unit->mSpecialIndex + i];
         if (thisChannelOffset >= 0) {
-            int offset = tick * inNumSamples * resample;
+            int offset = sc_float_to_int32(tick * inNumSamples * resample);
             float* in = mapin + offset;
 
             AudioBusGuard<true> guard(unit, thisChannelOffset, world->mNumAudioBusChannels);
@@ -377,7 +386,7 @@ inline void AudioControl_next_channel_reblock(AudioControl* unit, int i, float* 
             if (guard.isValid() && diff == 0) {
                 // copy with reblocking/resampling
                 for (int i = 0; i < inNumSamples; ++i) {
-                    int index = i * resample;
+                    int index = sc_float_to_int32(i * resample);
                     out[i] = in[index];
                 }
                 unit->m_busUsedInPrevCycle[i] = true;
@@ -390,7 +399,7 @@ inline void AudioControl_next_channel_reblock(AudioControl* unit, int i, float* 
                 } else {
                     // copy with reblocking/resampling
                     for (int i = 0; i < inNumSamples; ++i) {
-                        int index = i * resample;
+                        int index = sc_float_to_int32(i * resample);
                         out[i] = in[index];
                     }
                 }
@@ -516,6 +525,8 @@ void AudioControl_next_1(AudioControl* unit, int inNumSamples) {
 }
 
 void AudioControl_Ctor(AudioControl* unit) {
+    unit->m_prevVal = nullptr;
+    ClearUnitIfMissing(controlsInRange(unit, unit->mNumOutputs), "controls");
     World* world = unit->mWorld;
     float** mapControls = unit->mParent->mMapControls + unit->mSpecialIndex;
     int numChannels = unit->mNumOutputs;
@@ -605,7 +616,7 @@ void TrigControl_next_1(TrigControl* unit, int inNumSamples) {
 }
 
 void TrigControl_Ctor(TrigControl* unit) {
-    // Print("TrigControl_Ctor\n");
+    ClearUnitIfMissing(controlsInRange(unit, unit->mNumOutputs), "controls");
     // There is no need for dedicated reblocking calc functions.
     if (unit->mNumOutputs == 1) {
         SETCALC(TrigControl_next_1);
@@ -655,6 +666,9 @@ void LagControl_next_1_reblock(LagControl* unit, int inNumSamples) {
 }
 
 void LagControl_Ctor(LagControl* unit) {
+    unit->m_y1 = nullptr;
+    // One lag time in, and one control read and one value out, per channel.
+    ClearUnitIfMissing(unit->mNumInputs == unit->mNumOutputs && controlsInRange(unit, unit->mNumInputs), "controls");
     int numChannels = unit->mNumInputs;
     float** mapin = unit->mParent->mMapControls + unit->mSpecialIndex;
 
@@ -776,7 +790,7 @@ void In_next_a_reblock(In* unit, int inNumSamples) {
     IO_a_update_channels(unit, world, fbusChannel, numChannels, bufLength);
 
     double resample = world->mSampleRate / SAMPLERATE;
-    int offset = unit->mParent->mTickCounter * inNumSamples * resample;
+    int offset = sc_float_to_int32(unit->mParent->mTickCounter * inNumSamples * resample);
     float* in = unit->m_bus + offset;
     int32* touched = unit->m_busTouchedCache;
     const int32 bufCounter = unit->mWorld->mBufCounter;
@@ -795,7 +809,7 @@ void In_next_a_reblock(In* unit, int inNumSamples) {
         if (guard.isValid() && (touched[i] == bufCounter)) {
             // copy with reblocking/resampling
             for (int j = 0; j < inNumSamples; ++j) {
-                int index = j * resample;
+                int index = sc_float_to_int32(j * resample);
                 out[j] = in[index];
             }
         } else {
@@ -837,7 +851,7 @@ void In_next_k(In* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<false>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     const float* bus = unit->m_bus;
     for (uint32 i = 0; i < numChannels; ++i) {
@@ -895,7 +909,7 @@ void LagIn_next_k(LagIn* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<false>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     const float* bus = unit->m_bus;
     float b1 = unit->m_b1;
@@ -936,7 +950,7 @@ void LagIn_next_0(LagIn* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<false>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     const float* bus = unit->m_bus;
     float* y1 = unit->m_y1;
@@ -984,7 +998,7 @@ void InFeedback_next_a_reblock(InFeedback* unit, int inNumSamples) {
     double resample = world->mSampleRate / SAMPLERATE;
     const int32 tick = unit->mParent->mTickCounter;
     const int32 numTicks = unit->mParent->mNumTicks;
-    const int offset = tick * inNumSamples * resample;
+    const int offset = sc_float_to_int32(tick * inNumSamples * resample);
     float* in = unit->m_bus + offset;
     int32* touched = unit->m_busTouchedCache;
     const int32 bufCounter = unit->mWorld->mBufCounter;
@@ -1004,7 +1018,7 @@ void InFeedback_next_a_reblock(InFeedback* unit, int inNumSamples) {
         if (guard.isValid() && diff == 0) {
             // copy with reblocking/resampling
             for (int j = 0; j < inNumSamples; ++j) {
-                int index = j * resample;
+                int index = sc_float_to_int32(j * resample);
                 out[j] = in[index];
             }
             unit->m_busUsedInPrevCycle[i] = true;
@@ -1017,7 +1031,7 @@ void InFeedback_next_a_reblock(InFeedback* unit, int inNumSamples) {
             } else {
                 // copy with reblocking/resampling
                 for (int j = 0; j < inNumSamples; ++j) {
-                    int index = j * resample;
+                    int index = sc_float_to_int32(j * resample);
                     out[j] = in[index];
                 }
             }
@@ -1114,7 +1128,7 @@ void InTrig_next_k(InTrig* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<true>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     const float* in = unit->m_bus;
     int32* touched = unit->m_busTouched;
@@ -1180,7 +1194,7 @@ void ReplaceOut_next_a_reblock(ReplaceOut* unit, int inNumSamples) {
 
     // in case of upsampling, we only write every N samples (N = resample factor)
     const int tick = unit->mParent->mTickCounter;
-    const int upsample = static_cast<int>(resample);
+    const int upsample = sc_float_to_int32(resample);
     assert(ISPOWEROFTWO(upsample));
     const int inputOffset = tick * inNumSamples;
     if (inputOffset & (upsample - 1)) {
@@ -1292,7 +1306,7 @@ void ReplaceOut_next_k(ReplaceOut* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<true>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     float* out = unit->m_bus;
     int32* touched = unit->m_busTouched;
@@ -1300,10 +1314,10 @@ void ReplaceOut_next_k(ReplaceOut* unit, int inNumSamples) {
     for (int i = 0; i < numChannels; ++i, out++) {
         if (firstOutputChannel + i < maxChannel) {
             float* in = IN(i + 1);
-            ACQUIRE_BUS_CONTROL((int32)fbusChannel + i);
+            ACQUIRE_BUS_CONTROL(sc_float_to_int32(fbusChannel) + i);
             *out = *in;
             touched[i] = bufCounter;
-            RELEASE_BUS_CONTROL((int32)fbusChannel + i);
+            RELEASE_BUS_CONTROL(sc_float_to_int32(fbusChannel) + i);
         }
     }
 }
@@ -1360,7 +1374,7 @@ void Out_next_a_reblock(Out* unit, int inNumSamples) {
 
     // in case of upsampling, we only write every N samples (N = resample factor)
     const int tick = unit->mParent->mTickCounter;
-    const int upsample = static_cast<int>(resample);
+    const int upsample = sc_float_to_int32(resample);
     assert(ISPOWEROFTWO(upsample));
     const int inputOffset = tick * inNumSamples;
     if (inputOffset & (upsample - 1)) {
@@ -1524,7 +1538,7 @@ void Out_next_k(Out* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<true>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     float* out = unit->m_bus;
     int32* touched = unit->m_busTouched;
@@ -1532,14 +1546,14 @@ void Out_next_k(Out* unit, int inNumSamples) {
     for (int i = 0; i < numChannels; ++i, out++) {
         if (firstOutputChannel + i < maxChannel) {
             float* in = IN(i + 1);
-            ACQUIRE_BUS_CONTROL((int32)fbusChannel + i);
+            ACQUIRE_BUS_CONTROL(sc_float_to_int32(fbusChannel) + i);
             if (touched[i] == bufCounter)
                 *out += *in;
             else {
                 *out = *in;
                 touched[i] = bufCounter;
             }
-            RELEASE_BUS_CONTROL((int32)fbusChannel + i);
+            RELEASE_BUS_CONTROL(sc_float_to_int32(fbusChannel) + i);
         }
     }
 }
@@ -1606,7 +1620,7 @@ void XOut_next_a_reblock(XOut* unit, int inNumSamples) {
 
     // in case of upsampling, we only write every N samples (N = resample factor)
     const int tick = unit->mParent->mTickCounter;
-    const int upsample = static_cast<int>(resample);
+    const int upsample = sc_float_to_int32(resample);
     assert(ISPOWEROFTWO(upsample));
     const int inputOffset = tick * inNumSamples;
     if (inputOffset & (upsample - 1)) {
@@ -1843,7 +1857,7 @@ void XOut_next_k(XOut* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     IO_k_update_channels<true>(unit, world, fbusChannel, numChannels);
     const int32 maxChannel = world->mNumControlBusChannels;
-    const int32 firstOutputChannel = (int)fbusChannel;
+    const int64 firstOutputChannel = sc_float_to_int32(fbusChannel);
 
     float xfade = ZIN0(1);
     float* out = unit->m_bus;
@@ -1852,7 +1866,7 @@ void XOut_next_k(XOut* unit, int inNumSamples) {
     for (int i = 0; i < numChannels; ++i, out++) {
         if (firstOutputChannel + i < maxChannel) {
             float* in = IN(i + 2);
-            ACQUIRE_BUS_CONTROL((int32)fbusChannel + i);
+            ACQUIRE_BUS_CONTROL(sc_float_to_int32(fbusChannel) + i);
             if (touched[i] == bufCounter) {
                 float zin = *in;
                 float zout = *out;
@@ -1861,7 +1875,7 @@ void XOut_next_k(XOut* unit, int inNumSamples) {
                 *out = xfade * *in;
                 touched[i] = bufCounter;
             }
-            RELEASE_BUS_CONTROL((int32)fbusChannel + i);
+            RELEASE_BUS_CONTROL(sc_float_to_int32(fbusChannel) + i);
         }
     }
 }
@@ -1919,7 +1933,7 @@ void OffsetOut_next_a_reblock(OffsetOut* unit, int inNumSamples) {
     // in case of upsampling, we only write every N samples (N = resample factor)
     const int tick = unit->mParent->mTickCounter;
     const int numTicks = unit->mParent->mNumTicks;
-    const int upsample = static_cast<int>(resample);
+    const int upsample = sc_float_to_int32(resample);
     assert(ISPOWEROFTWO(upsample));
     const int inPhase = tick * inNumSamples;
     if (inPhase & (upsample - 1)) {
@@ -1975,7 +1989,8 @@ void OffsetOut_next_a_reblock(OffsetOut* unit, int inNumSamples) {
                         Clear(bufLength, out);
                         // Print("untouched offset %d\n", offset);
                     } else {
-                        Copy(offset, out, saved);
+                        if (saved)
+                            Copy(offset, out, saved);
                         Clear(remain, out + offset);
                     }
                     touched[i] = bufCounter;
@@ -1984,7 +1999,8 @@ void OffsetOut_next_a_reblock(OffsetOut* unit, int inNumSamples) {
                         // just keep bus content
                         // Print("touched offset %d\n", offset);
                     } else {
-                        Accum(offset, out, saved);
+                        if (saved)
+                            Accum(offset, out, saved);
                     }
                 }
             }
@@ -2050,7 +2066,8 @@ void OffsetOut_next_a(OffsetOut* unit, int inNumSamples) {
                     // Print("untouched offset %d\n", offset);
                 } else {
                     // copy the saved content into the first bus section
-                    Copy(offset, out, saved);
+                    if (saved)
+                        Copy(offset, out, saved);
                 }
                 // copy the input into the second bus section
                 Copy(remain, out + offset, in);
@@ -2061,7 +2078,8 @@ void OffsetOut_next_a(OffsetOut* unit, int inNumSamples) {
                     // Print("touched offset %d\n", offset);
                 } else {
                     // accumulate the saved content into the first bus section
-                    Accum(offset, out, saved);
+                    if (saved)
+                        Accum(offset, out, saved);
                 }
                 // accumulate the input into the second bus section
                 Accum(remain, out + offset, in);
@@ -2069,7 +2087,8 @@ void OffsetOut_next_a(OffsetOut* unit, int inNumSamples) {
         }
 
         // always save the remaining input, even if the buf channel was out-of-range.
-        Copy(offset, saved, in + remain);
+        if (saved)
+            Copy(offset, saved, in + remain);
 
         // Print("out %d %d %d  %g %g\n", i, in[0], out[0]);
     }
@@ -2117,7 +2136,7 @@ void OffsetOut_Dtor(OffsetOut* unit) {
         float* saved = unit->m_saved;
         int32* touched = unit->m_busTouched;
         const int32 bufCounter = unit->mWorld->mBufCounter;
-        const int32 bufChannel = (int32)unit->m_fbusChannel;
+        const int32 bufChannel = sc_float_to_int32(unit->m_fbusChannel);
         const int32 maxChannel = world->mNumAudioBusChannels;
 
         for (int i = 0; i < numChannels; ++i, out += bufLength, saved += offset) {
@@ -2152,7 +2171,7 @@ void SharedIn_next_k(SharedIn* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     if (fbusChannel != unit->m_fbusChannel) {
         unit->m_fbusChannel = fbusChannel;
-        uint32 busChannel = (uint32)fbusChannel;
+        uint32 busChannel = sc_float_to<uint32>(fbusChannel);
         uint32 lastChannel = busChannel + numChannels;
 
         if (!(lastChannel > world->mNumSharedControls)) {
@@ -2195,7 +2214,7 @@ void SharedOut_next_k(SharedOut* unit, int inNumSamples) {
     float fbusChannel = ZIN0(0);
     if (fbusChannel != unit->m_fbusChannel) {
         unit->m_fbusChannel = fbusChannel;
-        uint32 busChannel = (uint32)fbusChannel;
+        uint32 busChannel = sc_float_to<uint32>(fbusChannel);
         uint32 lastChannel = busChannel + numChannels;
 
         if (!(lastChannel > world->mNumSharedControls)) {
@@ -2354,16 +2373,17 @@ void LocalIn_Ctor(LocalIn* unit) {
     World* world = unit->mWorld;
 
     int busDataSize = numChannels * BUFLENGTH;
+    // The touched flags follow the bus data, on an int64 boundary.
+    const size_t touchedOffset = sc_align_up(busDataSize * sizeof(float), alignof(int64));
 
     // align the buffer to 32 bytes so that we can use avx instructions
-    unit->m_realData =
-        (float*)RTAlloc(world, busDataSize * sizeof(float) + numChannels * sizeof(int64) + 32 * sizeof(float));
+    unit->m_realData = (float*)RTAlloc(world, touchedOffset + numChannels * sizeof(int64) + 32 * sizeof(float));
     ClearUnitIfMemFailed(unit->m_realData);
     size_t alignment = (uintptr_t)unit->m_realData & 31;
 
     unit->m_bus = alignment ? (float*)(((uintptr_t)unit->m_realData + 32) & ~31) : unit->m_realData;
 
-    unit->m_busTouched = (int64*)(unit->m_bus + busDataSize);
+    unit->m_busTouched = (int64*)((char*)unit->m_bus + touchedOffset);
     std::fill_n(unit->m_busTouched, numChannels, -1);
 
     if (unit->mCalcRate == calc_FullRate) {

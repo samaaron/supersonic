@@ -66,7 +66,7 @@ public:
 
 private:
     void next_k(int /*numSamples*/) {
-        *mOutBuf[0] = static_cast<float>(sessionClock().bpm / 60.0);
+        out0(0) = static_cast<float>(sessionClock().bpm / 60.0);
     }
 };
 
@@ -82,7 +82,7 @@ private:
         // The same arithmetic tau and the JS client use — one formula,
         // in clock_math.h, rather than a second opinion computed here.
         const double beat = clock.beatAt(supersonic_scsynth_block_ntp());
-        *mOutBuf[0] = static_cast<float>(clockwork::wrapPhase(beat, quantum));
+        out0(0) = static_cast<float>(clockwork::wrapPhase(beat, quantum));
     }
 };
 

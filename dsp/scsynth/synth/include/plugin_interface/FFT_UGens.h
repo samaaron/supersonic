@@ -84,19 +84,13 @@ static inline void FFT_ClearUnitOutputs(Unit* unit, int wrongNumSamples) { ZOUT0
         return;                                                                                                        \
     }                                                                                                                  \
     ZOUT0(0) = fbufnum;                                                                                                \
-    uint32 ibufnum = (uint32)fbufnum;                                                                                  \
     World* world = unit->mWorld;                                                                                       \
-    SndBuf* buf;                                                                                                       \
-    if (ibufnum >= world->mNumSndBufs) {                                                                               \
-        int localBufNum = ibufnum - world->mNumSndBufs;                                                                \
-        Graph* parent = unit->mParent;                                                                                 \
-        if (localBufNum <= parent->localBufNum) {                                                                      \
-            buf = parent->mLocalSndBufs + localBufNum;                                                                 \
-        } else {                                                                                                       \
-            buf = world->mSndBufs;                                                                                     \
-        }                                                                                                              \
-    } else {                                                                                                           \
-        buf = world->mSndBufs + ibufnum;                                                                               \
+    SndBuf* buf = sc_unit_buffer(unit, fbufnum);                                                                       \
+    if (!buf)                                                                                                          \
+        buf = world->mSndBufs;                                                                                         \
+    if (!buf->data || buf->samples < 2) {                                                                              \
+        ZOUT0(0) = -1.f;                                                                                               \
+        return;                                                                                                        \
     }                                                                                                                  \
     LOCK_SNDBUF(buf);                                                                                                  \
     int numbins = (buf->samples - 2) >> 1;
@@ -111,32 +105,16 @@ static inline void FFT_ClearUnitOutputs(Unit* unit, int wrongNumSamples) { ZOUT0
         return;                                                                                                        \
     }                                                                                                                  \
     ZOUT0(0) = fbufnum1;                                                                                               \
-    uint32 ibufnum1 = (int)fbufnum1;                                                                                   \
-    uint32 ibufnum2 = (int)fbufnum2;                                                                                   \
     World* world = unit->mWorld;                                                                                       \
-    SndBuf* buf1;                                                                                                      \
-    SndBuf* buf2;                                                                                                      \
-    if (ibufnum1 >= world->mNumSndBufs) {                                                                              \
-        int localBufNum = ibufnum1 - world->mNumSndBufs;                                                               \
-        Graph* parent = unit->mParent;                                                                                 \
-        if (localBufNum <= parent->localBufNum) {                                                                      \
-            buf1 = parent->mLocalSndBufs + localBufNum;                                                                \
-        } else {                                                                                                       \
-            buf1 = world->mSndBufs;                                                                                    \
-        }                                                                                                              \
-    } else {                                                                                                           \
-        buf1 = world->mSndBufs + ibufnum1;                                                                             \
-    }                                                                                                                  \
-    if (ibufnum2 >= world->mNumSndBufs) {                                                                              \
-        int localBufNum = ibufnum2 - world->mNumSndBufs;                                                               \
-        Graph* parent = unit->mParent;                                                                                 \
-        if (localBufNum <= parent->localBufNum) {                                                                      \
-            buf2 = parent->mLocalSndBufs + localBufNum;                                                                \
-        } else {                                                                                                       \
-            buf2 = world->mSndBufs;                                                                                    \
-        }                                                                                                              \
-    } else {                                                                                                           \
-        buf2 = world->mSndBufs + ibufnum2;                                                                             \
+    SndBuf* buf1 = sc_unit_buffer(unit, fbufnum1);                                                                     \
+    SndBuf* buf2 = sc_unit_buffer(unit, fbufnum2);                                                                     \
+    if (!buf1)                                                                                                         \
+        buf1 = world->mSndBufs;                                                                                        \
+    if (!buf2)                                                                                                         \
+        buf2 = world->mSndBufs;                                                                                        \
+    if (!buf1->data || !buf2->data || buf1->samples < 2) {                                                             \
+        ZOUT0(0) = -1.f;                                                                                               \
+        return;                                                                                                        \
     }                                                                                                                  \
     LOCK_SNDBUF2(buf1, buf2);                                                                                          \
     if (buf1->samples != buf2->samples)                                                                                \
@@ -146,6 +124,10 @@ static inline void FFT_ClearUnitOutputs(Unit* unit, int wrongNumSamples) { ZOUT0
 #define MAKE_TEMP_BUF                                                                                                  \
     if (!unit->m_tempbuf) {                                                                                            \
         unit->m_tempbuf = (float*)RTAlloc(unit->mWorld, buf->samples * sizeof(float));                                 \
+        if (!unit->m_tempbuf) {                                                                                        \
+            ZOUT0(0) = -1.f;                                                                                           \
+            return;                                                                                                    \
+        }                                                                                                              \
         unit->m_numbins = numbins;                                                                                     \
     } else if (numbins != unit->m_numbins)                                                                             \
         return;

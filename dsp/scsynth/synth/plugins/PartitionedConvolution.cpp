@@ -68,7 +68,7 @@ void PartConv_Dtor(PartConv* unit);
 }
 
 void PartConv_Ctor(PartConv* unit) {
-    unit->m_fftsize = (int)ZIN0(1);
+    unit->m_fftsize = sc_float_to_int32(ZIN0(1));
     unit->m_nover2 = unit->m_fftsize >> 1;
 
     unit->m_scfft = unit->m_scifft = nullptr;
@@ -106,23 +106,14 @@ void PartConv_Ctor(PartConv* unit) {
     // get passed in buffer
     unit->m_fd_accumulate = nullptr;
 
-    uint32 bufnum = (uint32)ZIN0(2);
-    SndBuf* buf;
-
-    if (bufnum >= unit->mWorld->mNumSndBufs) {
-        int localBufNum = bufnum - unit->mWorld->mNumSndBufs;
-        Graph* parent = unit->mParent;
-        if (localBufNum <= parent->localMaxBufNum) {
-            buf = parent->mLocalSndBufs + localBufNum;
-        } else {
-            Print("PartConv Error: Invalid Spectral data bufnum %d \n", bufnum);
-            SETCALC(*ClearUnitOutputs);
-            unit->mDone = true;
-            return;
-        }
+    uint32 bufnum = (uint32)sc_float_to_int32(ZIN0(2));
+    SndBuf* buf = sc_unit_buffer(unit, ZIN0(2));
+    if (!buf) {
+        Print("PartConv Error: Invalid Spectral data bufnum %d \n", bufnum);
+        SETCALC(*ClearUnitOutputs);
+        unit->mDone = true;
+        return;
     }
-
-    buf = unit->mWorld->mSndBufs + bufnum;
 
     unit->m_specbufnumcheck = bufnum;
 
@@ -151,7 +142,7 @@ void PartConv_Ctor(PartConv* unit) {
     // CHECK SAMPLING RATE AND BUFFER SIZE
     unit->m_blocksize = FULLBUFLENGTH;
     // if(unit->m_blocksize!=64) printf("TPV complains: block size not 64, you have %d\n", unit->m_blocksize);
-    unit->m_sr = FULLRATE;
+    unit->m_sr = sc_float_to_int32(FULLRATE);
     // if(unit->m_sr!=44100) printf("TPV complains: sample rate not 44100, you have %d\n", unit->m_sr);
 
     OUT0(0) = 0.f;

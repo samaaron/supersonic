@@ -263,7 +263,7 @@ void Decimator_next(Decimator *unit, int inNumSamples)
 
   float count = unit->mCount;
   float last_out = unit->mLastOut;
-  long sample_rate = fSampleRate;
+  long sample_rate = sc_float_to<long>(fSampleRate);
   float step, stepr, delta, ratio;
   double dummy;
 

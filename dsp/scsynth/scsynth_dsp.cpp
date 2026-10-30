@@ -24,6 +24,7 @@
  * builds a World from the client's config block, dsp_process runs a block,
  * dsp_osc performs messages and bundles with sample-accurate offsets.
  */
+#include "SC_FloatToInt.h"
 #include "dsp_api.h"
 #include "engine_api.h"
 #include "clockwork_product.h"   // CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_VERSION: how it describes itself
@@ -172,7 +173,7 @@ void apply_offset(ScsynthDsp* d, int64_t when, int64_t block_time) {
     const float diff = (float)((double)(when - block_time) * d->osc_to_samples) + 0.5f;
     const float floored = std::floor(diff);
     const float last = (float)(w->mBufLength - 1);
-    w->mSampleOffset = !(floored > 0.0f) ? 0 : floored >= last ? w->mBufLength - 1 : (int)floored;
+    w->mSampleOffset = !(floored > 0.0f) ? 0 : floored >= last ? w->mBufLength - 1 : sc_float_to_int32(floored);
     w->mSubsampleOffset = diff - floored;
 }
 
@@ -503,7 +504,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     options.mBufLength            = config->block_size;
     options.mNumInputBusChannels  = config->max_input_channels;
     options.mNumOutputBusChannels = config->max_output_channels;
-    options.mPreferredSampleRate  = (uint32_t)(config->sample_rate + 0.5);
+    options.mPreferredSampleRate  = sc_float_to<uint32_t>(config->sample_rate + 0.5);
 
     /*
      * The shape of the graph, READ FROM THE CONFIG BLOCK the host wrote.

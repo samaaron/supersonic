@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include "SC_BoundsMacros.h"
 #include "SC_InlineUnaryOp.h"
 #include <cmath>
@@ -470,10 +471,10 @@ inline long sc_lcm(long a, long b) {
 }
 
 /// Greatest common divisor
-inline float sc_gcd(float u, float v) { return (float)sc_gcd((long)std::trunc(u), (long)std::trunc(v)); }
+inline float sc_gcd(float u, float v) { return (float)sc_gcd(sc_float_to<long>(std::trunc(u)), sc_float_to<long>(std::trunc(v))); }
 
 /// Least common multiple
-inline float sc_lcm(float u, float v) { return (float)sc_lcm((long)std::trunc(u), (long)std::trunc(v)); }
+inline float sc_lcm(float u, float v) { return (float)sc_lcm(sc_float_to<long>(std::trunc(u)), sc_float_to<long>(std::trunc(v))); }
 
 /// Performs a bitwise and with the number b
 inline int sc_bitAnd(int a, int b) { return a & b; }

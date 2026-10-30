@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -175,6 +176,24 @@ TEST_CASE("Reblock/Resample: block size and factor given as controls",
             EngineFixture fx(config());
             const Rates got = probe(fx, c.name, 110, c.controls);
             CHECK(got.block == c.block);
+            CHECK(got.rate == c.rate);
+        }
+    }
+}
+
+TEST_CASE("Reblock/Resample: a factor that is not a number runs at the server's rate, a huge one at 64 times it",
+          "[reblock][resample]") {
+    struct Case { float factor; float rate; };
+    const Case cases[] = {
+        { std::numeric_limits<float>::quiet_NaN(),        48000 },
+        { std::numeric_limits<float>::infinity(),         48000 },
+        { 1048576.f,                               48000 * 64 },
+    };
+    for (const auto& c : cases) {
+        DYNAMIC_SECTION("factor " << c.factor) {
+            EngineFixture fx(config());
+            const Rates got = probe(fx, "rr_probe_resample_ctrl", 110, { { "factor", c.factor } });
+            CHECK(got.block == 128);
             CHECK(got.rate == c.rate);
         }
     }

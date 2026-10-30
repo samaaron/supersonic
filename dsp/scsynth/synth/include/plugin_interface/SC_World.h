@@ -104,6 +104,12 @@ struct World {
 
     const char* mRestrictedPath; // OSC commands to read/write data can only do it within this path, if specified
 
+    // What a unit reaches for an input or output its SynthDef did not give it:
+    // a wire holding the constant 0, and a buffer nothing reads. Each buffer
+    // is as long as the longest block a graph can run.
+    struct Wire* mMissingInput;
+    float* mMissingOutput;
+
 #ifdef SUPERNOVA
     nova::padded_rw_spinlock* mAudioBusLocks;
     nova::spin_lock* mControlBusLock;

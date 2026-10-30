@@ -64,6 +64,10 @@ Unit* Unit_New(World* inWorld, Graph* graph, UnitSpec* inUnitSpec, char*& memory
 
     unit->mDone = false;
 
+    // Until its constructor sets one: a unit built for scalar rate sets none,
+    // and a SynthDef can give it any rate.
+    unit->mCalcFunc = (UnitCalcFunc)&Unit_ZeroOutputs;
+
     return unit;
 }
 

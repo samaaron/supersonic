@@ -304,9 +304,9 @@ void Vibrato_next(Vibrato* unit, int inNumSamples) {
         unit->mFreq = rate * (1.f + rateVariation * rgen.frand2());
         unit->m_scaleA = depth * (1.f + depthVariation * rgen.frand2());
         unit->m_scaleB = depth * (1.f + depthVariation * rgen.frand2());
-        unit->m_delay = (int)(ZIN0(3) * SAMPLERATE);
-        unit->m_attack = (int)(ZIN0(4) * SAMPLERATE);
-        unit->m_attackSlope = 1. / (double)(1 + unit->m_attack);
+        unit->m_delay = sc_max(0, sc_float_to_int32(ZIN0(3) * SAMPLERATE));
+        unit->m_attack = sc_max(0, sc_float_to_int32(ZIN0(4) * SAMPLERATE));
+        unit->m_attackSlope = 1. / (1. + unit->m_attack);
         unit->m_attackLevel = unit->m_attackSlope;
     }
 
@@ -407,9 +407,10 @@ void Vibrato_Ctor(Vibrato* unit) {
     float initFreq = unit->mFreq = rate * (1.f + rateVariation * rgen.frand2());
     float initScaleA = unit->m_scaleA = depth * (1.f + depthVariation * rgen.frand2());
     float initScaleB = unit->m_scaleB = depth * (1.f + depthVariation * rgen.frand2());
-    unit->m_delay = (int)(ZIN0(3) * SAMPLERATE);
-    unit->m_attack = (int)(ZIN0(4) * SAMPLERATE);
-    unit->m_attackSlope = 1. / (double)(1 + unit->m_attack);
+    // Sample counts: a negative delay or attack would count the block past its end.
+    unit->m_delay = sc_max(0, sc_float_to_int32(ZIN0(3) * SAMPLERATE));
+    unit->m_attack = sc_max(0, sc_float_to_int32(ZIN0(4) * SAMPLERATE));
+    unit->m_attackSlope = 1. / (1. + unit->m_attack);
     unit->m_attackLevel = unit->m_attackSlope;
     unit->trig = 0.0f;
     SETCALC(Vibrato_next);
@@ -709,7 +710,7 @@ void LFGauss_next_k(LFGauss* unit, int inNumSamples) {
             if (loop) {
                 x -= 2.f;
             } else {
-                DoneAction(ZIN0(4), unit);
+                DoneAction(sc_float_to_int32(ZIN0(4)), unit);
             }
         } ZXP(out) = exp(x * x * factor);
         x += step;);
@@ -738,7 +739,7 @@ void LFGauss_next_a(LFGauss* unit, int inNumSamples) {
             if (loop) {
                 x -= 2.f;
             } else {
-                DoneAction(ZIN0(4), unit);
+                DoneAction(sc_float_to_int32(ZIN0(4)), unit);
             }
         }
 
@@ -773,7 +774,7 @@ void LFGauss_next_aa(LFGauss* unit, int inNumSamples) {
             if (loop) {
                 x -= 2.f;
             } else {
-                DoneAction(ZIN0(4), unit);
+                DoneAction(sc_float_to_int32(ZIN0(4)), unit);
             }
         }
 
@@ -1260,7 +1261,7 @@ void T2K_Ctor(T2K* unit) {
 
 static inline void T2A_write_trigger(T2A* unit, float level) {
     float* out = OUT(0);
-    int offset = sc_clip(static_cast<int>(IN0(1)), 0, BUFLENGTH - 1);
+    int offset = sc_clip(sc_float_to_int32(IN0(1)), 0, BUFLENGTH - 1);
     out[offset] = level;
 }
 
@@ -1355,7 +1356,7 @@ static inline void Line_next_loop(Line* unit, int& counter, int remain, double& 
             LOOP(nsmps, ZXP(out) = level; level += slope;);
             if (counter == 0) {
                 unit->mDone = true;
-                int doneAction = (int)ZIN0(3);
+                int doneAction = sc_float_to_int32(ZIN0(3));
                 DoneAction(doneAction, unit);
             }
         }
@@ -1430,7 +1431,7 @@ void Line_Ctor(Line* unit) {
     double end = ZIN0(1);
     double dur = ZIN0(2);
 
-    int counter = (int)(dur * unit->mRate->mSampleRate + .5f);
+    int counter = sc_float_to_int32(dur * unit->mRate->mSampleRate + .5f);
     unit->mCounter = sc_max(1, counter);
     if (counter == 0) {
         unit->mLevel = end;
@@ -1462,7 +1463,7 @@ static inline void Xline_next_loop(XLine* unit, int& counter, int remain, double
             if (counter == 0) {
                 level = unit->mEndLevel;
                 unit->mDone = true;
-                int doneAction = (int)ZIN0(3);
+                int doneAction = sc_float_to_int32(ZIN0(3));
                 DoneAction(doneAction, unit);
             }
         }
@@ -1533,7 +1534,8 @@ void XLine_Ctor(XLine* unit) {
     double end = ZIN0(1);
     double dur = ZIN0(2);
 
-    int counter = (int)(dur * unit->mRate->mSampleRate + .5f);
+    // A duration of 0 or less goes straight to the end.
+    int counter = sc_max(0, sc_float_to_int32(dur * unit->mRate->mSampleRate + .5f));
 
     unit->mEndLevel = end;
 
@@ -2461,13 +2463,12 @@ void EnvGen_Ctor(EnvGen* unit) {
     unit->m_shape = shape_Hold;
     unit->m_prevGate = 0.f;
     unit->m_released = false;
-    unit->m_releaseNode = initReleaseNode = (int)ZIN0(kEnvGen_releaseNode);
+    unit->m_releaseNode = initReleaseNode = sc_float_to_int32(ZIN0(kEnvGen_releaseNode));
     unit->m_stageResidual = 0.0;
 
-    float** envPtr = unit->mInBuf + kEnvGen_nodeOffset;
-    const int initialShape = (int32)*envPtr[2];
+    const int initialShape = sc_float_to_int32(IN0(kEnvGen_nodeOffset + 2));
     if (initialShape == shape_Hold)
-        unit->m_level = *envPtr[0]; // we start at the end level;
+        unit->m_level = IN0(kEnvGen_nodeOffset); // we start at the end level;
 
     EnvGen_next_k(unit, 1);
 
@@ -2481,7 +2482,7 @@ void EnvGen_Ctor(EnvGen* unit) {
     unit->m_releaseNode = initReleaseNode;
     unit->m_stageResidual = 0.0;
     if (initialShape == shape_Hold)
-        unit->m_level = *envPtr[0]; // we start at the end level;
+        unit->m_level = IN0(kEnvGen_nodeOffset); // we start at the end level;
 }
 
 // called by nextSegment and check_gate:
@@ -2489,9 +2490,10 @@ void EnvGen_Ctor(EnvGen* unit) {
 // - level: current envelope value
 // - dur: if supplied and >= 0, stretch segment to last dur seconds (used in forced release)
 static bool EnvGen_initSegment(EnvGen* unit, int& counter, double& level, double dur = -1) {
-    int stageOffset = (unit->m_stage << 2) + kEnvGen_nodeOffset;
+    // m_stage can come from the stage count input, so any int.
+    const int64 stageOffset = (int64)unit->m_stage * 4 + kEnvGen_nodeOffset;
 
-    if (stageOffset + 4 > unit->mNumInputs) {
+    if (stageOffset < 0 || stageOffset + 4 > unit->mNumInputs) {
         // oops.
         Print("envelope went past end of inputs.\n");
         ClearUnitOutputs(unit, 1);
@@ -2502,17 +2504,16 @@ static bool EnvGen_initSegment(EnvGen* unit, int& counter, double& level, double
     float previousEndLevel = unit->m_endLevel;
     if (unit->m_shape == shape_Hold)
         level = previousEndLevel;
-    float** envPtr = unit->mInBuf + stageOffset;
-    double endLevel = *envPtr[0] * ZIN0(kEnvGen_levelScale) + ZIN0(kEnvGen_levelBias); // scale levels
+    double endLevel = IN0(stageOffset) * ZIN0(kEnvGen_levelScale) + ZIN0(kEnvGen_levelBias); // scale levels
     if (dur < 0)
-        dur = *envPtr[1] * ZIN0(kEnvGen_timeScale);
-    unit->m_shape = (int32)*envPtr[2];
-    double curve = *envPtr[3];
+        dur = IN0(stageOffset + 1) * ZIN0(kEnvGen_timeScale);
+    unit->m_shape = sc_float_to_int32(IN0(stageOffset + 2));
+    double curve = IN0(stageOffset + 3);
     unit->m_endLevel = endLevel;
 
     // Carry the residual stage duration forward to the next stage
     double stageDurInSamples = dur * SAMPLERATE + unit->m_stageResidual;
-    int32 stageDurInSamples_floor = static_cast<int32>(stageDurInSamples);
+    int32 stageDurInSamples_floor = sc_float_to_int32(stageDurInSamples);
     double counter_fractional = sc_max(1.0, stageDurInSamples);
     counter = sc_max(1, stageDurInSamples_floor);
     unit->m_stageResidual = stageDurInSamples - counter;
@@ -2614,9 +2615,9 @@ static bool check_gate(EnvGen* unit, float prevGate, float gate, int& counter, d
     } else if (gate <= -1.f && prevGate > -1.f) {
         // forced release: jump to last segment overriding its duration
         double dur = -gate - 1.f;
-        counter = (int32)(dur * SAMPLERATE);
+        counter = sc_float_to_int32(dur * SAMPLERATE);
         counter = sc_max(1, counter) + counterOffset;
-        unit->m_stage = static_cast<int>(ZIN0(kEnvGen_numStages) - 1);
+        unit->m_stage = sc_float_to_int32(ZIN0(kEnvGen_numStages) - 1.f);
         unit->m_released = true;
         EnvGen_initSegment(unit, counter, level, dur);
         unit->m_stageResidual = 0.0;
@@ -2644,20 +2645,20 @@ static inline bool check_gate_ar(EnvGen* unit, int i, float& prevGate, float*& g
 }
 
 static inline bool EnvGen_nextSegment(EnvGen* unit, int& counter, double& level) {
-    int numstages = (int)ZIN0(kEnvGen_numStages);
+    int numstages = sc_float_to_int32(ZIN0(kEnvGen_numStages));
 
     if (unit->m_stage + 1 >= numstages) { // last stage completed
         // don't update level yet, the current level hasn't been written out by `perform` yet
         counter = INT_MAX;
         unit->m_shape = 0;
         unit->mDone = true;
-        int doneAction = (int)ZIN0(kEnvGen_doneAction);
+        int doneAction = sc_float_to_int32(ZIN0(kEnvGen_doneAction));
         DoneAction(doneAction, unit);
     } else if (unit->m_stage == ENVGEN_NOT_STARTED) {
         counter = INT_MAX;
         return true;
-    } else if (unit->m_stage + 1 == (int)ZIN0(kEnvGen_releaseNode) && !unit->m_released) { // sustain stage
-        int loopNode = (int)ZIN0(kEnvGen_loopNode);
+    } else if (unit->m_stage + 1 == sc_float_to_int32(ZIN0(kEnvGen_releaseNode)) && !unit->m_released) { // sustain stage
+        int loopNode = sc_float_to_int32(ZIN0(kEnvGen_loopNode));
         if (loopNode >= 0 && loopNode < numstages) {
             unit->m_stage = loopNode;
             return EnvGen_initSegment(unit, counter, level);
@@ -2998,7 +2999,7 @@ void Linen_next_k(Linen* unit, int inNumSamples) {
         unit->m_stage = 0;
         float attackTime = ZIN0(1);
         float susLevel = ZIN0(2);
-        int counter = (int)(attackTime * SAMPLERATE);
+        int counter = sc_float_to_int32(attackTime * SAMPLERATE);
         counter = sc_max(1, counter);
         unit->m_slope = (susLevel - unit->m_level) / counter;
         unit->m_counter = counter;
@@ -3018,14 +3019,14 @@ void Linen_next_k(Linen* unit, int inNumSamples) {
             // cutoff
             unit->m_stage = 2;
             float releaseTime = -gate - 1.f;
-            int counter = (int)(releaseTime * SAMPLERATE);
+            int counter = sc_float_to_int32(releaseTime * SAMPLERATE);
             counter = sc_max(1, counter);
             unit->m_slope = -unit->m_level / counter;
             unit->m_counter = counter;
         } else if (gate <= 0.f) {
             unit->m_stage = 2;
             float releaseTime = ZIN0(3);
-            int counter = (int)(releaseTime * SAMPLERATE);
+            int counter = sc_float_to_int32(releaseTime * SAMPLERATE);
             counter = sc_max(1, counter);
             unit->m_slope = -unit->m_level / counter;
             unit->m_counter = counter;
@@ -3038,7 +3039,7 @@ void Linen_next_k(Linen* unit, int inNumSamples) {
         // Print("done %d\n", unit->mParent->mNode.mID);
         unit->mDone = true;
         unit->m_stage++;
-        int doneAction = (int)ZIN0(4);
+        int doneAction = sc_float_to_int32(ZIN0(4));
         DoneAction(doneAction, unit);
     } break;
     case 4:
@@ -3073,9 +3074,9 @@ void EnvFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
         int shape = msg->geti();
         double curve = msg->getf();
 
-        int32 ipos = (int32)pos;
+        int32 ipos = sc_float_to_int32(pos);
         double smpdur = dur * size;
-        int32 nsmps = (int32)smpdur - ipos;
+        int32 nsmps = sc_float_to_int32(smpdur) - ipos;
         nsmps = sc_min(nsmps, remain);
 
         switch (shape) {
@@ -3232,7 +3233,8 @@ void EnvFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
 
 struct IEnvGen : public Unit {
     float m_level, m_offset;
-    float m_startpoint, m_numvals, m_pointin;
+    float m_pointin;
+    int m_numStages;
     float* m_envvals;
 };
 
@@ -3358,9 +3360,13 @@ void IEnvGen_Ctor(IEnvGen* unit) {
         SETCALC(IEnvGen_next_k);
     }
 
-    int numStages = (int)IN0(3);
+    unit->m_envvals = nullptr;
+    ClearUnitIfInputsMissing(unit->mNumInputs >= 5);
+    int numStages = sc_float_to_int32(IN0(3));
+    ClearUnitIfInputsMissing(numStages >= 0 && numStages <= ((int)unit->mNumInputs - 5) / 4);
+    unit->m_numStages = numStages;
     int numvals = numStages * 4; // initlevel + (levels, dur, shape, curves) * stages
-    unit->m_envvals = (float*)RTAlloc(unit->mWorld, (int)(numvals + 1.) * sizeof(float));
+    unit->m_envvals = (float*)RTAlloc(unit->mWorld, (numvals + 1) * sizeof(float));
     ClearUnitIfMemFailed(unit->m_envvals);
 
     // fill m_envvals with the values
@@ -3386,7 +3392,7 @@ void IEnvGen_next_a(IEnvGen* unit, int inNumSamples) {
     float level = unit->m_level;
     float* pointin = IN(0);
     float offset = unit->m_offset;
-    int numStages = (int)IN0(3);
+    int numStages = unit->m_numStages;
     float totalDur = IN0(4);
 
     float point;
@@ -3400,7 +3406,7 @@ void IEnvGen_next_a(IEnvGen* unit, int inNumSamples) {
             float newtime = 0.f;
             int stage = 0;
             float seglen = 0.f;
-            if (point >= totalDur) {
+            if (point >= totalDur || numStages == 0) {
                 unit->m_level = level = unit->m_envvals[numStages * 4]; // grab the last value
             } else {
                 if (point <= 0.0) {
@@ -3408,7 +3414,7 @@ void IEnvGen_next_a(IEnvGen* unit, int inNumSamples) {
                 } else {
                     float segpos = point;
                     // determine which segment the current time pointer needs
-                    for (int j = 0; point >= newtime; j++) {
+                    for (int j = 0; j < numStages && point >= newtime; j++) {
                         seglen = unit->m_envvals[(j * 4) + 1];
                         newtime += seglen;
                         segpos -= seglen;
@@ -3417,8 +3423,8 @@ void IEnvGen_next_a(IEnvGen* unit, int inNumSamples) {
                     stagemul = stage * 4;
                     segpos = segpos + seglen;
                     float begLevel = unit->m_envvals[stagemul];
-                    int shape = (int)unit->m_envvals[stagemul + 2];
-                    int curve = (int)unit->m_envvals[stagemul + 3];
+                    int shape = sc_float_to_int32(unit->m_envvals[stagemul + 2]);
+                    int curve = sc_float_to_int32(unit->m_envvals[stagemul + 3]);
                     float endLevel = unit->m_envvals[stagemul + 4];
                     float pos = (segpos / seglen);
 
@@ -3435,7 +3441,7 @@ void IEnvGen_next_k(IEnvGen* unit, int inNumSamples) {
     float level = unit->m_level;
     float pointin = IN0(0);
     float offset = unit->m_offset;
-    int numStages = (int)IN0(3);
+    int numStages = unit->m_numStages;
     float totalDur = IN0(4);
 
     float point;
@@ -3449,7 +3455,7 @@ void IEnvGen_next_k(IEnvGen* unit, int inNumSamples) {
             float newtime = 0.f;
             int stage = 0;
             float seglen = 0.f;
-            if (point >= totalDur) {
+            if (point >= totalDur || numStages == 0) {
                 unit->m_level = level = unit->m_envvals[numStages * 4]; // grab the last value
             } else {
                 if (point <= 0.0) {
@@ -3457,7 +3463,7 @@ void IEnvGen_next_k(IEnvGen* unit, int inNumSamples) {
                 } else {
                     float segpos = point;
                     // determine which segment the current time pointer needs
-                    for (int j = 0; point >= newtime; j++) {
+                    for (int j = 0; j < numStages && point >= newtime; j++) {
                         seglen = unit->m_envvals[(j * 4) + 1];
                         newtime += seglen;
                         segpos -= seglen;
@@ -3466,8 +3472,8 @@ void IEnvGen_next_k(IEnvGen* unit, int inNumSamples) {
                     stagemul = stage * 4;
                     segpos = segpos + seglen;
                     float begLevel = unit->m_envvals[stagemul];
-                    int shape = (int)unit->m_envvals[stagemul + 2];
-                    int curve = (int)unit->m_envvals[stagemul + 3];
+                    int shape = sc_float_to_int32(unit->m_envvals[stagemul + 2]);
+                    int curve = sc_float_to_int32(unit->m_envvals[stagemul + 3]);
                     float endLevel = unit->m_envvals[stagemul + 4];
                     float pos = (segpos / seglen);
 

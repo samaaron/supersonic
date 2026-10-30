@@ -112,7 +112,7 @@ void Convolution3_Dtor(Convolution3* unit);
 
 void Convolution_Ctor(Convolution* unit) {
     // require size N+M-1 to be a power of two
-    unit->m_framesize = (int)ZIN0(2);
+    unit->m_framesize = sc_float_to_int32(ZIN0(2));
 
     unit->m_fftsize = 2 * (unit->m_framesize);
     // just use memory for the input buffers and fft buffers
@@ -250,22 +250,8 @@ static SndBuf* ConvGetBuffer(Unit* unit, int32 bufnum, const char* ugenName, int
     SndBuf* buf;
     World* world = unit->mWorld;
 
-    // first check if bufnum is positive!
-    if (bufnum >= 0) {
-        if (bufnum >= world->mNumSndBufs) {
-            int localBufNum = bufnum - world->mNumSndBufs;
-            Graph* parent = unit->mParent;
-            if (localBufNum <= parent->localMaxBufNum) {
-                buf = parent->mLocalSndBufs + localBufNum;
-            } else {
-                if (unit->mWorld->mVerbosity > -1)
-                    Print("%s: invalid buffer number (%d).\n", ugenName, bufnum);
-                goto handle_failure;
-            }
-        } else {
-            buf = world->mSndBufs + bufnum;
-        }
-    } else {
+    buf = sc_unit_buffer_at(unit, bufnum);
+    if (!buf) {
         if (unit->mWorld->mVerbosity > -1)
             Print("%s: invalid buffer number (%d).\n", ugenName, bufnum);
         goto handle_failure;
@@ -288,8 +274,8 @@ handle_failure:
 
 void Convolution2_Ctor(Convolution2* unit) {
     // require size N+M-1 to be a power of two
-    unit->m_framesize = (int32)ZIN0(3);
-    int32 kernelbufnum = (int32)ZIN0(1);
+    unit->m_framesize = sc_float_to_int32(ZIN0(3));
+    int32 kernelbufnum = sc_float_to_int32(ZIN0(1));
     World* world = unit->mWorld;
 
     unit->m_inbuf1 = unit->m_fftbuf1 = unit->m_fftbuf2 = unit->m_outbuf = unit->m_overlapbuf = nullptr;
@@ -395,7 +381,7 @@ void Convolution2_next(Convolution2* unit, int wrongNumSamples) {
     unit->m_pos += numSamples;
 
     if (unit->m_prevtrig <= 0.f && curtrig > 0.f) {
-        int32 kernelbufnum = (int32)ZIN0(1);
+        int32 kernelbufnum = sc_float_to_int32(ZIN0(1));
         SndBuf* kernelbuf = ConvGetBuffer(unit, kernelbufnum, "Convolution2", numSamples);
         if (!kernelbuf)
             return;
@@ -462,8 +448,8 @@ void Convolution2_next(Convolution2* unit, int wrongNumSamples) {
 
 void Convolution2L_Ctor(Convolution2L* unit) {
     // require size N+M-1 to be a power of two
-    unit->m_framesize = (int)ZIN0(3);
-    unit->m_cflength = (int)ZIN0(4);
+    unit->m_framesize = sc_float_to_int32(ZIN0(3));
+    unit->m_cflength = sc_float_to_int32(ZIN0(4));
     unit->m_curbuf = 0;
     unit->m_cfpos = unit->m_cflength;
 
@@ -486,7 +472,7 @@ void Convolution2L_Ctor(Convolution2L* unit) {
 
     ClearUnitIfMemFailed(unit->m_inbuf1 && unit->m_fftbuf1 && unit->m_fftbuf2 && unit->m_fftbuf3 && unit->m_tempbuf);
 
-    int32 bufnum = (int32)ZIN0(1); // fbufnum;
+    int32 bufnum = sc_float_to_int32(ZIN0(1)); // fbufnum;
 
     SndBuf* buf = ConvGetBuffer(unit, bufnum, "Convolution2L", 1);
 
@@ -562,12 +548,12 @@ void Convolution2L_next(Convolution2L* unit, int numSamples) {
     unit->m_pos += numSamples;
 
     if (unit->m_prevtrig <= 0.f && curtrig > 0.f) {
-        int32 bufnum = (int32)ZIN0(1);
+        int32 bufnum = sc_float_to_int32(ZIN0(1));
         SndBuf* buf = ConvGetBuffer(unit, bufnum, "Convolution2L", numSamples);
         if (!buf)
             return;
 
-        unit->m_cflength = (int)ZIN0(4);
+        unit->m_cflength = sc_float_to_int32(ZIN0(4));
 
         unit->m_cfpos = 0;
         if (unit->m_curbuf == 1) {
@@ -703,8 +689,8 @@ void Convolution2L_next(Convolution2L* unit, int numSamples) {
 /** basically the same as Convolution2L, but takes a stereo buffer to convolve with and outputs a stereo signal */
 void StereoConvolution2L_Ctor(StereoConvolution2L* unit) {
     // require size N+M-1 to be a power of two
-    unit->m_framesize = (int)ZIN0(4);
-    unit->m_cflength = (int)ZIN0(5);
+    unit->m_framesize = sc_float_to_int32(ZIN0(4));
+    unit->m_cflength = sc_float_to_int32(ZIN0(5));
     unit->m_curbuf = 0;
     unit->m_cfpos = unit->m_cflength;
 
@@ -767,8 +753,8 @@ void StereoConvolution2L_Ctor(StereoConvolution2L* unit) {
     ClearUnitIfMemFailed(unit->m_scfft1 && unit->m_scfft2[0] && unit->m_scfft3[0] && unit->m_scfftR[0]
                          && unit->m_scfftR2[0]);
     ClearUnitIfMemFailed(unit->m_scfft2[1] && unit->m_scfft3[1] && unit->m_scfftR[1] && unit->m_scfftR2[1]);
-    int32 bufnumL = (int32)ZIN0(1);
-    int32 bufnumR = (int32)ZIN0(2);
+    int32 bufnumL = sc_float_to_int32(ZIN0(1));
+    int32 bufnumR = sc_float_to_int32(ZIN0(2));
     // printf("bufnumL: %d, bufnumR: %d\n", bufnumL, bufnumR);
 
     // unit->m_log2n = LOG2CEIL(unit->m_fftsize);
@@ -851,9 +837,9 @@ void StereoConvolution2L_next(StereoConvolution2L* unit, int wrongNumSamples) {
     unit->m_pos += numSamples;
 
     if (unit->m_prevtrig <= 0.f && curtrig > 0.f) {
-        int32 bufnumL = (int32)ZIN0(1);
-        int32 bufnumR = (int32)ZIN0(2);
-        unit->m_cflength = (int32)ZIN0(5);
+        int32 bufnumL = sc_float_to_int32(ZIN0(1));
+        int32 bufnumR = sc_float_to_int32(ZIN0(2));
+        unit->m_cflength = sc_float_to_int32(ZIN0(5));
 
         SndBuf* bufL = ConvGetBuffer(unit, bufnumL, "StereoConvolution2L", numSamples);
         SndBuf* bufR = ConvGetBuffer(unit, bufnumR, "StereoConvolution2L", numSamples);
@@ -1022,9 +1008,9 @@ void StereoConvolution2L_next(StereoConvolution2L* unit, int wrongNumSamples) {
 }
 
 void Convolution3_Ctor(Convolution3* unit) {
-    unit->m_framesize = (int32)ZIN0(3);
+    unit->m_framesize = sc_float_to_int32(ZIN0(3));
 
-    int32 bufnum = (int32)ZIN0(1);
+    int32 bufnum = sc_float_to_int32(ZIN0(1));
 
     SndBuf* buf = ConvGetBuffer(unit, bufnum, "Convolution3", 1);
 
@@ -1080,7 +1066,7 @@ void Convolution3_next_a(Convolution3* unit) {
 
     if (unit->m_prevtrig <= 0.f && curtrig > 0.f) {
         uint32 framesize_f = unit->m_framesize * sizeof(float);
-        int32 bufnum = (int32)ZIN0(1);
+        int32 bufnum = sc_float_to_int32(ZIN0(1));
         SndBuf* buf = ConvGetBuffer(unit, bufnum, "Convolution3", numSamples);
         if (!buf)
             return;
@@ -1126,7 +1112,7 @@ void Convolution3_next_k(Convolution3* unit) {
     uint32 framesize_f = unit->m_framesize * sizeof(float);
 
     if (unit->m_prevtrig <= 0.f && curtrig > 0.f) {
-        int32 bufnum = (int32)ZIN0(1);
+        int32 bufnum = sc_float_to_int32(ZIN0(1));
         SndBuf* buf = ConvGetBuffer(unit, bufnum, "Convolution3", 1);
         if (!buf)
             return;

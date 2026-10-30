@@ -19,6 +19,7 @@
 */
 
 
+#include "SC_FloatToInt.h"
 #include "SC_Win32Utils.h"
 #include "SC_Graph.h"
 #include "SC_GraphDef.h"
@@ -147,6 +148,10 @@ bool Graph_HasParent(const Graph* inGraph) { return inGraph->mNode.mParent != nu
 ////////////////////////////////////////////////////////////////////////////////
 
 static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter* msg, bool argtype);
+
+// The largest resample factor. A factor multiplies the passes a graph makes
+// each server block, and comes from a SynthDef or a control.
+constexpr int32 kMaxResampleFactor = 64;
 
 // 'argtype' is true for normal args, false for setn type args
 int Graph_New(World* inWorld, GraphDef* inGraphDef, int32 inID, sc_msg_iter* args, Graph** outGraph, bool argtype) {
@@ -452,7 +457,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         // get block size from Synth Control
         uint32 index = inGraphDef->mBlockSizeIndex;
         if (index < graph->mNumControls) {
-            blockSize = graph->mMapControls[index][0];
+            blockSize = sc_float_to_int32(graph->mMapControls[index][0]);
         } else {
             scprintf("ERROR: block size control index %d out of range!\n", index);
             blockSize = 0;
@@ -475,6 +480,11 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
     if (upsample == 0.0) {
         upsample = 1.0;
     }
+    // A factor can come from a control, so it can be anything.
+    if (!std::isfinite(upsample)) {
+        scprintf("WARNING: Synth: bad resample factor (%f)\n", upsample);
+        upsample = 1.0;
+    }
 
     if (blockSize == 0 && upsample == 1.0) {
         // no reblocking and no upsampling -> use the global rates
@@ -487,8 +497,13 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         // reblocking or upsampling
         if (upsample > 1.0) {
             // make sure that 'upsample' is a power of two!
-            if (ISPOWEROFTWO((int)upsample)) {
-                upsample = (int)upsample;
+            if (ISPOWEROFTWO(sc_float_to_int32(upsample))) {
+                upsample = sc_float_to_int32(upsample);
+                if (upsample > kMaxResampleFactor) {
+                    scprintf("WARNING: Synth: upsample factor (%f) above %d, using %d\n", upsample,
+                             kMaxResampleFactor, kMaxResampleFactor);
+                    upsample = kMaxResampleFactor;
+                }
                 graph->mFlags |= kGraph_Resample; // ok
             } else {
                 scprintf("WARNING: Synth: upsample factor (%f) not a power of two\n", upsample);
@@ -509,12 +524,12 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                 blockSize = inWorld->mBufLength;
             }
 
-            const int32_t effectiveBlockSize = blockSize / static_cast<int32_t>(upsample);
+            const int32_t effectiveBlockSize = blockSize / sc_float_to_int32(upsample);
             if (effectiveBlockSize > inWorld->mBufLength) {
                 // The effective block size cannot be larger than the Server block size.
                 // For now, let's keep the upsample factor and adjust the block size accordingly.
                 const int32_t originalBlockSize = blockSize;
-                blockSize = inWorld->mBufLength * static_cast<int32_t>(upsample);
+                blockSize = inWorld->mBufLength * sc_float_to_int32(upsample);
                 scprintf("WARNING: Synth: block size (%d) too large for resample factor (%f). "
                          "Adjusting block size to %d samples.\n",
                          originalBlockSize, upsample, blockSize);
@@ -545,7 +560,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
             blockSize = inWorld->mBufLength;
         }
 
-        graph->mNumTicks = (inWorld->mBufLength * upsample) / blockSize;
+        graph->mNumTicks = sc_float_to<uint32>((inWorld->mBufLength * upsample) / blockSize);
         graph->mTickCounter = 0;
         double sampleRate = inWorld->mSampleRate * upsample;
 
@@ -841,7 +856,7 @@ void Graph_CalcTrace(Graph* inGraph) {
     if (inGraph->mFlags & kGraph_ReblockOrResample) {
         scprintf("\nTRACE %d  %s    #units: %d, block size: %d, sr: %d\n", inGraph->mNode.mID,
                       inGraph->mNode.mDef->mName, numCalcUnits, inGraph->mFullRate->mBufLength,
-                      (int)inGraph->mFullRate->mSampleRate);
+                      sc_float_to_int32(inGraph->mFullRate->mSampleRate));
     } else {
         scprintf("\nTRACE %d  %s    #units: %d\n", inGraph->mNode.mID, inGraph->mNode.mDef->mName, numCalcUnits);
     }

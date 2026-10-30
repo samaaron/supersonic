@@ -29,6 +29,7 @@
 
 // next perhaps Duxbury et al/ Mauri et al different conception of high frequency content with ratio of changes
 
+#include "SC_FloatToInt.h"
 #include "FFT_UGens.h"
 
 struct PV_OnsetDetectionBase : public Unit {
@@ -76,29 +77,20 @@ void RunningSum_Dtor(RunningSum* unit);
 }
 
 #define PV_FEAT_GET_BUF_UNLOCKED                                                                                       \
-    uint32 ibufnum = (uint32)fbufnum;                                                                                  \
     int bufOK = 1;                                                                                                     \
     World* world = unit->mWorld;                                                                                       \
-    SndBuf* buf;                                                                                                       \
-    if (ibufnum >= world->mNumSndBufs) {                                                                               \
-        int localBufNum = ibufnum - world->mNumSndBufs;                                                                \
-        Graph* parent = unit->mParent;                                                                                 \
-        if (localBufNum <= parent->localBufNum) {                                                                      \
-            buf = parent->mLocalSndBufs + localBufNum;                                                                 \
-        } else {                                                                                                       \
-            bufOK = 0;                                                                                                 \
-            buf = world->mSndBufs;                                                                                     \
-            if (unit->mWorld->mVerbosity > -1) {                                                                       \
-                Print("FFT Ctor error: Buffer number overrun: %i\n", ibufnum);                                         \
-            }                                                                                                          \
+    SndBuf* buf = sc_unit_buffer(unit, fbufnum);                                                                       \
+    if (!buf) {                                                                                                        \
+        bufOK = 0;                                                                                                     \
+        buf = world->mSndBufs;                                                                                         \
+        if (unit->mWorld->mVerbosity > -1) {                                                                           \
+            Print("FFT Ctor error: Buffer number overrun: %g\n", fbufnum);                                             \
         }                                                                                                              \
-    } else {                                                                                                           \
-        buf = world->mSndBufs + ibufnum;                                                                               \
     }                                                                                                                  \
     int numbins = (buf->samples - 2) >> 1;                                                                             \
     if (!buf->data) {                                                                                                  \
         if (unit->mWorld->mVerbosity > -1) {                                                                           \
-            Print("FFT Ctor error: Buffer %i not initialised.\n", ibufnum);                                            \
+            Print("FFT Ctor error: Buffer %g not initialised.\n", fbufnum);                                            \
         }                                                                                                              \
         bufOK = 0;                                                                                                     \
     }
@@ -143,7 +135,7 @@ void PV_JensenAndersen_Ctor(PV_JensenAndersen* unit) {
     unit->m_sf = 0.0;
     unit->m_sc = 0.0;
 
-    unit->m_fourkindex = (int)(4000.0 / FULLRATE) * (unit->m_numbins);
+    unit->m_fourkindex = sc_float_to_int32(4000.0 / FULLRATE) * (unit->m_numbins);
 
     SETCALC(PV_JensenAndersen_next);
 }
@@ -230,7 +222,7 @@ void PV_JensenAndersen_next(PV_JensenAndersen* unit, int inNumSamples) {
             outval = 1.0;
             unit->m_waiting = 1;
             unit->m_waitSamp = inNumSamples;
-            unit->m_waitLen = (int)(ZIN0(6) * (world->mSampleRate));
+            unit->m_waitLen = sc_float_to_int32(ZIN0(6) * (world->mSampleRate));
         }
 
         // take copy of this frame's magnitudes as prevframe
@@ -248,8 +240,8 @@ void PV_HainsworthFoote_Ctor(PV_HainsworthFoote* unit) {
 
     World* world = unit->mWorld;
 
-    unit->m_5kindex = (int)((5000.0 / (world->mSampleRate)) * (unit->m_numbins));
-    unit->m_30Hzindex = (int)((30.0 / (world->mSampleRate)) * (unit->m_numbins));
+    unit->m_5kindex = sc_float_to_int32((5000.0 / (world->mSampleRate)) * (unit->m_numbins));
+    unit->m_30Hzindex = sc_float_to_int32((30.0 / (world->mSampleRate)) * (unit->m_numbins));
 
     unit->m_prevNorm = 1.0;
 
@@ -330,7 +322,7 @@ void PV_HainsworthFoote_next(PV_HainsworthFoote* unit, int inNumSamples) {
             outval = 1.0;
             unit->m_waiting = 1;
             unit->m_waitSamp = inNumSamples;
-            unit->m_waitLen = (int)(ZIN0(4) * FULLRATE);
+            unit->m_waitLen = sc_float_to_int32(ZIN0(4) * FULLRATE);
         }
 
         // take copy of this frame's magnitudes as prevframe
@@ -346,7 +338,7 @@ void PV_HainsworthFoote_next(PV_HainsworthFoote* unit, int inNumSamples) {
 void RunningSum_Ctor(RunningSum* unit) {
     SETCALC(RunningSum_next_k);
 
-    unit->msamp = (int)ZIN0(1);
+    unit->msamp = sc_float_to_int32(ZIN0(1));
 
     // unit->mmeanmult= 1.0f/(unit->msamp);
     unit->msum = 0.0f;

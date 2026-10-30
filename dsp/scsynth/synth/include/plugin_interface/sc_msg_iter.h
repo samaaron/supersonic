@@ -23,6 +23,7 @@
 
 #include "SC_Endian.h"
 #include "SC_Types.h"
+#include "SC_FloatToInt.h"
 #include <string.h>
 
 // return the ptr to the byte after the OSC string.
@@ -47,17 +48,7 @@ inline float32 OSCfloat(const char* inData) {
 
 inline int32 OSCint(const char* inData) { return (int32)sc_ntohl(*(uint32*)inData); }
 
-// A float as an int, clamped to int32's range (NaN reads as 0): converting a
-// float the type cannot hold is undefined.
-inline int32 OSCfloatToInt(float32 f) {
-    if (!(f == f))
-        return 0;
-    if (f >= 2147483648.f)
-        return 2147483647;
-    if (f <= -2147483648.f)
-        return (int32)(-2147483647 - 1);
-    return (int32)f;
-}
+
 
 inline int64 OSCtime(const char* inData) {
     return ((int64)sc_ntohl(*(uint32*)inData) << 32) + (sc_ntohl(*(uint32*)(inData + 4)));
@@ -198,7 +189,7 @@ inline int32 sc_msg_iter::geti(int32 defaultValue) {
         } else if (tags[count] == 'f') {
             if (!fits(sizeof(float32)))
                 return defaultValue;
-            value = OSCfloatToInt(OSCfloat(rdpos));
+            value = sc_float_to_int32(OSCfloat(rdpos));
             rdpos += sizeof(float32);
         } else if (tags[count] == 's') {
             /*	value = atoi(rdpos); */

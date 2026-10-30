@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include "../../common/SC_Lock.h" // for chrono
 #include "SC_Types.h"
 
@@ -47,7 +48,7 @@ template <typename TimePoint> static inline int64 OSCTime(TimePoint const& tp) {
 
     nanoseconds nsecs = sinceEpoch - secs;
 
-    return ((int64)(secs.count() + kSECONDS_FROM_1900_to_1970) << 32) + (int64)(nsecs.count() * kNanosToOSCunits);
+    return ((int64)(secs.count() + kSECONDS_FROM_1900_to_1970) << 32) + sc_float_to<int64>(nsecs.count() * kNanosToOSCunits);
 }
 
 static inline int32 timeSeed() {

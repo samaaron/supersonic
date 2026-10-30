@@ -97,7 +97,7 @@ struct Schmidt : public Unit {
 struct PulseDivider : public Unit {
     float mLevel;
     float m_prevtrig;
-    long mCounter;
+    int64 mCounter;
 };
 
 struct PulseCount : public Unit {
@@ -377,7 +377,7 @@ void Trig1_next(Trig1* unit, int inNumSamples) {
     LOOP1(
         inNumSamples, float curtrig = ZXP(trig); float zout; if (counter > 0) { zout = --counter ? 1.f : 0.f; } else {
             if (curtrig > 0.f && prevtrig <= 0.f) {
-                counter = (long)(dur * sr + .5f);
+                counter = sc_float_to<long>(dur * sr + .5f);
                 if (counter < 1)
                     counter = 1;
                 zout = 1.f;
@@ -401,7 +401,7 @@ void Trig1_next_k(Trig1* unit, int inNumSamples) {
     LOOP1(
         inNumSamples, float zout; if (counter > 0) { zout = --counter ? 1.f : 0.f; } else {
             if (curtrig > 0.f && prevtrig <= 0.f) {
-                counter = (long)(dur * sr + .5f);
+                counter = sc_float_to<long>(dur * sr + .5f);
                 if (counter < 1)
                     counter = 1;
                 zout = 1.f;
@@ -532,7 +532,7 @@ void Trig_next(Trig* unit, int inNumSamples) {
     LOOP1(
         inNumSamples, float curtrig = ZXP(trig); float zout; if (counter > 0) { zout = --counter ? level : 0.f; } else {
             if (curtrig > 0.f && prevtrig <= 0.f) {
-                counter = (long)(dur * sr + .5f);
+                counter = sc_float_to<long>(dur * sr + .5f);
                 if (counter < 1)
                     counter = 1;
                 level = curtrig;
@@ -559,7 +559,7 @@ void Trig_next_k(Trig* unit, int inNumSamples) {
     LOOP1(
         inNumSamples, float zout; if (counter > 0) { zout = --counter ? level : 0.f; } else {
             if (curtrig > 0.f && prevtrig <= 0.f) {
-                counter = (long)(dur * sr + .5f);
+                counter = sc_float_to<long>(dur * sr + .5f);
                 if (counter < 1)
                     counter = 1;
                 level = curtrig;
@@ -665,14 +665,14 @@ void SendTrig_next(SendTrig* unit, int inNumSamples) {
 
     LOOP1(
         inNumSamples, float curtrig = ZXP(trig); if (curtrig > 0.f && prevtrig <= 0.f) {
-            SendTrigger(&unit->mParent->mNode, (int)ZIN0(1), ZIN0(2));
+            SendTrigger(&unit->mParent->mNode, sc_float_to_int32(ZIN0(1)), ZIN0(2));
         } prevtrig = curtrig;);
     unit->m_prevtrig = prevtrig;
 }
 
 void SendTrig_next_aka(SendTrig* unit, int inNumSamples) {
     float* trig = ZIN(0);
-    int id = (int)ZIN0(1);
+    int id = sc_float_to_int32(ZIN0(1));
     float* value = ZIN(2);
     float prevtrig = unit->m_prevtrig;
 
@@ -691,7 +691,11 @@ void SendReply_Ctor(SendReply* unit) {
     const int kVarOffset = 3;
 
     unit->m_prevtrig = 0.f;
-    unit->m_cmdNameSize = IN0(2);
+    unit->m_cmdName = nullptr;
+    ClearUnitIfInputsMissing(unit->mNumInputs >= kVarOffset);
+    const int cmdNameSize = sc_float_to_int32(IN0(2));
+    ClearUnitIfInputsMissing(cmdNameSize >= 0 && cmdNameSize <= (int)unit->mNumInputs - kVarOffset);
+    unit->m_cmdNameSize = cmdNameSize;
     unit->m_valueSize = unit->mNumInputs - unit->m_cmdNameSize - kVarOffset;
     unit->m_valueOffset = kVarOffset + unit->m_cmdNameSize;
 
@@ -707,7 +711,7 @@ void SendReply_Ctor(SendReply* unit) {
     unit->m_values = (float*)(chunk + cmdNamePadded);
 
     for (int i = 0; i < (int)unit->m_cmdNameSize; i++)
-        unit->m_cmdName[i] = (char)IN0(kVarOffset + i);
+        unit->m_cmdName[i] = (char)sc_float_to_int32(IN0(kVarOffset + i));
 
     // terminate string
     unit->m_cmdName[unit->m_cmdNameSize] = 0;
@@ -733,7 +737,7 @@ void SendReply_next(SendReply* unit, int inNumSamples) {
             for (int i = 0; i < valueSize; i++)
                 values[i] = IN(i + valueOffset)[0];
 
-            SendNodeReply(&unit->mParent->mNode, (int)ZIN0(1), unit->m_cmdName, unit->m_valueSize, values);
+            SendNodeReply(&unit->mParent->mNode, sc_float_to_int32(ZIN0(1)), unit->m_cmdName, unit->m_valueSize, values);
         }
         prevtrig = curtrig;
     }
@@ -753,7 +757,7 @@ void SendReply_next_aka(SendReply* unit, int inNumSamples) {
                 int offset = INRATE(i + valueOffset) != calc_FullRate ? 0 : j;
                 values[i] = IN(i + valueOffset)[offset];
             }
-            SendNodeReply(&unit->mParent->mNode, (int)ZIN0(1), unit->m_cmdName, unit->m_valueSize, values);
+            SendNodeReply(&unit->mParent->mNode, sc_float_to_int32(ZIN0(1)), unit->m_cmdName, unit->m_valueSize, values);
         }
         prevtrig = curtrig;
     }
@@ -774,12 +778,15 @@ void Poll_Ctor(Poll* unit) {
         SETCALC(Poll_next_kk);
     }
 
-    const int idSize = (int)IN0(3); // number of chars in the id string
+    unit->m_id_string = nullptr;
+    ClearUnitIfInputsMissing(unit->mNumInputs >= 4);
+    const int idSize = sc_float_to_int32(IN0(3)); // number of chars in the id string
+    ClearUnitIfInputsMissing(idSize >= 0 && idSize <= (int)unit->mNumInputs - 4);
     unit->m_id_string = (char*)RTAlloc(unit->mWorld, (idSize + 1) * sizeof(char));
     ClearUnitIfMemFailed(unit->m_id_string);
 
     for (int i = 0; i < idSize; i++)
-        unit->m_id_string[i] = (char)IN0(4 + i);
+        unit->m_id_string[i] = (char)sc_float_to_int32(IN0(4 + i));
 
     unit->m_id_string[idSize] = '\0';
     unit->m_mayprint = unit->mWorld->mVerbosity >= -1;
@@ -798,7 +805,7 @@ void Poll_next_aa(Poll* unit, int inNumSamples) {
                 Print("%s: %g\n", unit->m_id_string, in[i]);
 
             if (IN0(2) >= 0.0)
-                SendTrigger(&unit->mParent->mNode, (int)IN0(2), in[i]);
+                SendTrigger(&unit->mParent->mNode, sc_float_to_int32(IN0(2)), in[i]);
         }
         lasttrig = trig[i];
     }
@@ -813,7 +820,7 @@ void Poll_next_kk(Poll* unit, int inNumSamples) {
             Print("%s: %g\n", unit->m_id_string, in);
 
         if (IN0(2) >= 0.0)
-            SendTrigger(&unit->mParent->mNode, (int)IN0(2), in);
+            SendTrigger(&unit->mParent->mNode, sc_float_to_int32(IN0(2)), in);
     }
     unit->m_trig = trig;
 }
@@ -829,7 +836,7 @@ void Poll_next_ak(Poll* unit, int inNumSamples) {
                 Print("%s: %g\n", unit->m_id_string, in);
             }
             if (IN0(2) >= 0.0)
-                SendTrigger(&unit->mParent->mNode, (int)IN0(2), in);
+                SendTrigger(&unit->mParent->mNode, sc_float_to_int32(IN0(2)), in);
         }
         lasttrig = trig[i];
     }
@@ -1141,7 +1148,7 @@ void PulseDivider_Ctor(PulseDivider* unit) {
 
     unit->m_prevtrig = 0.f;
     unit->mLevel = 0.f;
-    long initCounter = unit->mCounter = static_cast<long>(floor(ZIN0(2) + 0.5));
+    long initCounter = unit->mCounter = sc_float_to_int32(floor(ZIN0(2) + 0.5));
 
     PulseDivider_next(unit, 1);
 
@@ -1154,9 +1161,9 @@ void PulseDivider_Ctor(PulseDivider* unit) {
 void PulseDivider_next(PulseDivider* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float* trig = ZIN(0);
-    long div = (long)ZIN0(1);
+    int64 div = sc_float_to_int32(ZIN0(1));
     float prevtrig = unit->m_prevtrig;
-    long counter = unit->mCounter;
+    int64 counter = unit->mCounter;
 
     LOOP1(
         inNumSamples, float z; float curtrig = ZXP(trig); if (prevtrig <= 0.f && curtrig > 0.f) {
@@ -1256,7 +1263,7 @@ void Stepper_Ctor(Stepper* unit) {
         SETCALC(Stepper_next_aa);
     }
 
-    int32 resetval = (int32)ZIN0(5);
+    int32 resetval = sc_float_to_int32(ZIN0(5));
 
     unit->m_prevtrig = 0.f;
     unit->m_prevreset = 0.f;
@@ -1274,10 +1281,10 @@ void Stepper_next_aa(Stepper* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float* trig = ZIN(0);
     float* reset = ZIN(1);
-    int32 zmin = (int32)ZIN0(2);
-    int32 zmax = (int32)ZIN0(3);
-    int32 step = (int32)ZIN0(4);
-    int32 resetval = (int32)ZIN0(5);
+    int32 zmin = sc_float_to_int32(ZIN0(2));
+    int32 zmax = sc_float_to_int32(ZIN0(3));
+    int32 step = sc_float_to_int32(ZIN0(4));
+    int32 resetval = sc_float_to_int32(ZIN0(5));
     float prevtrig = unit->m_prevtrig;
     float prevreset = unit->m_prevreset;
     float level = unit->mLevel;
@@ -1286,7 +1293,7 @@ void Stepper_next_aa(Stepper* unit, int inNumSamples) {
         inNumSamples, float curtrig = ZXP(trig); float curreset = ZXP(reset); if (prevreset <= 0.f && curreset > 0.f) {
             level = (float)sc_wrap(resetval, zmin, zmax);
         } else if (prevtrig <= 0.f && curtrig > 0.f) {
-            level = (float)sc_wrap((int32)level + step, zmin, zmax);
+            level = (float)sc_wrap(sc_float_to_int32(level) + step, zmin, zmax);
         } ZXP(out) = level;
         prevtrig = curtrig; prevreset = curreset;);
     unit->mLevel = level;
@@ -1298,10 +1305,10 @@ void Stepper_next_ak(Stepper* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float* trig = ZIN(0);
     float curreset = ZIN0(1);
-    int32 zmin = (int32)ZIN0(2);
-    int32 zmax = (int32)ZIN0(3);
-    int32 step = (int32)ZIN0(4);
-    int32 resetval = (int32)ZIN0(5);
+    int32 zmin = sc_float_to_int32(ZIN0(2));
+    int32 zmax = sc_float_to_int32(ZIN0(3));
+    int32 step = sc_float_to_int32(ZIN0(4));
+    int32 resetval = sc_float_to_int32(ZIN0(5));
     float prevtrig = unit->m_prevtrig;
     float prevreset = unit->m_prevreset;
     float level = unit->mLevel;
@@ -1310,7 +1317,7 @@ void Stepper_next_ak(Stepper* unit, int inNumSamples) {
         inNumSamples, float curtrig = ZXP(trig); if (prevreset <= 0.f && curreset > 0.f) {
             level = (float)sc_wrap(resetval, zmin, zmax);
         } else if (prevtrig <= 0.f && curtrig > 0.f) {
-            level = (float)sc_wrap((int32)level + step, zmin, zmax);
+            level = (float)sc_wrap(sc_float_to_int32(level) + step, zmin, zmax);
         } ZXP(out) = level;
         prevtrig = curtrig; prevreset = curreset;);
     unit->mLevel = level;
@@ -1321,15 +1328,15 @@ void Stepper_next_ak(Stepper* unit, int inNumSamples) {
 void Stepper_next_a0(Stepper* unit, int inNumSamples) {
     float* out = ZOUT(0);
     float* trig = ZIN(0);
-    int32 zmin = (int32)ZIN0(2);
-    int32 zmax = (int32)ZIN0(3);
-    int32 step = (int32)ZIN0(4);
+    int32 zmin = sc_float_to_int32(ZIN0(2));
+    int32 zmax = sc_float_to_int32(ZIN0(3));
+    int32 step = sc_float_to_int32(ZIN0(4));
     float prevtrig = unit->m_prevtrig;
     float level = unit->mLevel;
 
     LOOP1(
         inNumSamples, float curtrig = ZXP(trig); if (prevtrig <= 0.f && curtrig > 0.f) {
-            level = (float)sc_wrap((int32)level + step, zmin, zmax);
+            level = (float)sc_wrap(sc_float_to_int32(level) + step, zmin, zmax);
         } ZXP(out) = level;
         prevtrig = curtrig;);
     unit->mLevel = level;
@@ -1364,7 +1371,7 @@ void TDelay_next(TDelay* unit, int inNumSamples) {
             zout = 0.f;
         } else if (counter <= 0) {
             if (prevtrig <= 0.f && curtrig > 0.f) {
-                counter = (long)(dur * unit->mRate->mSampleRate + .5f);
+                counter = sc_float_to<long>(dur * unit->mRate->mSampleRate + .5f);
                 if (counter < 1)
                     counter = 1;
             }
@@ -2306,7 +2313,7 @@ void LastValue_next_ak(LastValue* unit, int inNumSamples) {
 void Done_Ctor(Done* unit) {
     SETCALC(Done_next);
 
-    unit->m_src = unit->mInput[0]->mFromUnit;
+    unit->m_src = INWIRE(0)->mFromUnit;
 
     Done_next(unit, 1);
 }
@@ -2373,7 +2380,7 @@ void Pause_next(Pause* unit, int inNumSamples) {
     int state = in == 0.f ? 0 : 1;
     if (state != unit->m_state) {
         unit->m_state = state;
-        int id = (int)ZIN0(1);
+        int id = sc_float_to_int32(ZIN0(1));
         Node* node = SC_GetNode(unit->mWorld, id);
         if (node) {
             NodeRun(node, state);
@@ -2396,7 +2403,7 @@ void Free_Ctor(Free* unit) {
 void Free_next(Free* unit, int inNumSamples) {
     float trig = ZIN0(0);
     if (trig > 0.f && unit->m_prevtrig <= 0) {
-        int id = (int)ZIN0(1);
+        int id = sc_float_to_int32(ZIN0(1));
         Node* node = SC_GetNode(unit->mWorld, id);
         if (node) {
             NodeEnd(node);
@@ -2409,7 +2416,7 @@ void Free_next(Free* unit, int inNumSamples) {
 //////////////////////////////////////////////////////////////////////////////////////////
 
 void FreeSelfWhenDone_Ctor(FreeSelfWhenDone* unit) {
-    unit->m_src = unit->mInput[0]->mFromUnit;
+    unit->m_src = INWIRE(0)->mFromUnit;
 
     if (unit->m_src) {
         SETCALC(FreeSelfWhenDone_next);
@@ -2435,7 +2442,7 @@ void FreeSelfWhenDone_next(FreeSelfWhenDone* unit, int inNumSamples) {
 //////////////////////////////////////////////////////////////////////////////////////////
 
 void PauseSelfWhenDone_Ctor(PauseSelfWhenDone* unit) {
-    unit->m_src = unit->mInput[0]->mFromUnit;
+    unit->m_src = INWIRE(0)->mFromUnit;
 
     if (unit->m_src) {
         SETCALC(PauseSelfWhenDone_next);
@@ -2471,11 +2478,19 @@ struct SendPeakRMS : public Unit {
     SendPeakRMS() {
         SendPeakRMS* unit = this;
 
-        mChannelCount = (unsigned int)IN0(channelCountIndex);
-        size_t channelDataAllocSize = mChannelCount * 3 * sizeof(float);
+        mChannelData = nullptr;
+        mChannelCount = 0;
+        ClearUnitIfInputsMissing(mNumInputs > channelCountIndex);
+        const int channelCount = sc_float_to_int32(IN0(channelCountIndex));
+        ClearUnitIfInputsMissing(channelCount >= 0 && channelCount < (int)mNumInputs - signalStartIndex);
+        const int cmdSizeIndex = signalStartIndex + channelCount;
+        const int cmdNameSize = sc_float_to_int32(IN0(cmdSizeIndex));
+        ClearUnitIfInputsMissing(cmdNameSize >= 0 && cmdNameSize < (int)mNumInputs - cmdSizeIndex);
+        mChannelCount = channelCount;
 
-        int cmdSizeIndex = signalStartIndex + mChannelCount;
-        size_t cmdNameSize = IN0(cmdSizeIndex);
+        // Per channel: level and square sum, lagged level, then the reply's
+        // level and RMS.
+        size_t channelDataAllocSize = (size_t)mChannelCount * 5 * sizeof(float);
         size_t cmdNameAllocSize = (cmdNameSize + 1) * sizeof(char);
 
         void* allocData = RTAlloc(unit->mWorld, channelDataAllocSize + cmdNameAllocSize);
@@ -2486,9 +2501,9 @@ struct SendPeakRMS : public Unit {
 
         char* cmdName = (char*)(allocData) + channelDataAllocSize;
 
-        size_t cmdNameIndex = cmdSizeIndex + 1;
+        const int cmdNameIndex = cmdSizeIndex + 1;
         for (int i = 0; i < cmdNameSize; i++)
-            cmdName[i] = (char)IN0(cmdNameIndex + i);
+            cmdName[i] = (char)sc_float_to_int32(IN0(cmdNameIndex + i));
         cmdName[cmdNameSize] = 0;
 
         if ((FULLBUFLENGTH & 15) == 0) {
@@ -2505,8 +2520,9 @@ struct SendPeakRMS : public Unit {
 
         float replyRate = IN0(rateIndex);
 
-        mAudioSamplesPerTick = FULLRATE / replyRate;
-        mControlSamplesPerTick = BUFRATE / replyRate;
+        // At least one sample, or one control block, between replies.
+        mAudioSamplesPerTick = sc_max(1, sc_float_to_int32(FULLRATE / replyRate));
+        mControlSamplesPerTick = sc_max(1, sc_float_to_int32(BUFRATE / replyRate));
 
         mPhaseRemain = (mCalcRate == calc_FullRate) ? mAudioSamplesPerTick : mControlSamplesPerTick;
 
@@ -2535,14 +2551,12 @@ struct SendPeakRMS : public Unit {
     }
 
     char* getCmdName() {
-        void* buffer = mChannelData;
-        return (char*)(buffer) + mChannelCount * 3 * sizeof(float);
+        return (char*)(mChannelData + 5 * mChannelCount);
     }
 
     void sendReply() {
         SendPeakRMS* unit = this;
-        float* reply = (float*)alloca(mChannelCount * 2 * sizeof(float));
-
+        float* reply = mChannelData + 3 * mChannelCount;
 
         for (int i = 0; i != mChannelCount; ++i) {
             float& maxLevel = reply[2 * i];
@@ -2556,7 +2570,7 @@ struct SendPeakRMS : public Unit {
                 rms = std::sqrt(mChannelData[2 * i + 1] / (float)mControlSamplesPerTick);
         }
 
-        SendNodeReply(&unit->mParent->mNode, (int)ZIN0(replyIdIndex), getCmdName(), mChannelCount * 2, reply);
+        SendNodeReply(&unit->mParent->mNode, sc_float_to_int32(ZIN0(replyIdIndex)), getCmdName(), mChannelCount * 2, reply);
         memset(mChannelData, 0, mChannelCount * 2 * sizeof(float));
     }
 
@@ -2600,10 +2614,10 @@ struct SendPeakRMS : public Unit {
     }
 
     template <bool simd> inline void next_k(int inNumSamples) {
-        mPhaseRemain -= 1;
+        mPhaseRemain = sc_sub_modular(mPhaseRemain, 1);
 
         if (mPhaseRemain <= 0) {
-            mPhaseRemain += mControlSamplesPerTick;
+            mPhaseRemain = sc_add_modular(mPhaseRemain, mControlSamplesPerTick);
             sendReply();
         }
 
@@ -2612,7 +2626,7 @@ struct SendPeakRMS : public Unit {
 
     template <bool simd> inline void next_a(int inNumSamples) {
         if (mPhaseRemain >= inNumSamples) {
-            mPhaseRemain -= inNumSamples;
+            mPhaseRemain = sc_sub_modular(mPhaseRemain, inNumSamples);
             analyzeFullBlock<simd>();
         } else {
             if (mPhaseRemain == 0) {
@@ -2628,7 +2642,7 @@ struct SendPeakRMS : public Unit {
                 analyzePartialBlock(startSample, samplesToAnalyze);
 
                 startSample += samplesToAnalyze;
-                mPhaseRemain -= samplesToAnalyze;
+                mPhaseRemain = sc_sub_modular(mPhaseRemain, samplesToAnalyze);
                 if (mPhaseRemain == 0) {
                     sendReply();
                     mPhaseRemain = mAudioSamplesPerTick;

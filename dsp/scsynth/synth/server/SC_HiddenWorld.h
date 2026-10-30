@@ -28,6 +28,7 @@
 #include "SC_RGen.h"
 #include "HashTable.h"
 #include "SC_World.h"
+#include "SC_Wire.h"
 #include "SC_Reply.h"
 #include "MsgFifo.h"
 #include "guest_heap.h"
@@ -124,6 +125,7 @@ struct HiddenWorld {
 
     uint32 mMaxWireBufs;
     float* mWireBufSpace;
+    Wire mMissingInputWire;
 
     TriggersFifo mTriggers;
     NodeReplyFifo mNodeMsgs;

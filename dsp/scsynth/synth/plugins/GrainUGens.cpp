@@ -28,6 +28,7 @@
 
 
 #include "SC_PlugIn.h"
+#include "SC_LoopPhase.h"
 
 #include "function_attributes.h"
 
@@ -159,39 +160,11 @@ template <bool full_rate> inline float grain_in_at(Unit* unit, int index, int of
         return IN0(index);
 }
 
-inline double sc_gloop(double in, double hi) {
-    // avoid the divide if possible
-    if (in >= hi) {
-        in -= hi;
-        if (in < hi)
-            return in;
-    } else if (in < 0.) {
-        in += hi;
-        if (in >= 0.)
-            return in;
-    } else
-        return in;
-
-    return in - hi * floor(in / hi);
-}
 
 #define GRAIN_BUF                                                                                                      \
-    const SndBuf* buf;                                                                                                 \
-    if (bufnum >= world->mNumSndBufs) {                                                                                \
-        int localBufNum = bufnum - world->mNumSndBufs;                                                                 \
-        Graph* parent = unit->mParent;                                                                                 \
-        if (localBufNum <= parent->localBufNum) {                                                                      \
-            buf = parent->mLocalSndBufs + localBufNum;                                                                 \
-        } else {                                                                                                       \
-            bufnum = 0;                                                                                                \
-            buf = world->mSndBufs + bufnum;                                                                            \
-        }                                                                                                              \
-    } else {                                                                                                           \
-        if (bufnum < 0) {                                                                                              \
-            bufnum = 0;                                                                                                \
-        }                                                                                                              \
-        buf = world->mSndBufs + bufnum;                                                                                \
-    }                                                                                                                  \
+    const SndBuf* buf = sc_unit_buffer_at(unit, bufnum);                                                               \
+    if (!buf)                                                                                                          \
+        buf = world->mSndBufs;                                                                                         \
     LOCK_SNDBUF_SHARED(buf);                                                                                           \
     const float* bufData __attribute__((__unused__)) = buf->data;                                                      \
     uint32 bufChannels __attribute__((__unused__)) = buf->channels;                                                    \
@@ -219,8 +192,12 @@ inline double sc_gloop(double in, double hi) {
 
 #define GET_GRAIN_WIN_RELAXED(WINTYPE)                                                                                 \
     do {                                                                                                               \
-        assert(WINTYPE < unit->mWorld->mNumSndBufs);                                                                   \
-        window = unit->mWorld->mSndBufs + (int)WINTYPE;                                                                \
+        const int32 winIndex = sc_float_to_int32(WINTYPE);                                                             \
+        if (winIndex < 0 || (uint32)winIndex >= unit->mWorld->mNumSndBufs) {                                           \
+            windowData = nullptr;                                                                                      \
+            break;                                                                                                     \
+        }                                                                                                              \
+        window = unit->mWorld->mSndBufs + winIndex;                                                                    \
         windowData = window->data;                                                                                     \
         windowSamples = window->samples;                                                                               \
         windowFrames = window->frames;                                                                                 \
@@ -240,7 +217,7 @@ static inline bool getGrainWin(Unit* unit, float wintype, SndBuf*& window, const
     if (wintype < 0)
         return true; // use default hann window
 
-    window = unit->mWorld->mSndBufs + (int)wintype;
+    window = unit->mWorld->mSndBufs + sc_float_to_int32(wintype);
     windowData = window->data;
     if (!windowData)
         return false;
@@ -390,7 +367,7 @@ static inline bool getGrainWin(Unit* unit, float wintype, SndBuf*& window, const
             float ipan = floor(cpan);                                                                                  \
             float panfrac = cpan - ipan;                                                                               \
             panangle = panfrac * pi2_f;                                                                                \
-            grain->chan = (int)ipan;                                                                                   \
+            grain->chan = sc_float_to_int32(ipan);                                                                                   \
             if (grain->chan >= (int)numOutputs)                                                                        \
                 grain->chan -= numOutputs;                                                                             \
         } else {                                                                                                       \
@@ -430,7 +407,7 @@ static inline bool getGrainWin(Unit* unit, float wintype, SndBuf*& window, const
 #define CALC_NEXT_GRAIN_AMP_CUSTOM                                                                                     \
     do {                                                                                                               \
         winPos += winInc;                                                                                              \
-        int iWinPos = (int)winPos;                                                                                     \
+        int iWinPos = sc_float_to_int32(winPos);                                                                                     \
         double winFrac = winPos - (double)iWinPos;                                                                     \
         const float* winTable1 = windowData + iWinPos;                                                                 \
         const float* winTable2 = winTable1 + 1;                                                                        \
@@ -549,7 +526,7 @@ template <bool full_rate> inline void GrainIn_next_start_new(GrainIn* unit, int 
     float winSize = grain_in_at<full_rate>(unit, 1, position);
     double counter = winSize * SAMPLERATE;
     counter = sc_max(4., counter);
-    grain->counter = (int)counter;
+    grain->counter = sc_float_to_int32(counter);
     grain->winType = winType;
 
     GET_GRAIN_INIT_AMP
@@ -602,7 +579,7 @@ void GrainIn_next_k(GrainIn* unit, int inNumSamples) {
     if (unit->mFirst) {
         unit->mFirst = false;
         float maxGrains = IN0(5);
-        unit->mMaxGrains = (int)maxGrains;
+        unit->mMaxGrains = sc_float_to_int32(maxGrains);
         unit->mGrains = (GrainInG*)RTAlloc(unit->mWorld, unit->mMaxGrains * sizeof(GrainInG));
         ClearUnitIfMemFailed(unit->mGrains);
     }
@@ -664,7 +641,7 @@ inline void GrainSin_next_play_active(GrainSin* unit, int inNumSamples) {
             // end change //
             CALC_NEXT_GRAIN_AMP
 
-            oscphase += thisfreq;
+            oscphase = sc_add_modular(oscphase, thisfreq);
         }
 
         SAVE_GRAIN_AMP_PARAMS
@@ -692,11 +669,11 @@ template <bool full_rate> inline void GrainSin_next_start_new(GrainSin* unit, in
     GrainSinG* grain = unit->mGrains + unit->mNumActive++;
     float freq = grain_in_at<full_rate>(unit, 2, position);
     float winSize = grain_in_at<full_rate>(unit, 1, position);
-    int32 thisfreq = grain->freq = (int32)(unit->m_cpstoinc * freq);
+    int32 thisfreq = grain->freq = sc_float_to_int32(unit->m_cpstoinc * freq);
     int32 oscphase = 0;
     double counter = winSize * SAMPLERATE;
     counter = sc_max(4., counter);
-    grain->counter = (int)counter;
+    grain->counter = sc_float_to_int32(counter);
     grain->winType = winType;
 
     GET_GRAIN_INIT_AMP
@@ -725,7 +702,7 @@ template <bool full_rate> inline void GrainSin_next_start_new(GrainSin* unit, in
         // end add / change
         CALC_NEXT_GRAIN_AMP
 
-        oscphase += thisfreq;
+        oscphase = sc_add_modular(oscphase, thisfreq);
     }
     grain->oscphase = oscphase;
 
@@ -753,7 +730,7 @@ void GrainSin_next_k(GrainSin* unit, int inNumSamples) {
     if (unit->mFirst) {
         unit->mFirst = false;
         float maxGrains = IN0(5);
-        unit->mMaxGrains = (int)maxGrains;
+        unit->mMaxGrains = sc_float_to_int32(maxGrains);
         unit->mGrains = (GrainSinG*)RTAlloc(unit->mWorld, unit->mMaxGrains * sizeof(GrainSinG));
         ClearUnitIfMemFailed(unit->mGrains);
     }
@@ -823,9 +800,9 @@ inline void GrainFM_next_play_active(GrainFM* unit, int inNumSamples) {
             // end change //
             CALC_NEXT_GRAIN_AMP
 
-            int32 cfreq = (int32)(unit->m_cpstoinc * (carbase + thismod)); // needs to be calced in the loop!
-            coscphase += cfreq;
-            moscphase += mfreq;
+            int32 cfreq = sc_float_to_int32(unit->m_cpstoinc * (carbase + thismod)); // needs to be calced in the loop!
+            coscphase = sc_add_modular(coscphase, cfreq);
+            moscphase = sc_add_modular(moscphase, mfreq);
         } // need to save float carbase, int32 mfreq, float deviation
         grain->coscphase = coscphase;
         grain->moscphase = moscphase;
@@ -857,13 +834,13 @@ template <bool full_rate> inline void GrainFM_next_start_new(GrainFM* unit, int 
     float modfreq = GRAIN_IN_AT(unit, 3, position);
     float index = GRAIN_IN_AT(unit, 4, position);
     float deviation = grain->deviation = index * modfreq;
-    int32 mfreq = grain->mfreq = (int32)(unit->m_cpstoinc * modfreq);
+    int32 mfreq = grain->mfreq = sc_float_to_int32(unit->m_cpstoinc * modfreq);
     grain->carbase = carfreq;
     int32 coscphase = 0;
     int32 moscphase = 0;
     double counter = winSize * SAMPLERATE;
     counter = sc_max(4., counter);
-    grain->counter = (int)counter;
+    grain->counter = sc_float_to_int32(counter);
     grain->winType = winType; // GRAIN_IN_AT(unit, 6, i);
 
     GET_GRAIN_INIT_AMP
@@ -891,9 +868,9 @@ template <bool full_rate> inline void GrainFM_next_start_new(GrainFM* unit, int 
         // end add / change
         CALC_NEXT_GRAIN_AMP
 
-        int32 cfreq = (int32)(unit->m_cpstoinc * (carfreq + thismod)); // needs to be calced in the loop!
-        coscphase += cfreq;
-        moscphase += mfreq;
+        int32 cfreq = sc_float_to_int32(unit->m_cpstoinc * (carfreq + thismod)); // needs to be calced in the loop!
+        coscphase = sc_add_modular(coscphase, cfreq);
+        moscphase = sc_add_modular(moscphase, mfreq);
     } // need to save float carbase, int32 mfreq, float deviation
     grain->coscphase = coscphase;
     grain->moscphase = moscphase;
@@ -923,7 +900,7 @@ void GrainFM_next_k(GrainFM* unit, int inNumSamples) {
     if (unit->mFirst) {
         unit->mFirst = false;
         float maxGrains = IN0(7);
-        unit->mMaxGrains = (int)maxGrains;
+        unit->mMaxGrains = sc_float_to_int32(maxGrains);
         unit->mGrains = (GrainFMG*)RTAlloc(unit->mWorld, unit->mMaxGrains * sizeof(GrainFMG));
         ClearUnitIfMemFailed(unit->mGrains);
     }
@@ -957,7 +934,7 @@ void GrainFM_Dtor(GrainFM* unit) { RTFree(unit->mWorld, unit->mGrains); }
 
 #define GRAIN_BUF_LOOP_BODY_4_MONO                                                                                     \
     phase = sc_gloop(phase, loopMax);                                                                                  \
-    int32 iphase = (int32)phase;                                                                                       \
+    int32 iphase = sc_float_to_int32(phase);                                                                                       \
     const float* table1 = bufData + iphase;                                                                            \
     const float* table0 = table1 - 1;                                                                                  \
     const float* table2 = table1 + 1;                                                                                  \
@@ -986,7 +963,7 @@ void GrainFM_Dtor(GrainFM* unit) { RTFree(unit->mWorld, unit->mGrains); }
 
 #define GRAIN_BUF_LOOP_BODY_2_MONO                                                                                     \
     phase = sc_gloop(phase, loopMax);                                                                                  \
-    int32 iphase = (int32)phase;                                                                                       \
+    int32 iphase = sc_float_to_int32(phase);                                                                                       \
     const float* table1 = bufData + iphase;                                                                            \
     const float* table2 = table1 + 1;                                                                                  \
     if (iphase > guardFrame) {                                                                                         \
@@ -1004,7 +981,7 @@ void GrainFM_Dtor(GrainFM* unit) { RTFree(unit->mWorld, unit->mGrains); }
 
 #define GRAIN_BUF_LOOP_BODY_1_MONO                                                                                     \
     phase = sc_gloop(phase, loopMax);                                                                                  \
-    int32 iphase = (int32)phase;                                                                                       \
+    int32 iphase = sc_float_to_int32(phase);                                                                                       \
     float outval = amp * bufData[iphase];                                                                              \
     out1[j] += outval * pan1;
 
@@ -1131,7 +1108,7 @@ static inline void GrainBuf_next_start_new(GrainBuf* unit, int inNumSamples, int
         return;
 
     GrainBufG* grain = unit->mGrains + unit->mNumActive++;
-    int32 bufnum = grain_in_at<full_rate>(unit, 2, position);
+    int32 bufnum = sc_float_to_int32(grain_in_at<full_rate>(unit, 2, position));
     grain->bufnum = bufnum;
 
     GRAIN_BUF
@@ -1154,9 +1131,9 @@ static inline void GrainBuf_next_start_new(GrainBuf* unit, int inNumSamples, int
 
     double counter = grain_in_at<full_rate>(unit, 1, position) * SAMPLERATE;
     counter = sc_max(4., counter);
-    grain->counter = (int)counter;
+    grain->counter = sc_float_to_int32(counter);
 
-    grain->interp = (int)grain_in_at<full_rate>(unit, 5, position);
+    grain->interp = sc_float_to_int32(grain_in_at<full_rate>(unit, 5, position));
     grain->winType = winType;
 
     GET_GRAIN_INIT_AMP
@@ -1224,7 +1201,7 @@ void GrainBuf_Ctor(GrainBuf* unit) {
     unit->curtrig = 0.f;
 
     float maxGrains = IN0(8);
-    unit->mMaxGrains = (int)maxGrains;
+    unit->mMaxGrains = sc_float_to_int32(maxGrains);
     unit->mGrains = (GrainBufG*)RTAlloc(unit->mWorld, unit->mMaxGrains * sizeof(GrainBufG));
     ClearUnitIfMemFailed(unit->mGrains);
 
@@ -1248,7 +1225,7 @@ void GrainBuf_Dtor(GrainBuf* unit) { RTFree(unit->mWorld, unit->mGrains); }
 
 #define BUF_GRAIN_LOOP_BODY_4_N                                                                                        \
     phase = sc_gloop(phase, loopMax);                                                                                  \
-    int32 iphase = (int32)phase;                                                                                       \
+    int32 iphase = sc_float_to_int32(phase);                                                                                       \
     const float* table1 = bufData + iphase * bufChannels;                                                              \
     const float* table0 = table1 - bufChannels;                                                                        \
     const float* table2 = table1 + bufChannels;                                                                        \
@@ -1273,7 +1250,7 @@ void GrainBuf_Dtor(GrainBuf* unit) { RTFree(unit->mWorld, unit->mGrains); }
 
 #define BUF_GRAIN_LOOP_BODY_2_N                                                                                        \
     phase = sc_gloop(phase, loopMax);                                                                                  \
-    int32 iphase = (int32)phase;                                                                                       \
+    int32 iphase = sc_float_to_int32(phase);                                                                                       \
     const float* table1 = bufData + iphase * bufChannels;                                                              \
     const float* table2 = table1 + bufChannels;                                                                        \
     if (iphase > guardFrame) {                                                                                         \
@@ -1289,15 +1266,19 @@ void GrainBuf_Dtor(GrainBuf* unit) { RTFree(unit->mWorld, unit->mGrains); }
 
 #define BUF_GRAIN_LOOP_BODY_1_N                                                                                        \
     phase = sc_gloop(phase, loopMax);                                                                                  \
-    int32 iphase = (int32)phase;                                                                                       \
+    int32 iphase = sc_float_to_int32(phase);                                                                                       \
     float outval = amp * bufData[iphase + n];                                                                          \
     ZXP(out1) += outval;
 
 
 #define GET_WARP_WIN_RELAXED(WINTYPE)                                                                                  \
     do {                                                                                                               \
-        assert(WINTYPE < unit->mWorld->mNumSndBufs);                                                                   \
-        window = unit->mWorld->mSndBufs + (int)WINTYPE;                                                                \
+        const int32 winIndex = sc_float_to_int32(WINTYPE);                                                             \
+        if (winIndex < 0 || (uint32)winIndex >= unit->mWorld->mNumSndBufs) {                                           \
+            windowData = nullptr;                                                                                      \
+            break;                                                                                                     \
+        }                                                                                                              \
+        window = unit->mWorld->mSndBufs + winIndex;                                                                    \
         while (!TRY_ACQUIRE_SNDBUF_SHARED(window)) {                                                                   \
             RELEASE_SNDBUF_SHARED(buf);                                                                                \
             ACQUIRE_SNDBUF_SHARED(buf);                                                                                \
@@ -1394,16 +1375,16 @@ void Warp1_next(Warp1* unit, int inNumSamples) {
                 float counter = GRAIN_IN_AT(unit, 3, i) * SAMPLERATE;
                 double winrandamt = unit->mParent->mRGen->frand2() * (double)GRAIN_IN_AT(unit, 6, i);
                 counter = sc_max(4., floor(counter + (counter * winrandamt)));
-                grain->counter = (int)counter;
+                grain->counter = sc_float_to_int32(counter);
 
-                nextGrain = (int)(counter / overlaps);
+                nextGrain = sc_float_to_int32(counter / overlaps);
 
                 unit->mNextGrain[n] = nextGrain;
 
                 float rate = grain->rate = GRAIN_IN_AT(unit, 2, i) * bufRateScale;
                 float phase = GRAIN_IN_AT(unit, 1, i) * (float)bufFrames;
-                grain->interp = (int)GRAIN_IN_AT(unit, 7, i);
-                float winType = grain->winType = (int)GRAIN_IN_AT(unit, 4, i); // the buffer that holds the grain shape
+                grain->interp = sc_float_to_int32(GRAIN_IN_AT(unit, 7, i));
+                float winType = grain->winType = sc_float_to_int32(GRAIN_IN_AT(unit, 4, i)); // the buffer that holds the grain shape
                 DECLARE_WINDOW
 
                 if (winType >= unit->mWorld->mNumSndBufs) {

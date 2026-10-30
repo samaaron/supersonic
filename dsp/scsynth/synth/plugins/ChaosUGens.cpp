@@ -191,7 +191,7 @@ inline double mod2pi(double in) {
     } else
         return in;
 
-    return in - hi * (double)((int)(in * RECTWOPI));
+    return in - hi * (double)(sc_float_to_int32(in * RECTWOPI));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

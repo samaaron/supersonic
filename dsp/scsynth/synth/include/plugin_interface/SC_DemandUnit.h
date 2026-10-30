@@ -26,12 +26,12 @@
 // demand rate unit support.
 
 inline bool IsDemandInput(Unit* unit, int index) {
-    Unit* fromUnit = unit->mInput[index]->mFromUnit;
+    Unit* fromUnit = INWIRE(index)->mFromUnit;
     return fromUnit && fromUnit->mCalcRate == calc_DemandRate;
 }
 
 inline float DemandInput(Unit* unit, int index) {
-    Unit* fromUnit = unit->mInput[index]->mFromUnit;
+    Unit* fromUnit = INWIRE(index)->mFromUnit;
     if (fromUnit && fromUnit->mCalcRate == calc_DemandRate)
         (fromUnit->mCalcFunc)(fromUnit, 1);
     return IN0(index);
@@ -42,7 +42,7 @@ inline float DemandInput(Unit* unit, int index) {
 // it is converted to a buffer index here.
 
 inline float DemandInputA(Unit* unit, int index, int offset) {
-    Unit* fromUnit = unit->mInput[index]->mFromUnit;
+    Unit* fromUnit = INWIRE(index)->mFromUnit;
     if (!fromUnit) {
         return IN0(index);
     }
@@ -57,7 +57,7 @@ inline float DemandInputA(Unit* unit, int index, int offset) {
 }
 
 inline void ResetInput(Unit* unit, int index) {
-    Unit* fromUnit = unit->mInput[index]->mFromUnit;
+    Unit* fromUnit = INWIRE(index)->mFromUnit;
     if (fromUnit && fromUnit->mCalcRate == calc_DemandRate)
         (fromUnit->mCalcFunc)(fromUnit, 0);
 }

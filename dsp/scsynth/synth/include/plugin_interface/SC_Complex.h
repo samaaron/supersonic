@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include <cmath>
 
 #include "SC_Types.h"
@@ -135,7 +136,7 @@ struct Polar {
     Complex ToComplex() { return Complex(mag * std::cos(phase), mag * std::sin(phase)); }
 
     Complex ToComplexApx() {
-        uint32 sinindex = (int32)(kSinePhaseScale * phase) & kSineMask;
+        uint32 sinindex = sc_float_to_int32(kSinePhaseScale * phase) & kSineMask;
         uint32 cosindex = (sinindex + (kSineSize >> 2)) & kSineMask;
         return Complex(mag * gSine[cosindex], mag * gSine[sinindex]);
     }
@@ -164,7 +165,7 @@ inline Polar Complex::ToPolarApx() {
     float mag, phase, slope;
     if (absreal > absimag) {
         slope = imag / real;
-        index = (int32)(kPolarLUTSize2 + kPolarLUTSize2 * slope);
+        index = sc_float_to_int32(kPolarLUTSize2 + kPolarLUTSize2 * slope);
         mag = gMagLUT[index] * absreal;
         phase = gPhaseLUT[index];
         if (real > 0) {
@@ -174,7 +175,7 @@ inline Polar Complex::ToPolarApx() {
         }
     } else if (absimag > 0) {
         slope = real / imag;
-        index = (int32)(kPolarLUTSize2 + kPolarLUTSize2 * slope);
+        index = sc_float_to_int32(kPolarLUTSize2 + kPolarLUTSize2 * slope);
         mag = gMagLUT[index] * absimag;
         phase = gPhaseLUT[index];
         if (imag > 0) {

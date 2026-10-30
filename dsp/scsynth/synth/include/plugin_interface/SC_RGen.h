@@ -48,6 +48,7 @@
 
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include "SC_Endian.h"
 #include "SC_Types.h"
 #include "SC_BoundsMacros.h"
@@ -212,10 +213,10 @@ inline float RGen::fbilinrand() {
 inline float RGen::fsum3rand() { return (float)((frand() + frand() + frand() - 1.5) * 0.666666667); }
 
 /// Generate 32 bit integer from 0 to scale - 1
-inline int32 RGen::irand(int32 scale) { return (int32)floor(scale * drand()); }
+inline int32 RGen::irand(int32 scale) { return sc_float_to_int32(floor(scale * drand())); }
 
 /// Generate a 32 bit integer from -scale to +scale
-inline int32 RGen::irand2(int32 scale) { return (int32)floor((2. * scale + 1.) * drand() - scale); }
+inline int32 RGen::irand2(int32 scale) { return sc_float_to_int32(floor((2. * scale + 1.) * drand() - scale)); }
 
 /// Generates a single random 32 bit integer value in linear distribution from 0 to +scale
 inline int32 RGen::ilinrand(int32 scale) {

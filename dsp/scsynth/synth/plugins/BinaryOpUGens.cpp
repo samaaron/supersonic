@@ -262,15 +262,15 @@ enum {
 };
 
 
-inline float sc_andt(float a, float b) { return int(a) & int(b); }
+inline float sc_andt(float a, float b) { return sc_float_to_int32(a) & sc_float_to_int32(b); }
 
-inline float sc_ort(float a, float b) { return int(a) | int(b); }
+inline float sc_ort(float a, float b) { return sc_float_to_int32(a) | sc_float_to_int32(b); }
 
-inline float sc_xort(float a, float b) { return int(a) ^ int(b); }
+inline float sc_xort(float a, float b) { return sc_float_to_int32(a) ^ sc_float_to_int32(b); }
 
-inline float sc_rst(float a, float b) { return int(a) >> int(b); }
+inline float sc_rst(float a, float b) { return sc_float_to_int32(a) >> sc_float_to_int32(b); }
 
-inline float sc_lst(float a, float b) { return int(a) << int(b); }
+inline float sc_lst(float a, float b) { return sc_float_to_int32(a) << sc_float_to_int32(b); }
 
 struct BinaryOpUGen : public Unit {
     float mPrevA, mPrevB;

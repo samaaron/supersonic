@@ -411,7 +411,7 @@ void Logistic_next_k(Logistic* unit, int inNumSamples) {
     long remain = inNumSamples;
     do {
         if (counter <= 0) {
-            counter = (int32)(unit->mRate->mSampleRate / sc_max(freq, .001f));
+            counter = sc_float_to_int32(unit->mRate->mSampleRate / sc_max(freq, .001f));
             counter = sc_max(1, counter);
             y1 = paramf * y1 * (1.0 - y1); // chaotic equation
         }
@@ -602,8 +602,8 @@ void TExpRand_Ctor(TExpRand* unit) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void IRand_Ctor(IRand* unit) {
-    int lo = (int)ZIN0(0);
-    int hi = (int)ZIN0(1);
+    int lo = sc_float_to_int32(ZIN0(0));
+    int hi = sc_float_to_int32(ZIN0(1));
     int range = hi - lo + 1;
     RGen& rgen = *unit->mParent->mRGen;
     ZOUT0(0) = (float)(rgen.irand(range) + lo);
@@ -614,8 +614,8 @@ void IRand_Ctor(IRand* unit) {
 void TIRand_next_k(TIRand* unit, int inNumSamples) {
     float trig = ZIN0(2);
     if (trig > 0.f && unit->m_trig <= 0.f) {
-        int lo = (int)ZIN0(0);
-        int hi = (int)ZIN0(1);
+        int lo = sc_float_to_int32(ZIN0(0));
+        int hi = sc_float_to_int32(ZIN0(1));
         int range = hi - lo + 1;
         RGen& rgen = *unit->mParent->mRGen;
         ZOUT0(0) = unit->m_value = (float)(rgen.irand(range) + lo);
@@ -626,8 +626,8 @@ void TIRand_next_k(TIRand* unit, int inNumSamples) {
 }
 
 void TIRand_next_a(TIRand* unit, int inNumSamples) {
-    int lo = (int)ZIN0(0);
-    int hi = (int)ZIN0(1);
+    int lo = sc_float_to_int32(ZIN0(0));
+    int hi = sc_float_to_int32(ZIN0(1));
     float* trig = ZIN(2);
     float* out = ZOUT(0);
     float prev = unit->m_trig;
@@ -655,7 +655,7 @@ void TIRand_next_aa(TIRand* unit, int inNumSamples) {
     float next;
 
     LOOP1(
-        inNumSamples, next = ZXP(trig); int loval = (int)ZXP(lo); int hival = (int)ZXP(hi);
+        inNumSamples, next = ZXP(trig); int loval = sc_float_to_int32(ZXP(lo)); int hival = sc_float_to_int32(ZXP(hi));
         if (next > 0.f && prev <= 0.f) {
             int range = hival - loval + 1;
             RGen& rgen = *unit->mParent->mRGen;
@@ -668,8 +668,8 @@ void TIRand_next_aa(TIRand* unit, int inNumSamples) {
 
 
 void TIRand_Ctor(TIRand* unit) {
-    int lo = (int)ZIN0(0);
-    int hi = (int)ZIN0(1);
+    int lo = sc_float_to_int32(ZIN0(0));
+    int hi = sc_float_to_int32(ZIN0(1));
     int range = hi - lo + 1;
     RGen& rgen = *unit->mParent->mRGen;
     ZOUT0(0) = unit->m_value = (float)(rgen.irand(range) + lo);
@@ -748,7 +748,7 @@ void RandSeed_next_k(RandSeed* unit, int inNumSamples) {
 
     if (trig > 0.f && unit->m_trig <= 0.f) {
         RGen& rgen = *unit->mParent->mRGen;
-        int seed = (int)DEMANDINPUT_A(1, inNumSamples);
+        int seed = sc_float_to_int32(DEMANDINPUT_A(1, inNumSamples));
         rgen.init(seed);
     }
     unit->m_trig = trig;
@@ -768,7 +768,7 @@ void RandSeed_next(RandSeed* unit, int inNumSamples) {
         curtrig = ZXP(trig);
         if (curtrig > 0.f && prevtrig <= 0.f) {
             RGen& rgen = *unit->mParent->mRGen;
-            int seed = (int)DEMANDINPUT_A(1, inNumSamples);
+            int seed = sc_float_to_int32(DEMANDINPUT_A(1, inNumSamples));
             rgen.init(seed);
         } prevtrig = curtrig;
         ZXP(out) = 0.f;
@@ -787,7 +787,7 @@ void RandID_Ctor(RandID* unit) {
 
 void RandID_next(RandID* unit, int inNumSamples) {
     float id = ZIN0(0);
-    uint32 iid = (uint32)id;
+    uint32 iid = sc_float_to<uint32>(id);
     if (iid < unit->mWorld->mNumRGens) {
         unit->mParent->mRGen = unit->mWorld->mRGen + iid;
     }
@@ -799,7 +799,7 @@ void RandID_next(RandID* unit, int inNumSamples) {
 void LinRand_Ctor(LinRand* unit) {
     float lo = ZIN0(0);
     float hi = ZIN0(1);
-    int n = (int)ZIN0(2);
+    int n = sc_float_to_int32(ZIN0(2));
 
     float range = hi - lo;
     RGen& rgen = *unit->mParent->mRGen;
@@ -818,7 +818,7 @@ void LinRand_Ctor(LinRand* unit) {
 void NRand_Ctor(NRand* unit) {
     float lo = ZIN0(0);
     float hi = ZIN0(1);
-    int n = (int)ZIN0(2);
+    int n = sc_float_to_int32(ZIN0(2));
 
     float range = hi - lo;
     RGen& rgen = *unit->mParent->mRGen;
@@ -864,7 +864,7 @@ void Hasher_Ctor(Hasher* unit) {
 
 void MantissaMask_next(MantissaMask* unit, int inNumSamples) {
     int32* in = (int32*)ZIN(0);
-    int32 bits = (int32)ZIN0(1);
+    int32 bits = sc_clip(sc_float_to_int32(ZIN0(1)), 0, 23);
     int32* out = (int32*)ZOUT(0);
     int32 mask = -1 << (23 - bits);
     LOOP1(inNumSamples, ZXP(out) = mask & ZXP(in););
@@ -888,7 +888,7 @@ void LFClipNoise_next(LFClipNoise* unit, int inNumSamples) {
         int remain = inNumSamples;
     do {
         if (counter <= 0) {
-            counter = (int)(unit->mRate->mSampleRate / sc_max(freq, .001f));
+            counter = sc_float_to_int32(unit->mRate->mSampleRate / sc_max(freq, .001f));
             counter = sc_max(1, counter);
             level = fcoin(s1, s2, s3);
         }
@@ -923,7 +923,7 @@ void LFNoise0_next(LFNoise0* unit, int inNumSamples) {
         int remain = inNumSamples;
     do {
         if (counter <= 0) {
-            counter = (int32)(unit->mRate->mSampleRate / sc_max(freq, .001f));
+            counter = sc_float_to_int32(unit->mRate->mSampleRate / sc_max(freq, .001f));
             counter = sc_max(1, counter);
             level = frand2(s1, s2, s3);
         }
@@ -944,7 +944,7 @@ void LFNoise0_next_1(LFNoise0* unit, int inNumSamples) {
     int32 counter = unit->mCounter;
 
     if (counter <= 0) {
-        counter = (int32)(unit->mRate->mSampleRate / sc_max(freq, .001f));
+        counter = sc_float_to_int32(unit->mRate->mSampleRate / sc_max(freq, .001f));
         counter = sc_max(1, counter);
         RGET level = frand2(s1, s2, s3);
         unit->mLevel = level;
@@ -981,7 +981,7 @@ void LFNoise1_next(LFNoise1* unit, int inNumSamples) {
         int remain = inNumSamples;
     do {
         if (counter <= 0) {
-            counter = (int32)(unit->mRate->mSampleRate / sc_max(freq, .001f));
+            counter = sc_float_to_int32(unit->mRate->mSampleRate / sc_max(freq, .001f));
             counter = sc_max(1, counter);
             float nextlevel = frand2(s1, s2, s3);
             slope = (nextlevel - level) / counter;
@@ -1026,7 +1026,7 @@ void LFNoise2_next(LFNoise2* unit, int inNumSamples) {
             level = unit->m_nextmidpt;
             unit->m_nextmidpt = (unit->m_nextvalue + value) * .5;
 
-            counter = (int32)(unit->mRate->mSampleRate / sc_max(freq, .001f));
+            counter = sc_float_to_int32(unit->mRate->mSampleRate / sc_max(freq, .001f));
             counter = sc_max(2, counter);
             float fseglen = (float)counter;
             curve = 2.f * (unit->m_nextmidpt - level - fseglen * slope) / (fseglen * fseglen + fseglen);
@@ -1059,7 +1059,7 @@ void LFNoise2_Ctor(LFNoise2* unit) {
 
 void WrapBufRd_next0(Unit* unit, int inNumSamples);
 void WrapBufRd_next0(Unit* unit, int inNumSamples) {
-    int bufnum = (int)ZIN0(0);
+    int bufnum = sc_float_to_int32(ZIN0(0));
     float* pos = ZIN(1);
 
     const SndBuf* buf = unit->mWorld->mSndBufs + bufnum;
@@ -1079,7 +1079,7 @@ void WrapBufRd_next0(Unit* unit, int inNumSamples) {
         out[i] = OUT(i);
 
     LOOP1(
-        inNumSamples, float fpos = ZXP(pos); int ipos = (int)fpos * numchan; ipos = sc_mod(ipos, numframes);
+        inNumSamples, float fpos = ZXP(pos); int ipos = sc_float_to_int32(fpos) * numchan; ipos = sc_mod(ipos, numframes);
         int index = numchan * ipos; for (int i = 0; i < numchan; ++i) {
             *++(out[i]) = data[index];
             index++;
@@ -1088,7 +1088,7 @@ void WrapBufRd_next0(Unit* unit, int inNumSamples) {
 
 void ClipBufRd_next0(Unit* unit, int inNumSamples);
 void ClipBufRd_next0(Unit* unit, int inNumSamples) {
-    int bufnum = (int)ZIN0(0);
+    int bufnum = sc_float_to_int32(ZIN0(0));
     float* pos = ZIN(1);
 
     const SndBuf* buf = unit->mWorld->mSndBufs + bufnum;
@@ -1109,7 +1109,7 @@ void ClipBufRd_next0(Unit* unit, int inNumSamples) {
         out[i] = OUT(i);
 
     LOOP1(
-        inNumSamples, float fpos = ZXP(pos); int ipos = (int)fpos * numchan; ipos = sc_clip(ipos, 0, maxframe);
+        inNumSamples, float fpos = ZXP(pos); int ipos = sc_float_to_int32(fpos) * numchan; ipos = sc_clip(ipos, 0, maxframe);
         int index = numchan * ipos; for (int i = 0; i < numchan; ++i) {
             *++(out[i]) = data[index];
             index++;

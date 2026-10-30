@@ -130,6 +130,37 @@ TEST_CASE("Definitions: every packaged definition loads", "[definitions]") {
     }
 }
 
+// Every packaged definition plays: a synth of each is started with its default
+// controls, renders 32 blocks and is freed, three times over, and the engine
+// then still answers. Freeing a synth hands its unit generators' real-time
+// memory back, so a unit that wrote outside it, or hands back the wrong
+// pointer, shows here.
+TEST_CASE("Definitions: every packaged definition plays and frees", "[definitions]") {
+    EngineFixture fix;
+    std::vector<std::string> names;
+    for (const auto& e : std::filesystem::directory_iterator(CLOCKWORK_SYNTHDEFS_DIR))
+        if (e.is_regular_file() && e.path().extension() == ".scsyndef") names.push_back(e.path().stem().string());
+    std::sort(names.begin(), names.end());
+    REQUIRE(names.size() > 100);
+
+    for (const auto& name : names) {
+        REQUIRE(fix.loadSynthDef(name));
+        for (int round = 0; round < 3; ++round) {
+            osc_test::Builder play;
+            play.begin("/s_new") << name.c_str() << -1 << 0 << 0;
+            fix.send(play.end());
+            fix.pumpBlock(32);
+            fix.send(osc_test::message("/g_freeAll", 0));
+            fix.pumpBlock(2);
+        }
+        fix.send(osc_test::message("/d_free", name.c_str()));
+    }
+    fix.clearReplies();
+    fix.send(osc_test::message("/sync", 7));
+    OscReply r;
+    REQUIRE(fix.waitForReply("/synced", r));
+}
+
 // The engine reads no files, on any platform: a definition reaches it as
 // bytes, in /d_recv. Sent to the engine itself, /d_load and /d_loadDir are
 // refused with what to do instead, and nothing is read. (supersonic::Commands,

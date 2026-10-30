@@ -63,13 +63,13 @@ void PackFFT_next(PackFFT* unit, int inNumSamples);
 
 
 void Unpack1FFT_Ctor(Unpack1FFT* unit) {
-    unit->bufsize = (int)ZIN0(1);
+    unit->bufsize = sc_float_to_int32(ZIN0(1));
     unit->latestMomentProcessed = -1;
     // unit->numOldSkipped = 0;
 
     unit->outval = 0.f;
 
-    unit->binindex = (int)ZIN0(2);
+    unit->binindex = sc_float_to_int32(ZIN0(2));
 
     if (ZIN0(3) == 0.f) {
         // Mags
@@ -104,22 +104,13 @@ void Unpack1FFT_Ctor(Unpack1FFT* unit) {
         ZOUT0(0) = unit->outval;                                                                                       \
         return;                                                                                                        \
     }                                                                                                                  \
-    uint32 ibufnum = (uint32)fbufnum;                                                                                  \
     World* world = unit->mWorld;                                                                                       \
-    SndBuf* buf;                                                                                                       \
-    if (ibufnum >= world->mNumSndBufs) {                                                                               \
-        int localBufNum = ibufnum - world->mNumSndBufs;                                                                \
-        Graph* parent = unit->mParent;                                                                                 \
-        if (localBufNum <= parent->localBufNum) {                                                                      \
-            buf = parent->mLocalSndBufs + localBufNum;                                                                 \
-        } else {                                                                                                       \
-            buf = world->mSndBufs;                                                                                     \
-            if (unit->mWorld->mVerbosity > -1) {                                                                       \
-                Print("Unpack1FFT_next: warning, bufnum too large: i%\n", ibufnum);                                    \
-            }                                                                                                          \
+    SndBuf* buf = sc_unit_buffer(unit, fbufnum);                                                                       \
+    if (!buf) {                                                                                                        \
+        buf = world->mSndBufs;                                                                                         \
+        if (unit->mWorld->mVerbosity > -1) {                                                                           \
+            Print("Unpack1FFT_next: warning, bufnum too large: %g\n", fbufnum);                                        \
         }                                                                                                              \
-    } else {                                                                                                           \
-        buf = world->mSndBufs + ibufnum;                                                                               \
     }                                                                                                                  \
     int binindex __attribute__((__unused__)) = unit->binindex;                                                         \
     LOCK_SNDBUF(buf);                                                                                                  \
@@ -196,11 +187,11 @@ void Unpack1FFT_next_nyq(Unpack1FFT* unit, int inNumSamples) {
 void PackFFT_Ctor(PackFFT* unit) {
     SETCALC(PackFFT_next);
 
-    unit->bufsize = (int)ZIN0(1);
-    unit->frombin = (int)ZIN0(2);
-    unit->tobin = (int)ZIN0(3);
+    unit->bufsize = sc_float_to_int32(ZIN0(1));
+    unit->frombin = sc_float_to_int32(ZIN0(2));
+    unit->tobin = sc_float_to_int32(ZIN0(3));
     unit->zeroothers = ZIN0(4) > 0;
-    unit->numinvals = (int)ZIN0(5);
+    unit->numinvals = sc_float_to_int32(ZIN0(5));
 
     //	Print("PackFFT_Ctor: Passing chain through, val %g\n", ZIN0(0));
     ZOUT0(0) = ZIN0(0); // Required: allows the buffer index to fall through nicely to the IFFT
@@ -215,20 +206,10 @@ void PackFFT_next(PackFFT* unit, int inNumSamples) {
         ZOUT0(0) = -1.f;
         return;
     }
-    uint32 ibufnum = (uint32)fbufnum;
     World* world = unit->mWorld;
-    SndBuf* buf;
-    if (ibufnum >= world->mNumSndBufs) {
-        int localBufNum = ibufnum - world->mNumSndBufs;
-        Graph* parent = unit->mParent;
-        if (localBufNum <= parent->localBufNum) {
-            buf = parent->mLocalSndBufs + localBufNum;
-        } else {
-            buf = world->mSndBufs;
-        }
-    } else {
-        buf = world->mSndBufs + ibufnum;
-    }
+    SndBuf* buf = sc_unit_buffer(unit, fbufnum);
+    if (!buf)
+        buf = world->mSndBufs;
     LOCK_SNDBUF(buf);
 
     int numbins = (buf->samples - 2) >> 1;

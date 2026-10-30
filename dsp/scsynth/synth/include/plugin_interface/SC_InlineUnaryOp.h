@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "SC_FloatToInt.h"
 #include "SC_Types.h"
 #include "SC_Constants.h"
 
@@ -256,7 +257,7 @@ inline float32 sc_frac(float32 x) { return x - sc_floor(x); }
 ////////////////////////////////
 
 /// Returns ones complement
-inline float32 sc_bitNot(float32 x) { return (float32) ~(int)x; }
+inline float32 sc_bitNot(float32 x) { return (float32) ~sc_float_to_int32(x); }
 
 /// Cubic lagrange interpolator
 inline float32 sc_lg3interp(float32 x1, float32 a, float32 b, float32 c, float32 d) {

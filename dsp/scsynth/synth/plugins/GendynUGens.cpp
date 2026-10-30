@@ -82,7 +82,7 @@ void Gendy1_Ctor(Gendy1* unit) {
     unit->mNextAmp = 0.0f;
     unit->mSpeed = 100.f;
 
-    unit->mMemorySize = (int)ZIN0(8); // default is 12
+    unit->mMemorySize = sc_min(sc_float_to_int32(ZIN0(8)), 1 << 20); // default is 12
     // printf("memsize %d %f", unit->mMemorySize, ZIN0(8));
     if (unit->mMemorySize < 1)
         unit->mMemorySize = 1;
@@ -204,8 +204,8 @@ void Gendy1_next_k(Gendy1* unit, int inNumSamples) {
     float* out = ZOUT(0);
 
     // distribution choices for amp and dur and constants of distribution
-    int whichamp = (int)ZIN0(0);
-    int whichdur = (int)ZIN0(1);
+    int whichamp = sc_float_to_int32(ZIN0(0));
+    int whichdur = sc_float_to_int32(ZIN0(1));
     float aamp = ZIN0(2);
     float adur = ZIN0(3);
     float minfreq = ZIN0(4);
@@ -233,7 +233,7 @@ void Gendy1_next_k(Gendy1* unit, int inNumSamples) {
             phase -= 1.0;
 
             int index = unit->mIndex;
-            int num = (int)(ZIN0(9)); //(unit->mMemorySize);(((int)ZIN0(9))%(unit->mMemorySize))+1;
+            int num = sc_float_to_int32(ZIN0(9)); //(unit->mMemorySize);((sc_float_to_int32(ZIN0(9)))%(unit->mMemorySize))+1;
             if ((num > (unit->mMemorySize)) || (num < 1))
                 num = unit->mMemorySize;
 
@@ -315,7 +315,7 @@ void Gendy2_Ctor(Gendy2* unit) {
     unit->mNextAmp = 0.0f;
     unit->mSpeed = 100.f;
 
-    unit->mMemorySize = (int)ZIN0(8); // default is 12
+    unit->mMemorySize = sc_min(sc_float_to_int32(ZIN0(8)), 1 << 20); // default is 12
     // printf("memsize %d %f", unit->mMemorySize, ZIN0(8));
     if (unit->mMemorySize < 1)
         unit->mMemorySize = 1;
@@ -371,8 +371,8 @@ void Gendy2_next_k(Gendy2* unit, int inNumSamples) {
     float* out = ZOUT(0);
 
     // distribution choices for amp and dur and constants of distribution
-    int whichamp = (int)ZIN0(0);
-    int whichdur = (int)ZIN0(1);
+    int whichamp = sc_float_to_int32(ZIN0(0));
+    int whichdur = sc_float_to_int32(ZIN0(1));
     float aamp = ZIN0(2);
     float adur = ZIN0(3);
     float minfreq = ZIN0(4);
@@ -399,7 +399,7 @@ void Gendy2_next_k(Gendy2* unit, int inNumSamples) {
             phase -= 1.0;
 
             int index = unit->mIndex;
-            int num = (int)(ZIN0(9)); //(unit->mMemorySize);(((int)ZIN0(9))%(unit->mMemorySize))+1;
+            int num = sc_float_to_int32(ZIN0(9)); //(unit->mMemorySize);((sc_float_to_int32(ZIN0(9)))%(unit->mMemorySize))+1;
             if ((num > (unit->mMemorySize)) || (num < 1))
                 num = unit->mMemorySize;
 
@@ -480,7 +480,7 @@ void Gendy3_Ctor(Gendy3* unit) {
     unit->mInterpMult = 1.0f;
     unit->mSpeed = 100.f;
 
-    unit->mMemorySize = (int)ZIN0(7);
+    unit->mMemorySize = sc_min(sc_float_to_int32(ZIN0(7)), 1 << 20);
     if (unit->mMemorySize < 1)
         unit->mMemorySize = 1;
     unit->mIndex = 0;
@@ -520,8 +520,8 @@ void Gendy3_next_k(Gendy3* unit, int inNumSamples) {
     float* out = ZOUT(0);
 
     // distribution choices for amp and dur and constants of distribution
-    int whichamp = (int)ZIN0(0);
-    int whichdur = (int)ZIN0(1);
+    int whichamp = sc_float_to_int32(ZIN0(0));
+    int whichdur = sc_float_to_int32(ZIN0(1));
     float aamp = ZIN0(2);
     float adur = ZIN0(3);
     float freq = ZIN0(4);
@@ -533,7 +533,7 @@ void Gendy3_next_k(Gendy3* unit, int inNumSamples) {
     float nextamp = unit->mNextAmp;
     float speed = unit->mSpeed;
     int index = unit->mIndex;
-    int interpmult = (int)unit->mInterpMult;
+    int interpmult = sc_float_to_int32(unit->mInterpMult);
     double lastphase = unit->mLastPhase;
     double nextphase = unit->mNextPhase;
 
@@ -549,7 +549,7 @@ void Gendy3_next_k(Gendy3* unit, int inNumSamples) {
         if (phase >= 1.) { // calculate all targets for new period
             phase -= 1.;
 
-            int num = (int)(ZIN0(8));
+            int num = sc_float_to_int32(ZIN0(8));
             if ((num > (unit->mMemorySize)) || (num < 1))
                 num = unit->mMemorySize;
 
@@ -622,7 +622,7 @@ void Gendy3_next_k(Gendy3* unit, int inNumSamples) {
             nextphase = lastphase + phaselist[index];
             nextamp = amplist[index + 1];
 
-            interpmult = (int)(1.0 / (nextphase - lastphase));
+            interpmult = sc_float_to_int32(1.0 / (nextphase - lastphase));
         }
 
         float interp = (phase - lastphase) * interpmult;

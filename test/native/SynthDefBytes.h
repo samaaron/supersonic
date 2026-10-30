@@ -48,4 +48,27 @@ inline void stillRunning(EngineFixture& fx) {
     REQUIRE(fx.waitForReply("/synced", synced));
 }
 
+// The pool units allocate from is still sound: allocate and free through it,
+// then the engine still answers. Buffer 0 is left alone.
+inline void poolStillSound(EngineFixture& fx) {
+    for (int32_t b = 1; b < 9; ++b) {
+        fx.send(osc_test::message("/b_alloc", b, 4096, 2));
+        fx.pumpBlock(2);
+        fx.send(osc_test::message("/b_free", b));
+        fx.pumpBlock(2);
+    }
+    stillRunning(fx);
+}
+
+// The value on control bus `bus`.
+inline float controlBus(EngineFixture& fx, int32_t bus) {
+    fx.clearReplies();
+    fx.send(osc_test::message("/c_get", bus));
+    OscReply reply;
+    REQUIRE(fx.waitForReply("/c_set", reply));
+    const auto parsed = reply.parsed();
+    REQUIRE(parsed.argCount() >= 2);
+    return parsed.argFloat(1);
+}
+
 } // namespace synthdef_bytes

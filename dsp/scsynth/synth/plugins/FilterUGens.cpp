@@ -484,7 +484,7 @@ void Ramp_next(Ramp* unit, int inNumSamples) {
         counter -= nsmps;
         remain -= nsmps;
         if (counter <= 0) {
-            counter = (int)(period * SAMPLERATE);
+            counter = sc_float_to_int32(period * SAMPLERATE);
             counter = sc_max(1, counter);
             slope = (*in - level) / counter;
         }
@@ -502,7 +502,7 @@ void Ramp_next_1(Ramp* unit, int inNumSamples) {
     if (--unit->m_counter <= 0) {
         float in = ZIN0(0);
         float period = ZIN0(1);
-        int counter = (int)(period * SAMPLERATE);
+        int counter = sc_float_to_int32(period * SAMPLERATE);
         unit->m_counter = counter = sc_max(1, counter);
         unit->m_slope = (in - unit->m_level) / counter;
     }
@@ -866,7 +866,7 @@ void VarLag_next(VarLag* unit, int inNumSamples) {
     int remain = inNumSamples;
 
     if (*in != unit->m_in) {
-        counter = (int)(lagTime * SAMPLERATE);
+        counter = sc_float_to_int32(lagTime * SAMPLERATE);
         counter = unit->m_counter = sc_max(1, counter);
         slope = unit->m_slope = (*in - unit->m_level) / counter;
         unit->m_in = *in;
@@ -874,7 +874,7 @@ void VarLag_next(VarLag* unit, int inNumSamples) {
     } else {
         if (lagTime != unit->m_lagTime) {
             float scaleFactor = lagTime / unit->m_lagTime;
-            counter = (int)(unit->m_counter * scaleFactor);
+            counter = sc_float_to_int32(unit->m_counter * scaleFactor);
             counter = unit->m_counter = sc_max(1, counter);
             slope = unit->m_slope / scaleFactor;
             unit->m_lagTime = lagTime;
@@ -902,7 +902,7 @@ void VarLag_next_1(VarLag* unit, int inNumSamples) {
     float lagTime = ZIN0(1);
     int counter = unit->m_counter;
     if (in != unit->m_in) {
-        counter = (int)(lagTime * SAMPLERATE);
+        counter = sc_float_to_int32(lagTime * SAMPLERATE);
         unit->m_counter = counter = sc_max(1, counter);
         unit->m_slope = (in - unit->m_level) / counter;
         unit->m_in = in;
@@ -912,7 +912,7 @@ void VarLag_next_1(VarLag* unit, int inNumSamples) {
         if (lagTime != unit->m_lagTime) {
             if (counter != 0) {
                 double scaleFactor = lagTime / unit->m_lagTime;
-                counter = (int)(unit->m_counter * scaleFactor);
+                counter = sc_float_to_int32(unit->m_counter * scaleFactor);
                 unit->m_counter = counter = sc_max(1, counter);
                 unit->m_slope = unit->m_slope / scaleFactor;
             }
@@ -938,7 +938,7 @@ void VarLag_Ctor(VarLag* unit) {
     float in = *IN(0);
     float lagTime = ZIN0(1);
     unit->m_level = ZIN0(2);
-    int counter = (int)(lagTime * SAMPLERATE);
+    int counter = sc_float_to_int32(lagTime * SAMPLERATE);
     unit->m_counter = counter = sc_max(1, counter);
     unit->m_slope = (in - unit->m_level) / counter;
     unit->m_in = in;
@@ -2626,7 +2626,7 @@ void Median_Ctor(Median* unit) {
     float in = ZIN0(1);
     // a length below 1 leaves pos at -1 in Median_InsertMedian, which then indexes
     // m_medianValue out of bounds; 1 is the documented minimum and is a no-op
-    unit->m_medianSize = sc_clip((int)ZIN0(0), 1, kMAXMEDIANSIZE);
+    unit->m_medianSize = sc_clip(sc_float_to_int32(ZIN0(0)), 1, kMAXMEDIANSIZE);
     Median_InitMedian(unit, unit->m_medianSize, in);
     ZOUT0(0) = Median_InsertMedian(unit, in);
 }
@@ -3302,12 +3302,18 @@ void Compander_next(Compander* unit, int inNumSamples) {
 
 void Normalizer_Dtor(Normalizer* unit) { RTFree(unit->mWorld, unit->m_table); }
 
+// A lookahead of `dur` seconds in samples: at least one, so every block moves
+// through the buffer, and few enough that three buffers' worth fits a long.
+static long lookaheadSamples(Unit* unit, float dur) {
+    return sc_clip(sc_float_to<long>(ceil(dur * SAMPLERATE)), 1L, 1L << 26);
+}
+
 void Normalizer_Ctor(Normalizer* unit) {
     SETCALC(Normalizer_next);
     // printf("Normalizer_Reset\n");
 
     float dur = ZIN0(2);
-    unit->m_bufsize = (long)(ceil(dur * SAMPLERATE));
+    unit->m_bufsize = lookaheadSamples(unit, dur);
     long allocsize = unit->m_bufsize * 3;
     // allocsize = NEXTPOWEROFTWO(allocsize);
 
@@ -3396,7 +3402,7 @@ void Limiter_Ctor(Limiter* unit) {
     SETCALC(Limiter_next);
 
     float dur = ZIN0(2);
-    unit->m_bufsize = (long)(ceil(dur * SAMPLERATE));
+    unit->m_bufsize = lookaheadSamples(unit, dur);
     long allocsize = unit->m_bufsize * 3;
     allocsize = NEXTPOWEROFTWO(allocsize);
 
@@ -3604,7 +3610,7 @@ void DetectSilence_Ctor(DetectSilence* unit) {
     // printf("DetectSilence_Reset\n");
     if (INRATE(1) == calc_ScalarRate && INRATE(2) == calc_ScalarRate) {
         unit->mThresh = ZIN0(1);
-        unit->mEndCounter = (int32)(SAMPLERATE * ZIN0(2));
+        unit->mEndCounter = sc_float_to_int32(SAMPLERATE * ZIN0(2));
         SETCALC(DetectSilence_next);
     } else {
         SETCALC(DetectSilence_next_k);
@@ -3628,7 +3634,7 @@ void DetectSilence_next(DetectSilence* unit, int inNumSamples) {
             *out++ = 0.f;
         } else if (counter >= 0) {
             if (++counter >= unit->mEndCounter) {
-                DoneAction((int)ZIN0(3), unit);
+                DoneAction(sc_float_to_int32(ZIN0(3)), unit);
                 *out++ = 1.f;
             } else {
                 *out++ = 0.f;
@@ -3641,7 +3647,7 @@ void DetectSilence_next(DetectSilence* unit, int inNumSamples) {
 
 void DetectSilence_next_k(DetectSilence* unit, int inNumSamples) {
     float thresh = ZIN0(1);
-    int endCounter = (int32)(SAMPLERATE * ZIN0(2));
+    int endCounter = sc_float_to_int32(SAMPLERATE * ZIN0(2));
     int counter = unit->mCounter;
     float val;
     float* in = IN(0);
@@ -3654,7 +3660,7 @@ void DetectSilence_next_k(DetectSilence* unit, int inNumSamples) {
             *out++ = 0.f;
         } else if (counter >= 0) {
             if (++counter >= endCounter) {
-                DoneAction((int)ZIN0(3), unit);
+                DoneAction(sc_float_to_int32(ZIN0(3)), unit);
                 *out++ = 1.f;
             } else {
                 *out++ = 0.f;
@@ -3790,7 +3796,7 @@ void FreqShift_Ctor(FreqShift* unit) {
             SETCALC(FreqShift_next_ka);
         else {
             SETCALC(FreqShift_next_kk);
-            unit->m_phase = (int32)(unit->m_radtoinc * IN0(2));
+            unit->m_phase = sc_float_to_int32(unit->m_radtoinc * IN0(2));
         }
     }
     // set up for the oscil for the modualtion
@@ -3838,7 +3844,7 @@ void FreqShift_next_kk(FreqShift* unit, int inNumSamples) {
     float freqin = ZIN0(1);
     float outcos, outsin; // the sample by sample output of the Hilbert
     float outsinosc, outsinoscHalfPi; // the samples from the oscil.
-    int32 halfPi = (int32)(unit->m_radtoinc * (0.5 * pi));
+    int32 halfPi = sc_float_to_int32(unit->m_radtoinc * (0.5 * pi));
     double y1[12];
     double coefs[12];
 
@@ -3847,8 +3853,8 @@ void FreqShift_next_kk(FreqShift* unit, int inNumSamples) {
     int32 lomask = unit->m_lomask;
     int32 phase = unit->m_phase;
 
-    int32 freq = (int32)(unit->m_cpstoinc * freqin);
-    int32 phaseinc = freq + (int32)(CALCSLOPE(phasein, unit->m_phasein) * unit->m_radtoinc);
+    int32 freq = sc_float_to_int32(unit->m_cpstoinc * freqin);
+    int32 phaseinc = sc_add_modular(freq, sc_float_to_int32(CALCSLOPE(phasein, unit->m_phasein) * unit->m_radtoinc));
     unit->m_phasein = phasein;
 
     // each filter's last sample
@@ -3871,11 +3877,11 @@ void FreqShift_next_kk(FreqShift* unit, int inNumSamples) {
           outsin = ay12;
 
           outsinosc = lookupi1(table0, table1, phase, lomask);
-          outsinoscHalfPi = lookupi1(table0, table1, phase + halfPi, lomask);
+          outsinoscHalfPi = lookupi1(table0, table1, sc_add_modular(phase, halfPi), lomask);
 
           ZXP(out) = (outcos * outsinoscHalfPi) + (outsinosc * outsin);
 
-          phase += phaseinc;)
+          phase = sc_add_modular(phase, phaseinc);)
 
     unit->m_phase = phase;
 
@@ -3890,7 +3896,7 @@ void FreqShift_next_aa(FreqShift* unit, int inNumSamples) {
     float* freqin = ZIN(1);
     float outcos, outsin; // the sample by sample output of the Hilbert
     float outsinosc, outsinoscHalfPi; // the samples from the oscil.
-    int32 halfPi = (int32)(unit->m_radtoinc * (0.5 * pi));
+    int32 halfPi = sc_float_to_int32(unit->m_radtoinc * (0.5 * pi));
     double y1[12];
     double coefs[12];
 
@@ -3918,10 +3924,10 @@ void FreqShift_next_aa(FreqShift* unit, int inNumSamples) {
               outcos = ay6;
           outsin = ay12;
 
-          int32 phaseoffset = phase + (int32)(unit->m_radtoinc * ZXP(phasein));
+          int32 phaseoffset = sc_add_modular(phase, sc_float_to_int32(unit->m_radtoinc * ZXP(phasein)));
           outsinosc = lookupi1(table0, table1, phaseoffset, lomask);
-          outsinoscHalfPi = lookupi1(table0, table1, phaseoffset + halfPi, lomask);
-          phase += (int32)(unit->m_cpstoinc * ZXP(freqin));
+          outsinoscHalfPi = lookupi1(table0, table1, sc_add_modular(phaseoffset, halfPi), lomask);
+          phase = sc_add_modular(phase, sc_float_to_int32(unit->m_cpstoinc * ZXP(freqin)));
 
           ZXP(out) = (outcos * outsinoscHalfPi) + (outsinosc * outsin);)
 
@@ -3938,7 +3944,7 @@ void FreqShift_next_ak(FreqShift* unit, int inNumSamples) {
     float* freqin = ZIN(1);
     float outcos, outsin; // the sample by sample output of the Hilbert
     float outsinosc, outsinoscHalfPi; // the samples from the oscil.
-    int32 halfPi = (int32)(unit->m_radtoinc * (0.5 * pi));
+    int32 halfPi = sc_float_to_int32(unit->m_radtoinc * (0.5 * pi));
     double y1[12];
     double coefs[12];
 
@@ -3968,10 +3974,10 @@ void FreqShift_next_ak(FreqShift* unit, int inNumSamples) {
               outcos = ay6;
           outsin = ay12;
 
-          int32 pphase = phase + (int32)(unit->m_radtoinc * phasemod); phasemod += phaseslope;
+          int32 pphase = sc_add_modular(phase, sc_float_to_int32(unit->m_radtoinc * phasemod)); phasemod += phaseslope;
           outsinosc = lookupi1(table0, table1, pphase, lomask);
-          outsinoscHalfPi = lookupi1(table0, table1, pphase + halfPi, lomask);
-          phase += (int32)(unit->m_cpstoinc * ZXP(freqin));
+          outsinoscHalfPi = lookupi1(table0, table1, sc_add_modular(pphase, halfPi), lomask);
+          phase = sc_add_modular(phase, sc_float_to_int32(unit->m_cpstoinc * ZXP(freqin)));
 
           ZXP(out) = (outcos * outsinoscHalfPi) + (outsinosc * outsin);)
 
@@ -3989,7 +3995,7 @@ void FreqShift_next_ka(FreqShift* unit, int inNumSamples) {
     float freqin = ZIN0(1);
     float outcos, outsin; // the sample by sample output of the Hilbert
     float outsinosc, outsinoscHalfPi; // the samples from the oscil.
-    int32 halfPi = (int32)(unit->m_radtoinc * (0.5 * pi));
+    int32 halfPi = sc_float_to_int32(unit->m_radtoinc * (0.5 * pi));
     double y1[12];
     double coefs[12];
 
@@ -3998,7 +4004,7 @@ void FreqShift_next_ka(FreqShift* unit, int inNumSamples) {
     int32 lomask = unit->m_lomask;
     int32 phase = unit->m_phase;
 
-    int32 freq = (int32)(unit->m_cpstoinc * freqin);
+    int32 freq = sc_float_to_int32(unit->m_cpstoinc * freqin);
 
     // each filter's last sample
     for (int i = 0; i < 12; ++i) {
@@ -4019,9 +4025,9 @@ void FreqShift_next_ka(FreqShift* unit, int inNumSamples) {
               outcos = ay6;
           outsin = ay12;
 
-          int32 phaseoffset = phase + (int32)(unit->m_radtoinc * ZXP(phasein));
+          int32 phaseoffset = sc_add_modular(phase, sc_float_to_int32(unit->m_radtoinc * ZXP(phasein)));
           outsinosc = lookupi1(table0, table1, phaseoffset, lomask);
-          outsinoscHalfPi = lookupi1(table0, table1, phaseoffset + halfPi, lomask); phase += freq;
+          outsinoscHalfPi = lookupi1(table0, table1, sc_add_modular(phaseoffset, halfPi), lomask); phase = sc_add_modular(phase, freq);
 
           ZXP(out) = (outcos * outsinoscHalfPi) + (outsinosc * outsin);)
 

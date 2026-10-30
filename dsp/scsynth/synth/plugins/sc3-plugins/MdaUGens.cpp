@@ -105,7 +105,7 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 	// grab some input controls
 	float freq = IN0(0);
 	float gate = IN0(1);
-	int32 velocity = (int32)IN0(2);
+	int32 velocity = sc_float_to_int32(IN0(2));
 	float param[12];
 	param[ 0] = IN0( 3); // Decay
 	param[ 1] = IN0( 4); // Release
@@ -147,12 +147,12 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 		int32 k, s;
 		
 		// NOTE ON
-		note = sc_cpsmidi(freq) + 0.5f;
+		note = sc_float_to_int32(sc_cpsmidi(freq) + 0.5f);
 		if(!(note>0)) note = 0; // Added & phrased to guard against NaNs, should also catch negs
 		unit->note = note;
 		
 		// Update state from arguments:
-		unit->size    = size    = (int32)(12.0f * param[2] - 6.0f);
+		unit->size    = size    = sc_float_to_int32(12.0f * param[2] - 6.0f);
 		unit->sizevel = sizevel = 0.12f * param[3];
 		unit->muffvel = muffvel = param[5] * param[5] * 5.0f;
 		
@@ -178,14 +178,14 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 		if(note > 60) l += stretch * (float)k; //stretch
 		
 		s = size;
-		if(velocity > 40) s += (int32)(sizevel * (float)(velocity - 40));
+		if(velocity > 40) s += sc_float_to_int32(sizevel * (float)(velocity - 40));
 		
 		k = 0;
 		while(note > (kgrp[k].high + s)) k++;  //find keygroup
 		
 		l += (float)(note - kgrp[k].root); //pitch
 		l = 22050.0f * SAMPLEDUR * (float)exp(0.05776226505 * l);
-		V->delta = (int32)(65536.0f * l);
+		V->delta = sc_float_to_int32(65536.0f * l);
 		V->frac = 0;
 		V->pos = kgrp[k].pos;
 		V->end = kgrp[k].end;

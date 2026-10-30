@@ -1045,7 +1045,7 @@ static inline float flush_to_zero(float f) {
 
 int isprime(int n) {
     unsigned int i;
-    const unsigned int lim = (int)sqrtf((float)n);
+    const unsigned int lim = sc_float_to_int32(sqrtf((float)n));
 
     if (n == 2)
         return (TRUE);
@@ -1063,7 +1063,7 @@ int nearestprime(int n, float rerror) {
     if (isprime(n))
         return (n);
     /* assume n is large enough and n*rerror enough smaller than n */
-    bound = n * static_cast<int>(rerror);
+    bound = n * sc_float_to_int32(rerror);
     for (k = 1; k <= bound; k++) {
         if (isprime(n + k))
             return (n + k);
@@ -1073,12 +1073,7 @@ int nearestprime(int n, float rerror) {
     return (-1);
 }
 
-static inline int f_round(float f) {
-    ls_pcast32 p;
-    p.f = f;
-    p.f += (3 << 22);
-    return p.i - 0x4b400000;
-}
+static inline int f_round(float f) { return sc_float_to_int32(std::nearbyint(f)); }
 
 g_damper* make_damper(GVerb* unit, float damping) {
     g_damper* p;
@@ -1097,6 +1092,8 @@ g_diffuser* make_diffuser(GVerb* unit, int size, float coef) {
     p = (g_diffuser*)RTAlloc(unit->mWorld, sizeof(g_diffuser));
     if (p == nullptr)
         return nullptr;
+    // At least one sample: extreme room sizes and spreads give 0 or less.
+    size = sc_max(size, 1);
     p->size = size;
     p->coef = coef;
     p->idx = 0;
@@ -1115,19 +1112,21 @@ void free_diffuser(GVerb* unit, g_diffuser* p) {
     RTFree(unit->mWorld, p);
 }
 
-g_fixeddelay* make_fixeddelay(GVerb* unit, int size, int maxsize) {
+// A delay line of `size` samples, read at any delay from 1 to size - 1.
+g_fixeddelay* make_fixeddelay(GVerb* unit, int size) {
     g_fixeddelay* p;
     p = (g_fixeddelay*)RTAlloc(unit->mWorld, sizeof(g_fixeddelay));
     if (p == nullptr)
         return nullptr;
+    size = sc_max(size, 2);
     p->size = size;
     p->idx = 0;
-    p->buf = (float*)RTAlloc(unit->mWorld, maxsize * sizeof(float));
+    p->buf = (float*)RTAlloc(unit->mWorld, size * sizeof(float));
     if (p->buf == nullptr) {
         RTFree(unit->mWorld, p);
         return nullptr;
     }
-    Clear(maxsize, p->buf);
+    Clear(size, p->buf);
     return (p);
 }
 
@@ -1148,9 +1147,8 @@ static inline float diffuser_do(GVerb* unit, g_diffuser* p, float x) {
 }
 
 static inline float fixeddelay_read(GVerb* unit, g_fixeddelay* p, int n) {
-    int i;
-    i = (p->idx - n + p->size) % p->size;
-    return (p->buf[i]);
+    n = sc_clip(n, 1, p->size - 1);
+    return p->buf[(p->idx - n + p->size) % p->size];
 }
 
 static inline void fixeddelay_write(GVerb* unit, g_fixeddelay* p, float x) {
@@ -1175,25 +1173,27 @@ static inline void gverb_fdnmatrix(float* a, float* b) {
     b[3] = 0.5f * (+dl0 + dl1 + dl2 + dl3);
 }
 
+// Room sizes run from 1 to maxroomsize - 1.
+static inline float gverb_clip_roomsize(GVerb* unit, const float a) {
+    if (a <= 1.0 || sc_isnan(a))
+        return 1.0;
+    if (a >= unit->maxroomsize)
+        return unit->maxroomsize - 1.f;
+    return a;
+}
+
 static inline void gverb_set_roomsize(GVerb* unit, const float a) {
     unsigned int i;
 
-    if (a <= 1.0 || sc_isnan(a)) {
-        unit->roomsize = 1.0;
-    } else {
-        if (a >= unit->maxroomsize)
-            unit->roomsize = unit->maxroomsize - 1.f;
-        else
-            unit->roomsize = a;
-    };
+    unit->roomsize = gverb_clip_roomsize(unit, a);
 
     unit->largestdelay = SAMPLERATE * unit->roomsize / 340.0; // * 0.00294f;
 
     // the line below causes everything to blow up.... why?????
     //  unit->fdnlens[0] = nearestprime((int)(unit->largestdelay), 0.5);
-    unit->fdnlens[1] = (int)(0.816490 * unit->largestdelay);
-    unit->fdnlens[2] = (int)(0.707100 * unit->largestdelay);
-    unit->fdnlens[3] = (int)(0.632450 * unit->largestdelay);
+    unit->fdnlens[1] = sc_float_to_int32(0.816490 * unit->largestdelay);
+    unit->fdnlens[2] = sc_float_to_int32(0.707100 * unit->largestdelay);
+    unit->fdnlens[3] = sc_float_to_int32(0.632450 * unit->largestdelay);
 
     for (i = 0; i < FDNORDER; i++) {
         float oldfdngain = unit->fdngains[i];
@@ -1201,9 +1201,9 @@ static inline void gverb_set_roomsize(GVerb* unit, const float a) {
         unit->fdngainslopes[i] = CALCSLOPE(unit->fdngains[i], oldfdngain);
     }
 
-    unit->taps[0] = 5 + (int)(0.410 * unit->largestdelay);
-    unit->taps[1] = 5 + (int)(0.300 * unit->largestdelay);
-    unit->taps[2] = 5 + (int)(0.155 * unit->largestdelay);
+    unit->taps[0] = 5 + sc_float_to_int32(0.410 * unit->largestdelay);
+    unit->taps[1] = 5 + sc_float_to_int32(0.300 * unit->largestdelay);
+    unit->taps[2] = 5 + sc_float_to_int32(0.155 * unit->largestdelay);
     unit->taps[3] = 5; //+ f_round(0.000 * largestdelay);
 
     for (i = 0; i < FDNORDER; i++) {
@@ -1268,7 +1268,11 @@ static inline float gverb_set_drylevel(GVerb* unit, float a) {
 
 void GVerb_Ctor(GVerb* unit) {
     SETCALC(GVerb_next);
-    float roomsize = unit->roomsize = IN0(1);
+    // maxroomsize is at least 1, and small enough that the longest delay in
+    // samples fits an int.
+    float maxroomsize = unit->maxroomsize =
+        sc_clip(IN0(9) > 1.0001f ? IN0(9) : 1.0001f, 1.0001f, 1073741824.f * 340.f / (float)SAMPLERATE);
+    float roomsize = unit->roomsize = gverb_clip_roomsize(unit, IN0(1));
     float revtime = unit->revtime = IN0(2);
     float damping = unit->damping = IN0(3);
     float inputbandwidth = unit->inputbandwidth = 0.; // IN0(4);
@@ -1276,10 +1280,6 @@ void GVerb_Ctor(GVerb* unit) {
     unit->drylevel = 0.; // IN0(6);
     unit->earlylevel = 0.; // IN0(7);
     unit->taillevel = 0.; // IN0(8);
-
-    // when roomsize is greater than maxroomsize, it is set to maxroomsize - 1
-    // when roomsize is less than 0, it is set to 1, therefore maxroomsize must be at least 1.
-    float maxroomsize = unit->maxroomsize = sc_max(1.0001f, IN0(9));
 
     float maxdelay = unit->maxdelay = SAMPLERATE * maxroomsize / 340.f;
     float largestdelay = unit->largestdelay = SAMPLERATE * roomsize / 340.f;
@@ -1303,7 +1303,7 @@ void GVerb_Ctor(GVerb* unit) {
     for (int i = 0; i < FDNORDER; ++i) {
         float gb = gbmul[i] * largestdelay;
         if (i == 0) {
-            unit->fdnlens[i] = nearestprime((int)gb, 0.5);
+            unit->fdnlens[i] = nearestprime(sc_float_to_int32(gb), 0.5);
         } else {
             unit->fdnlens[i] = f_round(gb);
         }
@@ -1311,7 +1311,7 @@ void GVerb_Ctor(GVerb* unit) {
     }
     // make the fixeddelay lines and dampers
     for (int i = 0; i < FDNORDER; i++) {
-        unit->fdndels[i] = make_fixeddelay(unit, (int)unit->fdnlens[i], (int)maxdelay + 1000);
+        unit->fdndels[i] = make_fixeddelay(unit, sc_float_to_int32(maxdelay) + 1000);
         unit->fdndamps[i] = make_damper(unit, damping); // damping is the same as fdndamping in source
         ClearUnitIfMemFailed(unit->fdndels[i] && unit->fdndamps[i]);
     }
@@ -1321,16 +1321,16 @@ void GVerb_Ctor(GVerb* unit) {
     float spread1 = spread;
     float spread2 = 3.0 * spread;
 
-    int b = 210;
+    int64 b = 210;
     float r = 0.125541;
-    int a = (int)(spread1 * r);
-    int c = 210 + 159 + a;
-    int cc = c - b;
+    int64 a = sc_float_to_int32(spread1 * r);
+    int64 c = 210 + 159 + a;
+    int64 cc = c - b;
     r = 0.854046;
-    a = (int)(spread2 * r);
-    int d = 210 + 159 + 562 + a;
-    int dd = d - c;
-    int e = 1341 - d;
+    a = sc_float_to_int32(spread2 * r);
+    int64 d = 210 + 159 + 562 + a;
+    int64 dd = d - c;
+    int64 e = 1341 - d;
 
     unit->ldifs[0] = make_diffuser(unit, f_round(diffscale * b), 0.75);
     unit->ldifs[1] = make_diffuser(unit, f_round(diffscale * cc), 0.75);
@@ -1340,11 +1340,11 @@ void GVerb_Ctor(GVerb* unit) {
 
     b = 210;
     r = -0.568366;
-    a = (int)(spread1 * r);
+    a = sc_float_to_int32(spread1 * r);
     c = 210 + 159 + a;
     cc = c - b;
     r = -0.126815;
-    a = (int)(spread2 * r);
+    a = sc_float_to_int32(spread2 * r);
     d = 210 + 159 + 562 + a;
     dd = d - c;
     e = 1341 - d;
@@ -1355,16 +1355,16 @@ void GVerb_Ctor(GVerb* unit) {
     unit->rdifs[3] = make_diffuser(unit, f_round(diffscale * e), 0.625);
     ClearUnitIfMemFailed(unit->rdifs[0] && unit->rdifs[1] && unit->rdifs[2] && unit->rdifs[3]);
 
-    unit->taps[0] = 5 + (int)(0.410 * largestdelay);
-    unit->taps[1] = 5 + (int)(0.300 * largestdelay);
-    unit->taps[2] = 5 + (int)(0.155 * largestdelay);
+    unit->taps[0] = 5 + sc_float_to_int32(0.410 * largestdelay);
+    unit->taps[1] = 5 + sc_float_to_int32(0.300 * largestdelay);
+    unit->taps[2] = 5 + sc_float_to_int32(0.155 * largestdelay);
     unit->taps[3] = 5; //+ f_round(0.000 * largestdelay);
 
     for (int i = 0; i < FDNORDER; i++) {
         unit->tapgains[i] = static_cast<float>(std::pow(alpha, static_cast<double>(unit->taps[i])));
     }
 
-    unit->tapdelay = make_fixeddelay(unit, 44000, 44000);
+    unit->tapdelay = make_fixeddelay(unit, 44000);
     ClearUnitIfMemFailed(unit->tapdelay);
 
     // init the slope values

@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdexcept>
 #include "SC_AllocPool.h"
+#include <limits>
 #include "SC_BoundsMacros.h"
 #include <assert.h>
 #include <string>
@@ -282,6 +283,9 @@ size_t AllocPool::LargestFreeChunk() {
 
 void* AllocPool::Alloc(size_t inReqSize) {
 #ifdef DISABLE_MEMORY_POOLS
+    // A request a fixed pool could never hold fails here too.
+    if (mAreaMoreSize == 0 && inReqSize > mAreaInitSize)
+        return 0;
     return malloc(inReqSize);
 #endif
 
@@ -300,9 +304,13 @@ void* AllocPool::Alloc(size_t inReqSize) {
     AllocChunkPtr candidate; /* inspected/selected chunk */
     size_t candidate_size; /* its size */
     AllocChunkPtr remainder; /* remainder from a split */
-    int32 remainder_size; /* its size */
+    size_t remainder_size; /* its size */
     AllocAreaPtr area;
     size_t areaSize;
+
+    // Past this, adding the chunk header would wrap to a small size.
+    if (inReqSize > std::numeric_limits<size_t>::max() / 2)
+        return 0;
 
     size_t size = RequestToSize(inReqSize);
     int index = BinIndex(size);
@@ -328,13 +336,13 @@ void* AllocPool::Alloc(size_t inReqSize) {
     } else {
         for (candidate = bin->Prev(); candidate != bin; candidate = candidate->Prev()) {
             candidate_size = candidate->Size();
-            remainder_size = (int)(candidate_size - size);
-            if (remainder_size >= (int32)kMinAllocSize) { /* too big */
+            if (candidate_size < size) /* too small */
+                continue;
+            if (candidate_size - size >= kMinAllocSize) { /* too big */
                 --index; /* adjust to rescan below after checking last remainder */
                 break;
-            } else if (remainder_size >= 0) { /* exact fit */
-                goto found_exact_fit;
             }
+            goto found_exact_fit;
         }
         ++index;
     }
@@ -345,12 +353,14 @@ void* AllocPool::Alloc(size_t inReqSize) {
         /* Find and use first big enough chunk ... */
         for (candidate = bin->Prev(); candidate != bin; candidate = candidate->Prev()) {
             candidate_size = candidate->Size();
-            remainder_size = (int)(candidate_size - size);
-            if (remainder_size >= (int32)kMinAllocSize) { /* split */
+            if (candidate_size < size) /* too small */
+                continue;
+            remainder_size = candidate_size - size;
+            if (remainder_size >= kMinAllocSize) { /* split */
                 UnlinkFree(candidate);
                 goto found_bigger_fit;
-            } else if (remainder_size >= 0)
-                goto found_exact_fit;
+            }
+            goto found_exact_fit;
         }
     }
     check_pool();
@@ -394,7 +404,7 @@ split_new_area:
         return 0;
     candidate = &area->mChunk;
     candidate_size = candidate->Size();
-    remainder_size = (int)(areaSize - size);
+    remainder_size = areaSize - size;
     //	FALL THROUGH
 found_bigger_fit:
     // ipostbuf("found_bigger_fit\n");

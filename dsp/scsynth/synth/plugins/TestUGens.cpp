@@ -63,7 +63,7 @@ void CheckBadValues_next(CheckBadValues* unit, int inNumSamples) {
     float* in = ZIN(0);
     float* out = ZOUT(0);
     float id = ZIN0(1);
-    int post = (int)ZIN0(2);
+    int post = sc_float_to_int32(ZIN0(2));
 
     float samp;
     int classification;
@@ -73,15 +73,15 @@ void CheckBadValues_next(CheckBadValues* unit, int inNumSamples) {
         LOOP1(
             inNumSamples, samp = ZXP(in); classification = std::fpclassify(samp); switch (classification) {
                 case FP_INFINITE:
-                    Print("Infinite number found in Synth %d, ID: %d\n", unit->mParent->mNode.mID, (int)id);
+                    Print("Infinite number found in Synth %d, ID: %d\n", unit->mParent->mNode.mID, sc_float_to_int32(id));
                     ZXP(out) = 2;
                     break;
                 case FP_NAN:
-                    Print("NaN found in Synth %d, ID: %d\n", unit->mParent->mNode.mID, (int)id);
+                    Print("NaN found in Synth %d, ID: %d\n", unit->mParent->mNode.mID, sc_float_to_int32(id));
                     ZXP(out) = 1;
                     break;
                 case FP_SUBNORMAL:
-                    Print("Denormal found in Synth %d, ID: %d\n", unit->mParent->mNode.mID, (int)id);
+                    Print("Denormal found in Synth %d, ID: %d\n", unit->mParent->mNode.mID, sc_float_to_int32(id));
                     ZXP(out) = 3;
                     break;
                 default:
@@ -94,10 +94,10 @@ void CheckBadValues_next(CheckBadValues* unit, int inNumSamples) {
             if (classification != unit->prevclass) {
                 if (unit->sameCount == 0) {
                     Print("CheckBadValues: %s found in Synth %d, ID %d\n", CheckBadValues_fpclassString(classification),
-                          unit->mParent->mNode.mID, (int)id);
+                          unit->mParent->mNode.mID, sc_float_to_int32(id));
                 } else {
                     Print("CheckBadValues: %s found in Synth %d, ID %d (previous %d values were %s)\n",
-                          CheckBadValues_fpclassString(classification), unit->mParent->mNode.mID, (int)id,
+                          CheckBadValues_fpclassString(classification), unit->mParent->mNode.mID, sc_float_to_int32(id),
                           (int)unit->sameCount, CheckBadValues_fpclassString(unit->prevclass));
                 };
                 unit->sameCount = 0;

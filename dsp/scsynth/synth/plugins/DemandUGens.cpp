@@ -19,6 +19,7 @@
 */
 
 #include "SC_PlugIn.h"
+#include "SC_LoopPhase.h"
 #include <cstdio>
 #include <cmath>
 #include <limits>
@@ -207,6 +208,10 @@ void Dbrown_Ctor(Dbrown* unit);
 void Dbrown_next(Dbrown* unit, int inNumSamples);
 
 void Diwhite_Ctor(Diwhite* unit);
+// An integer bound or step for Diwhite and Dibrown, held within +-2^29 so the
+// differences and sums they make stay inside int32.
+static inline int32 demandInt(double x) { return sc_clip(sc_float_to_int32(x), -(1 << 29), 1 << 29); }
+
 void Diwhite_next(Diwhite* unit, int inNumSamples);
 
 void Dibrown_Ctor(Dibrown* unit);
@@ -400,7 +405,9 @@ void Demand_next_ka(Demand* unit, int inNumSamples) {
 
 
 void Demand_Ctor(Demand* unit) {
-    // Print("Demand_Ctor\n");
+    unit->m_out = nullptr;
+    // A trigger, a reset, then one demand input for each output.
+    ClearUnitIfInputsMissing(unit->mNumInputs == unit->mNumOutputs + 2);
     if (INRATE(0) == calc_FullRate) {
         if (INRATE(1) == calc_FullRate) {
             SETCALC(Demand_next_aa);
@@ -421,8 +428,10 @@ void Demand_Ctor(Demand* unit) {
     char* memoryChunk = (char*)RTAlloc(unit->mWorld, unit->mNumOutputs * (sizeof(float) + sizeof(float*)));
     ClearUnitIfMemFailed(memoryChunk);
 
-    unit->m_prevout = (float*)memoryChunk;
-    unit->m_out = (float**)(memoryChunk + unit->mNumOutputs * sizeof(float));
+    // The pointers first: after an odd number of floats they would not be
+    // pointer-aligned.
+    unit->m_out = (float**)memoryChunk;
+    unit->m_prevout = (float*)(memoryChunk + unit->mNumOutputs * sizeof(float*));
 
     unit->m_prevtrig = 0.f;
     unit->m_prevreset = 0.f;
@@ -430,8 +439,8 @@ void Demand_Ctor(Demand* unit) {
 }
 
 void Demand_Dtor(Demand* unit) {
-    if (unit->m_prevout)
-        RTFree(unit->mWorld, unit->m_prevout);
+    if (unit->m_out)   // the start of the chunk Demand_Ctor allocates
+        RTFree(unit->mWorld, unit->m_out);
 }
 
 
@@ -458,14 +467,14 @@ void Duty_next_da(Duty* unit, int inNumSamples) {
         if (count <= 0.f) {
             count = DEMANDINPUT_A(duty_dur, i + 1) * sr + count;
             if (sc_isnan(count)) {
-                int doneAction = (int)ZIN0(duty_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(duty_doneAction));
                 DoneAction(doneAction, unit);
             }
             float x = DEMANDINPUT_A(duty_level, i + 1);
             // printf("in  %d\n", count);
             if (sc_isnan(x)) {
                 x = prevout;
-                int doneAction = (int)ZIN0(duty_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(duty_doneAction));
                 DoneAction(doneAction, unit);
             } else {
                 prevout = x;
@@ -502,14 +511,14 @@ void Duty_next_dk(Duty* unit, int inNumSamples) {
         if (count <= 0.f) {
             count = DEMANDINPUT_A(duty_dur, i + 1) * sr + count;
             if (sc_isnan(count)) {
-                int doneAction = (int)ZIN0(duty_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(duty_doneAction));
                 DoneAction(doneAction, unit);
             }
 
             float x = DEMANDINPUT_A(duty_level, i + 1);
             if (sc_isnan(x)) {
                 x = prevout;
-                int doneAction = (int)ZIN0(duty_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(duty_doneAction));
                 DoneAction(doneAction, unit);
             } else {
                 prevout = x;
@@ -549,14 +558,14 @@ void Duty_next_dd(Duty* unit, int inNumSamples) {
         if (count <= 0.f) {
             count = DEMANDINPUT_A(duty_dur, i + 1) * sr + count;
             if (sc_isnan(count)) {
-                int doneAction = (int)ZIN0(duty_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(duty_doneAction));
                 DoneAction(doneAction, unit);
             }
             float x = DEMANDINPUT_A(duty_level, i + 1);
             // printf("in  %d %g\n", k, x);
             if (sc_isnan(x)) {
                 x = prevout;
-                int doneAction = (int)ZIN0(duty_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(duty_doneAction));
                 DoneAction(doneAction, unit);
             } else {
                 prevout = x;
@@ -683,7 +692,7 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                 running = false;
                 release = false;
                 // printf("release: %f %f \n", phase, level);
-                int doneAction = (int)ZIN0(d_env_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(d_env_doneAction));
                 DoneAction(doneAction, unit);
 
             } else {
@@ -705,7 +714,7 @@ void DemandEnvGen_next_k(DemandEnvGen* unit, int inNumSamples) {
                 if (sc_isnan(fshape))
                     shape = unit->m_shape;
                 else
-                    shape = (int)fshape;
+                    shape = sc_float_to_int32(fshape);
 
                 curve = DEMANDINPUT(d_env_curve);
                 if (sc_isnan(curve))
@@ -966,7 +975,7 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                 running = false;
                 release = false;
                 // printf("release: %f %f \n", phase, level);
-                int doneAction = (int)ZIN0(d_env_doneAction);
+                int doneAction = sc_float_to_int32(ZIN0(d_env_doneAction));
                 DoneAction(doneAction, unit);
 
             } else {
@@ -994,7 +1003,7 @@ void DemandEnvGen_next_a(DemandEnvGen* unit, int inNumSamples) {
                 if (sc_isnan(fshape))
                     shape = unit->m_shape;
                 else
-                    shape = (int)fshape;
+                    shape = sc_float_to_int32(fshape);
 
                 if (phase <= 1.f) {
                     shape = 1; // shape_Linear
@@ -1245,7 +1254,7 @@ void TDuty_next_da(TDuty* unit, int inNumSamples) {
         if (count <= 0.f) {
             count = DEMANDINPUT_A(duty_dur, i + 1) * sr + count;
             if (sc_isnan(count)) {
-                int doneAction = (int)ZIN0(2);
+                int doneAction = sc_float_to_int32(ZIN0(2));
                 DoneAction(doneAction, unit);
             }
             float x = DEMANDINPUT_A(duty_level, i + 1);
@@ -1281,7 +1290,7 @@ void TDuty_next_dk(TDuty* unit, int inNumSamples) {
         if (count <= 0.f) {
             count = DEMANDINPUT_A(duty_dur, i + 1) * sr + count;
             if (sc_isnan(count)) {
-                int doneAction = (int)ZIN0(2);
+                int doneAction = sc_float_to_int32(ZIN0(2));
                 DoneAction(doneAction, unit);
             }
             float x = DEMANDINPUT_A(duty_level, i + 1);
@@ -1319,7 +1328,7 @@ void TDuty_next_dd(TDuty* unit, int inNumSamples) {
         if (count <= 0.f) {
             count = DEMANDINPUT_A(duty_dur, i + 1) * sr + count;
             if (sc_isnan(count)) {
-                int doneAction = (int)ZIN0(2);
+                int doneAction = sc_float_to_int32(ZIN0(2));
                 DoneAction(doneAction, unit);
             }
             float x = DEMANDINPUT_A(duty_level, i + 1);
@@ -1469,10 +1478,10 @@ void Diwhite_next(Diwhite* unit, int inNumSamples) {
         float hi = DEMANDINPUT_A(2, inNumSamples);
 
         if (!sc_isnan(lo)) {
-            unit->m_lo = (int32)floor(DEMANDINPUT_A(1, inNumSamples) + 0.5f);
+            unit->m_lo = demandInt(floor(DEMANDINPUT_A(1, inNumSamples) + 0.5f));
         }
         if (!sc_isnan(hi)) {
-            int32 hi = (int32)floor(DEMANDINPUT_A(2, inNumSamples) + 0.5f);
+            int32 hi = demandInt(floor(DEMANDINPUT_A(2, inNumSamples) + 0.5f));
             unit->m_range = hi - unit->m_lo + 1;
         }
 
@@ -1545,15 +1554,15 @@ void Dibrown_next(Dibrown* unit, int inNumSamples) {
     if (inNumSamples) {
         float lo = DEMANDINPUT_A(1, inNumSamples);
         if (!sc_isnan(lo)) {
-            unit->m_lo = (int32)lo;
+            unit->m_lo = demandInt(lo);
         }
         float hi = DEMANDINPUT_A(2, inNumSamples);
         if (!sc_isnan(hi)) {
-            unit->m_hi = (int32)hi;
+            unit->m_hi = demandInt(hi);
         }
         float step = DEMANDINPUT_A(3, inNumSamples);
         if (!sc_isnan(step)) {
-            unit->m_step = (int32)step;
+            unit->m_step = demandInt(step);
         }
 
         if (unit->m_repeats < 0.) {
@@ -1856,7 +1865,9 @@ void Dwrand_next(Dwrand* unit, int inNumSamples) {
 
 void Dwrand_Ctor(Dwrand* unit) {
     SETCALC(Dwrand_next);
-    unit->m_weights_size = IN0(1);
+    const int weightsSize = sc_float_to_int32(IN0(1));
+    ClearUnitIfInputsMissing(weightsSize >= 0 && weightsSize <= (int)unit->mNumInputs - 2);
+    unit->m_weights_size = weightsSize;
     Dwrand_next(unit, 0);
     OUT0(0) = 0.f;
 }
@@ -1956,7 +1967,7 @@ void Dswitch1_next(Dswitch1* unit, int inNumSamples) {
             OUT0(0) = x;
             return;
         }
-        int index = (int32)floor(x + 0.5f);
+        int index = sc_float_to_int32(floor(x + 0.5f));
         index = sc_wrap(index, 0, unit->mNumInputs - 2) + 1;
         OUT0(0) = DEMANDINPUT_A(index, inNumSamples);
     } else {
@@ -1983,7 +1994,7 @@ void Dswitch_next(Dswitch* unit, int inNumSamples) {
             if (sc_isnan(ival))
                 val = ival;
             else {
-                int index = (int32)floor(ival + 0.5f);
+                int index = sc_float_to_int32(floor(ival + 0.5f));
                 index = sc_wrap(index, 0, unit->mNumInputs - 2) + 1;
                 val = DEMANDINPUT_A(index, inNumSamples);
 
@@ -1999,7 +2010,7 @@ void Dswitch_next(Dswitch* unit, int inNumSamples) {
         for (int i = 0; i < unit->mNumInputs; ++i) {
             RESETINPUT(i);
         }
-        int index = (int32)floor(DEMANDINPUT(0) + 0.5f);
+        int index = sc_float_to_int32(floor(DEMANDINPUT(0) + 0.5f));
         index = sc_wrap(index, 0, unit->mNumInputs - 1) + 1;
         unit->m_index = index;
     }
@@ -2007,7 +2018,7 @@ void Dswitch_next(Dswitch* unit, int inNumSamples) {
 
 void Dswitch_Ctor(Dswitch* unit) {
     SETCALC(Dswitch_next);
-    int index = (int32)floor(DEMANDINPUT(0) + 0.5f);
+    int index = sc_float_to_int32(floor(DEMANDINPUT(0) + 0.5f));
     index = sc_wrap(index, 0, unit->mNumInputs - 1) + 1;
     unit->m_index = index;
     OUT0(0) = 0.f;
@@ -2150,7 +2161,7 @@ void Dpoll_next(Dpoll* unit, int inNumSamples) {
             Print("%s: %g block offset: %d\n", unit->m_id_string, x, inNumSamples - 1);
         }
         if (IN0(1) >= 0.0)
-            SendTrigger(&unit->mParent->mNode, (int)IN0(1), x);
+            SendTrigger(&unit->mParent->mNode, sc_float_to_int32(IN0(1)), x);
         OUT0(0) = x;
     } else {
         RESETINPUT(0);
@@ -2160,13 +2171,16 @@ void Dpoll_next(Dpoll* unit, int inNumSamples) {
 void Dpoll_Ctor(Dpoll* unit) {
     OUT0(0) = 0.f;
 
-    const int idStringSize = (int)IN0(3);
+    unit->m_id_string = nullptr;
+    ClearUnitIfInputsMissing(unit->mNumInputs >= 4);
+    const int idStringSize = sc_float_to_int32(IN0(3));
+    ClearUnitIfInputsMissing(idStringSize >= 0 && idStringSize <= (int)unit->mNumInputs - 4);
 
     unit->m_id_string = (char*)RTAlloc(unit->mWorld, (idStringSize + 1) * sizeof(char));
     ClearUnitIfMemFailed(unit->m_id_string);
 
     for (int i = 0; i < idStringSize; i++)
-        unit->m_id_string[i] = (char)IN0(4 + i);
+        unit->m_id_string[i] = (char)sc_float_to_int32(IN0(4 + i));
 
     SETCALC(Dpoll_next);
     unit->m_id_string[idStringSize] = '\0';
@@ -2206,29 +2220,6 @@ void Dreset_Ctor(Dreset* unit) {
 
 //////////////////////////////
 
-inline double sc_loop(Unit* unit, double in, double hi, int loop) {
-    // avoid the divide if possible
-    if (in >= hi) {
-        if (!loop) {
-            unit->mDone = true;
-            return hi;
-        }
-        in -= hi;
-        if (in < hi)
-            return in;
-    } else if (in < 0.) {
-        if (!loop) {
-            unit->mDone = true;
-            return 0.;
-        }
-        in += hi;
-        if (in >= 0.)
-            return in;
-    } else
-        return in;
-
-    return in - hi * floor(in / hi);
-}
 
 #define D_CHECK_BUF                                                                                                    \
     if (!bufData) {                                                                                                    \
@@ -2246,23 +2237,8 @@ inline double sc_loop(Unit* unit, double in, double hi, int loop) {
     }                                                                                                                  \
     fbufnum = sc_max(0.f, fbufnum);                                                                                    \
     if (fbufnum != unit->m_fbufnum) {                                                                                  \
-        int bufnum = (int)fbufnum;                                                                                     \
-        World* world = unit->mWorld;                                                                                   \
-        if (bufnum < 0) {                                                                                              \
-            bufnum = 0;                                                                                                \
-        }                                                                                                              \
-        if (bufnum >= world->mNumSndBufs) {                                                                            \
-            int localBufNum = bufnum - world->mNumSndBufs;                                                             \
-            Graph* parent = unit->mParent;                                                                             \
-            if (localBufNum <= parent->localBufNum) {                                                                  \
-                unit->m_buf = parent->mLocalSndBufs + localBufNum;                                                     \
-            } else {                                                                                                   \
-                bufnum = 0;                                                                                            \
-                unit->m_buf = world->mSndBufs + bufnum;                                                                \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            unit->m_buf = world->mSndBufs + bufnum;                                                                    \
-        }                                                                                                              \
+        SndBuf* named = sc_unit_buffer(unit, fbufnum);                                                                 \
+        unit->m_buf = named ? named : unit->mWorld->mSndBufs;                                                          \
         unit->m_fbufnum = fbufnum;                                                                                     \
     }                                                                                                                  \
     SndBuf* buf = unit->m_buf;                                                                                         \
@@ -2283,23 +2259,8 @@ inline double sc_loop(Unit* unit, double in, double hi, int loop) {
     }                                                                                                                  \
     fbufnum = sc_max(0.f, fbufnum);                                                                                    \
     if (fbufnum != unit->m_fbufnum) {                                                                                  \
-        int bufnum = (int)fbufnum;                                                                                     \
-        World* world = unit->mWorld;                                                                                   \
-        if (bufnum < 0) {                                                                                              \
-            bufnum = 0;                                                                                                \
-        }                                                                                                              \
-        if (bufnum >= world->mNumSndBufs) {                                                                            \
-            int localBufNum = bufnum - world->mNumSndBufs;                                                             \
-            Graph* parent = unit->mParent;                                                                             \
-            if (localBufNum <= parent->localBufNum) {                                                                  \
-                unit->m_buf = parent->mLocalSndBufs + localBufNum;                                                     \
-            } else {                                                                                                   \
-                bufnum = 0;                                                                                            \
-                unit->m_buf = world->mSndBufs + bufnum;                                                                \
-            }                                                                                                          \
-        } else {                                                                                                       \
-            unit->m_buf = world->mSndBufs + bufnum;                                                                    \
-        }                                                                                                              \
+        SndBuf* named = sc_unit_buffer(unit, fbufnum);                                                                 \
+        unit->m_buf = named ? named : unit->mWorld->mSndBufs;                                                          \
         unit->m_fbufnum = fbufnum;                                                                                     \
     }                                                                                                                  \
     const SndBuf* buf = unit->m_buf;                                                                                   \
@@ -2313,7 +2274,7 @@ inline double sc_loop(Unit* unit, double in, double hi, int loop) {
 
 
 void Dbufrd_next(Dbufrd* unit, int inNumSamples) {
-    int32 loop = (int32)DEMANDINPUT_A(2, inNumSamples);
+    int32 loop = sc_float_to_int32(DEMANDINPUT_A(2, inNumSamples));
 
     D_GET_BUF_SHARED
     D_CHECK_BUF
@@ -2330,7 +2291,7 @@ void Dbufrd_next(Dbufrd* unit, int inNumSamples) {
         phase = x;
 
         phase = sc_loop((Unit*)unit, phase, loopMax, loop);
-        int32 iphase = (int32)phase;
+        int32 iphase = sc_float_to_int32(phase);
         const float* table1 = bufData + iphase * bufChannels;
         OUT0(0) = table1[0];
     } else {
@@ -2350,7 +2311,7 @@ void Dbufrd_Ctor(Dbufrd* unit) {
 ////////////////////////////////////
 
 void Dbufwr_next(Dbufwr* unit, int inNumSamples) {
-    int32 loop = (int32)DEMANDINPUT_A(3, inNumSamples);
+    int32 loop = sc_float_to_int32(DEMANDINPUT_A(3, inNumSamples));
 
     D_GET_BUF
     D_CHECK_BUF
@@ -2373,7 +2334,7 @@ void Dbufwr_next(Dbufwr* unit, int inNumSamples) {
         }
 
         phase = sc_loop((Unit*)unit, phase, loopMax, loop);
-        int32 iphase = (int32)phase;
+        int32 iphase = sc_float_to_int32(phase);
         float* table0 = bufData + iphase * bufChannels;
         table0[0] = val;
         OUT0(0) = val;

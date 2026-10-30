@@ -138,7 +138,7 @@ void ReadName(const char*& buffer, const char* end, int32* name) {
     uint32 namelen = readUInt8(buffer, end);
     if (namelen >= kSCNameByteLen) {
         std::ostringstream os;
-        os << "name too long (> " << kSCNameByteLen - 1 << " chars): " << std::string(buffer, namelen);
+        os << "name too long (> " << kSCNameByteLen - 1 << " chars): " << std::string(buffer, std::min<size_t>(namelen, end - buffer));
         throw std::runtime_error(os.str());
     }
     memset(name, 0, kSCNameByteLen);
@@ -150,7 +150,7 @@ void ReadNodeDefName(const char*& buffer, const char* end, int32* name) {
     if (namelen >= kSCNodeDefNameByteLen) {
         std::ostringstream os;
         os << "node definition name too long (> " << kSCNodeDefNameByteLen - 1
-           << " chars): " << std::string(buffer, namelen);
+           << " chars): " << std::string(buffer, std::min<size_t>(namelen, end - buffer));
         throw std::runtime_error(os.str());
     }
     memset(name, 0, kSCNodeDefNameByteLen);
@@ -473,6 +473,24 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
         graphDef->mBlockSizeIndex = 0;
         graphDef->mResampleFactor = 1.0;
         graphDef->mResampleIndex = 0;
+    }
+
+    // A unit that reads a whole block from an input reads a block on from the
+    // input's buffer, and an input that is not audio rate holds one value in
+    // its wire, inside the synth's own memory. A SynthDef can give any unit
+    // any input, so the synth ends a block on from its last byte.
+    const bool reblocks = graphDef->mBlockSize != 0 || graphDef->mResampleFactor != 1.0f;
+    const size_t maxBlock = reblocks ? (size_t)inWorld->hw->mMaxWireBufs * inWorld->mBufLength : inWorld->mBufLength;
+    graphDef->mNodeDef.mAllocSize += sc_align_up(maxBlock * sizeof(float), alignof(void*));
+
+    // Variants were copied before the size and the reblock settings were known.
+    for (uint32 i = 0; i < graphDef->mNumVariants; ++i) {
+        GraphDef* variant = graphDef->mVariants + i;
+        variant->mNodeDef.mAllocSize = graphDef->mNodeDef.mAllocSize;
+        variant->mBlockSize = graphDef->mBlockSize;
+        variant->mBlockSizeIndex = graphDef->mBlockSizeIndex;
+        variant->mResampleFactor = graphDef->mResampleFactor;
+        variant->mResampleIndex = graphDef->mResampleIndex;
     }
 
     // finally add to list

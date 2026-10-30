@@ -76,49 +76,42 @@ public:
 
     /// get input signal at index
     const float* in(uint32 index) const {
-        assert(index < mNumInputs);
         const Unit* unit = this;
         return IN(index);
     }
 
     /// get input signal at index (to be used with ZXP)
     const float* zin(uint32 index) const {
-        assert(index < mNumInputs);
         const Unit* unit = this;
         return ZIN(index);
     }
 
     /// get first sample of input signal
     float in0(uint32 index) const {
-        assert(index < mNumInputs);
         const Unit* unit = this;
         return IN0(index);
     }
 
     /// get output signal at index
     float* out(uint32 index) const {
-        assert(index < mNumOutputs);
         const Unit* unit = this;
         return OUT(index);
     }
 
     /// get output signal at index (to be used with ZXP)
     float* zout(uint32 index) const {
-        assert(index < mNumOutputs);
         const Unit* unit = this;
         return ZOUT(index);
     }
 
     /// get reference to first sample of output signal
     float& out0(uint32 index) const {
-        assert(index < mNumOutputs);
         const Unit* unit = this;
         return OUT0(index);
     }
 
     /// get rate of input signal
     int inRate(uint32 index) const {
-        assert(index < mNumInputs);
         const Unit* unit = this;
         return INRATE(index);
     }
@@ -131,31 +124,26 @@ public:
 
     /// test if input signal at index is scalar rate
     bool isScalarRateIn(uint32 index) const {
-        assert(index < mNumInputs);
         return inRate(index) == calc_ScalarRate;
     }
 
     /// test if input signal at index is demand rate
     bool isDemandRateIn(uint32 index) const {
-        assert(index < mNumInputs);
         return inRate(index) == calc_DemandRate;
     }
 
     /// test if input signal at index is control rate
     bool isControlRateIn(uint32 index) const {
-        assert(index < mNumInputs);
         return inRate(index) == calc_BufRate;
     }
 
     /// test if input signal at index is audio rate
     bool isAudioRateIn(uint32 index) const {
-        assert(index < mNumInputs);
         return inRate(index) == calc_FullRate;
     }
 
     /// get the blocksize of the input
     int inBufferSize(uint32 index) const {
-        assert(index < mNumInputs);
         const Unit* unit = this;
         return INBUFLENGTH(index);
     }

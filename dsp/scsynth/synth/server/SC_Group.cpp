@@ -19,6 +19,7 @@
 */
 
 
+#include "SC_FloatToInt.h"
 #include "SC_Group.h"
 #include "SC_GraphDef.h"
 #include "Hash.h"
@@ -165,7 +166,7 @@ void Group_DumpNodeTreeAndControls(Group* inGroup) {
                         int bus;
                         if (childGraph->mControlRates[i] == 2) {
                             bus = (childGraph->mMapControls[i]) - (child->mWorld->mAudioBus);
-                            bus = (int)((float)bus / child->mWorld->mBufLength);
+                            bus = sc_float_to_int32((float)bus / child->mWorld->mBufLength);
                             scprintf("a%d", bus);
                         } else {
                             bus = (childGraph->mMapControls[i]) - (child->mWorld->mControlBus);
@@ -348,7 +349,7 @@ void Group_QueryTreeAndControls(Group* inGroup, big_scpacket* packet) {
                     char buf[BUF_SIZE];
                     if (childGraph->mControlRates[i] == 2) {
                         bus = (childGraph->mMapControls[i]) - (child->mWorld->mAudioBus);
-                        bus = (int)((float)bus / child->mWorld->mBufLength);
+                        bus = sc_float_to_int32((float)bus / child->mWorld->mBufLength);
                         snprintf(buf, BUF_SIZE, "%c%d", 'a', bus);
                     } else {
                         bus = (childGraph->mMapControls[i]) - (child->mWorld->mControlBus);
