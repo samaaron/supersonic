@@ -209,6 +209,12 @@ if(BUILD_TESTS)
     add_subdirectory(test/native)
 endif()
 
+# The scsynth fuzz targets (test/fuzz/CMakeLists.txt says how to build them).
+option(SUPERSONIC_FUZZ "Build the libFuzzer targets for the SynthDef reader and the command handlers" OFF)
+if(SUPERSONIC_FUZZ)
+    add_subdirectory(test/fuzz)
+endif()
+
 message(STATUS "SuperSonic ${PROJECT_VERSION}: clockwork + ${CLOCKWORK_DSP}")
 
 # ─── Install ─────────────────────────────────────────────────────────────────
