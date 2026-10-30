@@ -312,6 +312,35 @@ static void GraphDef_SetAllocSizes(GraphDef* graphDef) {
 }
 
 
+// Every input must name a constant that exists or an output of an earlier
+// unit; a negative unit index means a constant. Buffer colouring and graph
+// construction index arrays with these numbers unchecked.
+static void CheckInputSpecs(const GraphDef* graphDef) {
+    for (uint32 j = 0; j < graphDef->mNumUnitSpecs; ++j) {
+        const UnitSpec* unitSpec = graphDef->mUnitSpecs + j;
+        for (uint32 i = 0; i < unitSpec->mNumInputs; ++i) {
+            const InputSpec* in = unitSpec->mInputSpec + i;
+            const int32 unit = in->mFromUnitIndex;
+            const int32 index = in->mFromOutputIndex;
+            const bool exists = unit < 0
+                ? index >= 0 && uint32(index) < graphDef->mNumConstants
+                : uint32(unit) < j && index >= 0 && uint32(index) < graphDef->mUnitSpecs[unit].mNumOutputs;
+            if (exists)
+                continue;
+            char str[ERR_BUF_SIZE];
+            if (unit < 0)
+                snprintf(str, ERR_BUF_SIZE, "SynthDef '%s': unit %u input %u reads constant %d, which does not exist.",
+                         (const char*)graphDef->mNodeDef.mName, j, i, index);
+            else
+                snprintf(str, ERR_BUF_SIZE,
+                         "SynthDef '%s': unit %u input %u reads output %d of unit %d, which is not an earlier unit's output.",
+                         (const char*)graphDef->mNodeDef.mName, j, i, index, unit);
+            g_lastGraphDefError = str;
+            throw std::runtime_error(str);
+        }
+    }
+}
+
 /** \note Relevant supernova code: \c sc_synthdef::sc_synthdef() */
 GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, GraphDef* inList, int32 inVersion) {
     int32 name[kSCNodeDefNameLen];
@@ -378,6 +407,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
         graphDef->mNumWires += unitSpec->mNumOutputs;
     }
 
+    CheckInputSpecs(graphDef.get());
     DoBufferColoring(inWorld, graphDef.get());
 
     GraphDef_SetAllocSizes(graphDef.get());

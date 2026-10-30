@@ -104,6 +104,7 @@ add_executable(SuperSonicNativeTests
     test_bundle_sequential.cpp
     test_reblock_resample.cpp
     test_scheduler_overflow.cpp
+    test_synthdef_inputs.cpp
     test_clear_sched.cpp
     test_rt_alloc_guest.cpp
     test_graphdef_leak.cpp
