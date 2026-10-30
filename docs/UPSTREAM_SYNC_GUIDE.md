@@ -307,6 +307,41 @@ World_Alloc(world, size);
 
 Guard with `#ifndef __EMSCRIPTEN__` if the code requires threading APIs. WASM AudioWorklet is single-threaded. Native SuperSonic also runs NRT (single-threaded) but can link threading libraries.
 
+### 5. Keep the arithmetic defined
+
+Upstream code assumes a well-formed SynthDef. SuperSonic does not: any input can be NaN, infinite, huge or negative, and a SynthDef can give any unit any number of inputs and outputs. Upstream code taken in follows the same rules as SuperSonic's own copy:
+
+- A float or double that becomes an integer goes through `sc_float_to_int32` or `sc_float_to<T>` (`SC_FloatToInt.h`): truncated as a cast truncates, held to the type's range, NaN as 0.
+- 32-bit phase arithmetic that wraps on purpose goes through `sc_add_modular`, `sc_sub_modular` and `sc_mul_modular` (`SC_ModularInt.h`), not `SC_NO_SANITIZE("signed-integer-overflow")`.
+- A buffer number is looked up with `sc_unit_buffer` or `sc_unit_buffer_at` (`SC_UnitBuffer.h`), never by indexing `mSndBufs` or `mLocalSndBufs`.
+- A count a unit reads from its own inputs (a name length, a number of channels or stages) is checked with `ClearUnitIfInputsMissing` before anything is read or allocated; a count of the synth's controls with `ClearUnitIfMissing(..., "controls")`.
+- A unit's ports are read through `IN`, `OUT`, `INRATE`, `INBUFLENGTH` and `INWIRE` (`SC_Unit.h`), which are bounds-checked, not through `mInBuf`, `mOutBuf`, `mInput` or `mOutput`.
+
+Apply them by hand to code taken in. Then `test/native/test_ugen_ports.cpp` plays every unit type with no inputs and with extreme inputs, and the fuzz targets play SynthDefs and set controls: run them under UBSan to catch a conversion or a phase step that was missed. To find where a memory error happens, use a build configured with `-DDISABLE_MEMORY_POOLS` added to ASan and UBSan flags: every real-time allocation is then a `malloc`, so an overrun is reported at the unit that made it, not units later.
+
+### 6. Fixes to upstream code that upstream does not have
+
+Keep these when merging; each is also a candidate to send upstream.
+
+- `AllocPool::Alloc`: a request larger than any chunk could split one (the remainder was cut to `int`).
+- Buffer lookup: every copy let a local buffer number one past the last through (`<=`), some read unfilled `MaxLocalBufs` slots, and PartConv indexed the World's buffers with a local number. All copies are now `sc_unit_buffer`.
+- `PV_PhaseShift` was registered with `PV_Unit`'s size and wrote past it.
+- `Unit_New` gives every unit a calc function (zero its outputs) until its constructor sets one.
+- A synth's memory ends a block on from its last byte, so a unit reading a block from an input that is not audio rate stays inside it; GraphDef variants take the reblock settings.
+- `INBUFLENGTH` of a constant is 1.
+- Counts from a unit's own inputs: SendReply, SendPeakRMS, Poll, Dpoll, IEnvGen, Dwrand; Demand's outputs against its inputs; the control units against the synth's controls.
+- GVerb: room size 0, room larger than its maximum, room grown after it starts.
+- DelTapRd: every read wraps into the buffer (a delay longer than the buffer read before it).
+- Vibrato and XLine: a negative delay, attack or duration wrote past a one-sample output.
+- Limiter and Normalizer: a lookahead of 0 hung the audio thread.
+- LocalBuf channel and frame counts; `MaxLocalBufs` count and zeroed slots; SetBuf's offset; GrainTap's buffer number before its first lookup; the grain window macros (assert-only range check).
+- DegreeToKey: a negative index on a multiple of the table size read one past the table.
+- PitchShift window size; Gendy memory size; Pitch bins per octave; PV temporary buffer when the pool is full; LocalIn flag alignment; OffsetOut's saved samples when there are none.
+- `Graph_Ctor`: a resample factor that is not a number divided by zero; a factor is at most 64 (`kMaxResampleFactor`).
+- `ReadName` / `ReadNodeDefName`: the error for a name too long read the name past the end of a truncated def.
+- `sc_loop` / `sc_gloop` (one copy, `SC_LoopPhase.h`, in place of four): a huge buffer phase lost its remainder to `in - hi * floor(in / hi)` and indexed outside the buffer; the remainder is now `fmod`'s.
+- `AllocPool::Alloc` with `DISABLE_MEMORY_POOLS`: a request larger than the fixed pool fails, as it does with the pool.
+
 ---
 
 ## Handling Conflicts

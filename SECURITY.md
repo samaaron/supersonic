@@ -57,14 +57,17 @@ From 1.0, each release states its support period and the date it ends.
 
 ## How it is tested
 
-The SynthDef reader and scsynth's command handlers each have a fuzz target.
-On every push, each target is replayed over its corpus, the seeds and every
-crasher ever found, deterministically, under AddressSanitizer and
-UndefinedBehaviorSanitizer. Every night, each target runs under libFuzzer for
-two hours; a crasher is sealed to a key only the maintainer holds before it
-leaves the runner, and once fixed joins the corpus.
-`.github/workflows/security.yml` is the whole of it. What is not fuzzed yet
-is listed in [docs/THREATS.md](docs/THREATS.md#known-gaps).
+The SynthDef reader, scsynth's command handlers, a SynthDef played and the
+controls of every shipped SynthDef each have a fuzz target. On every push,
+each target is replayed over its corpus, the seeds and every crasher ever
+found, deterministically, under AddressSanitizer and
+UndefinedBehaviorSanitizer, with the real-time memory pool replaced by
+`malloc` so the sanitizers see inside it. The native suite also plays every
+unit generator with no inputs and with extreme ones. Every night, each target
+runs under libFuzzer for two hours; a crasher is sealed to a key only the
+maintainer holds before it leaves the runner, and once fixed joins the corpus.
+`.github/workflows/security.yml` is the whole of it. What is not fuzzed yet is
+listed in [docs/THREATS.md](docs/THREATS.md#known-gaps).
 
 Clockwork's transports, sample decoder, audio file writer and rings are fuzzed
 in Clockwork's own workflow.
