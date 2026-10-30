@@ -16,6 +16,7 @@
  *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
  */
 #include "SC_PlugIn.h"
+#include <cmath>
 
 // gcc3.3 mathlib doesnt know these yet
 #if gccversion < 4

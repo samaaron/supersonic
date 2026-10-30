@@ -32,6 +32,7 @@
 #include "SC_WireSpec.h"
 #include <stdio.h>
 #include <string.h>
+#include <cmath>
 #include "SC_Prototypes.h"
 #include "SC_Errors.h"
 #include "Unroll.h"
