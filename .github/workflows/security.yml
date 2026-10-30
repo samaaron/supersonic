@@ -2,6 +2,15 @@
 #
 # What docs/THREATS.md and SECURITY.md promise, checked:
 #
+#   sbom       docs/components.cdx.json still lists everything SuperSonic
+#              carries besides its own code; one CycloneDX SBOM per CI target
+#              is written, with Clockwork's from the pinned commit beside it,
+#              and uploaded as an artifact; every component of every document
+#              is looked up in OSV or the NVD, failing on any advisory that no
+#              VEX statement (SuperSonic's or Clockwork's) accepts. Clockwork's
+#              canary fixture must fail the scan, which proves it looks. Nightly
+#              as well as on every push: a new advisory against an unchanged
+#              dependency changes nothing in the repository to trigger a run.
 #   replay     each scsynth fuzz target over its corpus, the seeds and every
 #              crasher ever found, deterministically, under ASan and UBSan, on
 #              every push. Red here means a change broke something.
@@ -36,6 +45,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ------------------------------------------------------------------- sbom --
+  sbom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Everything carried is listed
+        run: node clockwork/scripts/sbom.mjs --root . check
+      - name: One SBOM per target, with Clockwork's from the pin
+        run: node clockwork/scripts/sbom.mjs --root . target all build/sbom "$(git rev-parse --short HEAD)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supersonic-sboms
+          path: build/sbom/*.cdx.json
+      - name: Every component looked up, no open advisory
+        run: node clockwork/scripts/sbom.mjs --root . scan build/sbom/*.cdx.json
+      - name: The scan fails on known advisories
+        run: |
+          if node clockwork/scripts/sbom.mjs --root . scan clockwork/test/fixtures/sbom-canary.cdx.json; then
+            echo "the scan passed a fixture with known advisories; it is not looking"
+            exit 1
+          fi
+
   # ----------------------------------------------------------------- replay --
   # gcc has no libFuzzer, so each target is linked with Clockwork's replay
   # main, which runs it once on every file it is given and prints the count.

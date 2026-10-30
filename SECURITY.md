@@ -69,6 +69,16 @@ is listed in [docs/THREATS.md](docs/THREATS.md#known-gaps).
 Clockwork's transports, sample decoder, audio file writer and rings are fuzzed
 in Clockwork's own workflow.
 
+## What SuperSonic contains
+
+What SuperSonic carries besides its own code and Clockwork, and where each part
+came from, is in [docs/components.cdx.json](docs/components.cdx.json). On every
+push, and every night, CI writes a CycloneDX SBOM for each build target, with
+Clockwork's from the pinned commit, and looks every component up for
+advisories. The same documents can be written from any commit with
+`node clockwork/scripts/sbom.mjs --root . target all`. See
+[docs/THREATS.md](docs/THREATS.md#supply-chain).
+
 ## Scope
 
 [docs/THREATS.md](docs/THREATS.md) says what SuperSonic defends against and

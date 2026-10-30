@@ -70,6 +70,7 @@ When syncing with upstream:
 - [ ] Cherry-pick or manually apply changes
 - [ ] Adapt for the guest (no threads, no malloc on the audio thread)
 - [ ] **Leave everything uncommitted** — never `git commit` (or amend, rebase, `cherry-pick --continue`) in this repository; hand the maintainer a suggested commit split with messages in the [format below](#commit-message-format)
+- [ ] Update the SuperCollider entry in `docs/components.cdx.json` to the commit synced to (`node clockwork/scripts/sbom.mjs --root . check` holds it to this guide's Last Sync Commit)
 - [ ] Update this guide with new sync date
 
 ---

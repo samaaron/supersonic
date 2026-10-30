@@ -1,0 +1,246 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "library",
+      "bom-ref": "supersonic",
+      "name": "supersonic",
+      "licenses": [
+        {
+          "expression": "AGPL-3.0-or-later"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/samaaron/supersonic"
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "clockwork:vendor-dirs",
+        "value": "dsp/scsynth/synth/external_libraries,dsp/scsynth/synth/plugins/sc3-plugins"
+      },
+      {
+        "name": "clockwork:option-prefix",
+        "value": "SUPERSONIC_"
+      },
+      {
+        "name": "clockwork:pins",
+        "value": "clockwork"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "supercollider",
+      "name": "SuperCollider",
+      "version": "9a749de",
+      "description": "The scsynth code SuperSonic's synth was forked from, at the last upstream commit SuperSonic took changes from.",
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/supercollider/supercollider"
+        }
+      ],
+      "properties": [
+        {
+          "name": "clockwork:path",
+          "value": "dsp/scsynth/synth"
+        },
+        {
+          "name": "clockwork:targets",
+          "value": "native,web"
+        },
+        {
+          "name": "clockwork:version_from",
+          "value": "upstream_commit"
+        },
+        {
+          "name": "clockwork:upstream_commit",
+          "value": "9a749de81005c626841f80da478b54b0fce4a7cc"
+        },
+        {
+          "name": "clockwork:commit_file",
+          "value": "docs/UPSTREAM_SYNC_GUIDE.md"
+        },
+        {
+          "name": "clockwork:commit_pattern",
+          "value": "\\*\\*Last Sync Commit\\*\\*: ([0-9a-f]+)"
+        },
+        {
+          "name": "clockwork:modified",
+          "value": "yes"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "nova-simd",
+      "name": "nova-simd",
+      "version": "b61e579",
+      "licenses": [
+        {
+          "expression": "GPL-2.0-or-later"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/timblechmann/nova-simd"
+        }
+      ],
+      "properties": [
+        {
+          "name": "clockwork:path",
+          "value": "dsp/scsynth/synth/external_libraries/nova-simd"
+        },
+        {
+          "name": "clockwork:targets",
+          "value": "native,web"
+        },
+        {
+          "name": "clockwork:version_from",
+          "value": "upstream_commit"
+        },
+        {
+          "name": "clockwork:upstream_commit",
+          "value": "b61e579ffd24004cc5c9f517714cbd30b14d0148"
+        },
+        {
+          "name": "clockwork:modified",
+          "value": "yes"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "tlsf",
+      "name": "TLSF",
+      "version": "2.4.6",
+      "licenses": [
+        {
+          "expression": "GPL-2.0-only OR LGPL-2.1-only"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://www.gii.upv.es/tlsf/"
+        }
+      ],
+      "properties": [
+        {
+          "name": "clockwork:path",
+          "value": "dsp/scsynth/synth/external_libraries/TLSF-2.4.6"
+        },
+        {
+          "name": "clockwork:targets",
+          "value": "native,web"
+        },
+        {
+          "name": "clockwork:version_file",
+          "value": "dsp/scsynth/synth/external_libraries/TLSF-2.4.6/src/tlsf.c"
+        },
+        {
+          "name": "clockwork:version_pattern",
+          "value": "Version (\\d+)\\.(\\d+)\\.(\\d+)"
+        },
+        {
+          "name": "clockwork:advisory_search",
+          "value": "TLSF"
+        },
+        {
+          "name": "clockwork:modified",
+          "value": "no"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "sc3-plugins",
+      "name": "sc3-plugins (DistortionUGens, MdaUGens)",
+      "version": "066d4b1",
+      "licenses": [
+        {
+          "expression": "GPL-2.0-or-later"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/supercollider/sc3-plugins"
+        }
+      ],
+      "properties": [
+        {
+          "name": "clockwork:path",
+          "value": "dsp/scsynth/synth/plugins/sc3-plugins"
+        },
+        {
+          "name": "clockwork:targets",
+          "value": "native,web"
+        },
+        {
+          "name": "clockwork:version_from",
+          "value": "upstream_commit"
+        },
+        {
+          "name": "clockwork:upstream_commit",
+          "value": "066d4b1e426862619e002a02544617bd4131c6fd"
+        },
+        {
+          "name": "clockwork:modified",
+          "value": "yes"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "catch2",
+      "name": "Catch2",
+      "version": "v3.5.2",
+      "licenses": [
+        {
+          "expression": "BSL-1.0"
+        }
+      ],
+      "scope": "excluded",
+      "purl": "pkg:github/catchorg/catch2@v3.5.2",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/catchorg/Catch2.git"
+        }
+      ],
+      "properties": [
+        {
+          "name": "clockwork:fetch",
+          "value": "Catch2"
+        },
+        {
+          "name": "clockwork:modified",
+          "value": "no"
+        },
+        {
+          "name": "clockwork:upstream_commit",
+          "value": "05e10dfccc28c7f973727c54f850237d07d5e10f"
+        },
+        {
+          "name": "clockwork:targets",
+          "value": "none"
+        }
+      ]
+    }
+  ]
+}

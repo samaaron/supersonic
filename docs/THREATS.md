@@ -60,5 +60,13 @@ Open items, most important first.
 
 ## Supply chain
 
-Not yet written: SuperSonic's own SBOM (the scsynth fork by its upstream
-commit, the npm packages) with Clockwork's, regenerated from the pin.
+`docs/components.cdx.json` lists what SuperSonic carries besides its own code
+and Clockwork: the SuperCollider code its synthesis was forked from, by the
+upstream commit SuperSonic last took changes from; nova-simd, TLSF and two
+sc3-plugins files, each by upstream commit; and Catch2, which the tests fetch.
+The npm packages come from `package-lock.json`. `node clockwork/scripts/sbom.mjs
+--root . check` holds the list to the tree, `target all` writes one CycloneDX
+SBOM per build target with Clockwork's from the pinned commit beside it, and
+`scan` looks every component up in OSV or the NVD. `.github/workflows/security.yml`
+runs all three on every push and nightly; an advisory fails the run unless a
+statement in `docs/vex.cdx.json` or Clockwork's accepts it.
