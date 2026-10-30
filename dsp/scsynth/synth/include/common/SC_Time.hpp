@@ -22,7 +22,7 @@
 #pragma once
 
 #include "SC_FloatToInt.h"
-#include "../../common/SC_Lock.h" // for chrono
+#include <chrono>
 #include "SC_Types.h"
 
 const int32 kSECONDS_FROM_1900_to_1970 = (int32)2208988800UL; /* 17 leap years */
