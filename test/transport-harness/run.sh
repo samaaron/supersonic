@@ -9,7 +9,7 @@
 #   test/transport-harness/run.sh [path-to-SuperSonic-binary]
 #
 # Exit 0 = every transport answered; nonzero = at least one failed (each
-# failure prints the server log). Windows (UDP/TCP/named pipe) is run.ps1.
+# failure prints the server log). Windows (TCP, named pipe, SHM) is run.ps1.
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"

@@ -179,9 +179,20 @@ jobs:
           fi
         shell: bash
 
+      # A case that crashes prints its backtrace as offsets into the test
+      # binary, which Release builds with debug info. Keep the binary so the
+      # offsets can be symbolised: llvm-symbolizer --obj=<binary> <offset>.
+      - name: Upload test binary on failure
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: SuperSonicNativeTests-${{ matrix.name }}
+          path: build/native/test/native/SuperSonicNativeTests
+          retention-days: 7
+
       # End-to-end command transports: boot the real binary headless once per
-      # transport (UDP/TCP/UDS/SHM on unix; UDP/TCP/named pipe/SHM on Windows)
-      # and require a /status reply over that transport (test/transport-harness/).
+      # transport (TCP/UDS/SHM on unix; TCP/named pipe/SHM on Windows) and
+      # require a /status reply over that transport (test/transport-harness/).
       - name: Transport harness
         shell: bash
         run: |
@@ -256,7 +267,9 @@ jobs:
   # the container can't be a job-level `container:` because the runner injects
   # an x86_64 Node to execute JS actions, which an i386 rootfs cannot load.
   native-x86:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not -latest: on the 26.04 image apt inside the i386
+    # container reaches no Debian mirror.
+    runs-on: ubuntu-24.04
     name: native-linux-x86
     timeout-minutes: 60
 

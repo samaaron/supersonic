@@ -106,10 +106,12 @@ phase_smoke() {
     apt-get update
     apt-get install -y "${deb[0]}"
     supersonic -v
-    # Boot as installed, headless (no audio device in the container), give it
-    # a moment, then require it to still be alive. Replies over each transport
-    # are autopkgtest's (transport-smoke).
-    supersonic --headless > /tmp/supersonic-smoke.log 2>&1 &
+    # Boot as installed, headless (no audio device in the container), with a
+    # secret on stdin and a TCP command port, give it a moment, then require
+    # it to still be alive. Replies over each transport are autopkgtest's
+    # (transport-smoke).
+    secret="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    printf '%s\n' "$secret" | supersonic --headless --tcp 57110 > /tmp/supersonic-smoke.log 2>&1 &
     pid=$!
     sleep 5
     if ! kill -0 "$pid" 2>/dev/null; then
