@@ -373,6 +373,30 @@ export interface SuperSonicMetrics {
   engineSchedulerCapacity: number;
   /** Bytes of timed messages the scheduler can hold (0 in a build with none). */
   engineSchedulerPoolBytes: number;
+  /** Replies, broadcasts and log lines an egress ring refused, for want of room or for their size: what the clients never got. 0 in a healthy engine. */
+  egressFramesRefused: number;
+  /** Native only: replies and broadcasts the transport could not deliver (a client gone, a full peer ring). 0 in a healthy engine. */
+  egressFramesUndelivered: number;
+  /** Native only: cues the cue port's rate limit dropped. 0 unless someone floods it. */
+  cuesDropped: number;
+
+  // Memory
+  /** Bytes in use in the engine's pool now. */
+  guestPoolUsedBytes: number;
+  /** The most bytes ever in use in the engine's pool. */
+  guestPoolPeakBytes: number;
+  /** Bytes in use in the Rust heap now. */
+  rustHeapUsedBytes: number;
+  /** Rust allocations that fell back to the system allocator because the Rust heap was full. */
+  rustHeapFallbacks: number;
+  /** Bytes the engine holds from malloc, taken inside its entry points and not freed. */
+  guestMallocBytes: number;
+  /** malloc, calloc or realloc calls the engine made while processing since boot. */
+  guestMallocsProcessing: number;
+  /** malloc, calloc or realloc calls anywhere in the program since the engine was ready; 0 is the target. */
+  mallocsAfterBoot: number;
+  /** Bytes taken from malloc since the engine was ready and still held. */
+  mallocBytesAfterBoot: number;
 
   // OSC out
   /** OSC messages sent from JS to the engine. */
