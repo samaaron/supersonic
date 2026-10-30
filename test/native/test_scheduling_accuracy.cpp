@@ -352,3 +352,39 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     CHECK(p99  < blockMs * 2);    // tail within two blocks
     CHECK(pmax < blockMs * 3);    // worst within three blocks
 }
+
+// A bundle due long before the block that runs it plays from that block's
+// first frame, as one sent "immediately" does. A day late at 48 kHz is over
+// four billion samples before the block, outside int's range, so the offset
+// must be clamped before it is converted.
+static int onsetOfBundle(bool late) {
+    ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
+    cfg.freewheelClock     = true;
+    cfg.freewheelOriginNtp = kOriginNtp;
+    EngineFixture fx(cfg);
+    REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
+    fx.clearReplies();
+
+    auto* capture = reinterpret_cast<shm_audio_buffer*>(arena_storage + SCOPE_START) + CLOCKWORK_TAP_OUT;
+    REQUIRE(capture->enabled.load(std::memory_order_acquire) == 1);
+    const uint32_t channels   = capture->channels;
+    const uint32_t sampleRate = capture->sample_rate;
+    REQUIRE(sampleRate > 0);
+
+    const auto beep = OscBuilder::message("/s_new", "sonic-pi-beep", 1001, 0, 0,
+                                          "amp", 0.5f, "note", 72.0f, "release", 0.02f);
+    if (late) fx.engine().sendBundle(engineNow(fx, sampleRate) - 86400.0, { beep });
+    else      fx.engine().sendBundle(0.0, { beep });
+    const std::vector<float> captured = captureTap(fx, capture, 4 * 128);
+    fx.send(osc_test::message("/n_free", 1001));
+    return findOnsetFrame(captured.data(), uint32_t(captured.size() / channels), channels);
+}
+
+TEST_CASE("a bundle a day late plays from the start of the block that runs it",
+          "[scheduling][late]") {
+    const int immediate = onsetOfBundle(false);
+    const int late      = onsetOfBundle(true);
+    INFO("immediate onset " << immediate << ", late onset " << late);
+    REQUIRE(immediate >= 0);
+    CHECK(late == immediate);
+}

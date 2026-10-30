@@ -163,22 +163,16 @@ void apply_offset(ScsynthDsp* d, int64_t when, int64_t block_time) {
         w->mSubsampleOffset = 0.0f;
         return;
     }
-    /*
-     * Against THIS block's start, not the last one rendered.
-     *
-     * This used d->block_time, which dsp_process sets — and dsp_osc runs
-     * BEFORE dsp_process for the block a message belongs to, so it was always
-     * the previous block's start. `when - block_time` came out a whole block
-     * too large, the clamp below pinned it, and every scheduled synth landed
-     * on a buffer boundary. Block-accurate, never sample-accurate, which is
-     * exactly what OffsetOut.ar exists to avoid.
-     */
+    // Measured from the start of the block about to render: dsp_osc runs
+    // before dsp_process sets d->block_time for that block. A bundle due
+    // before the block starts at its first frame and one due after it at its
+    // last; the clamp is in float because a late bundle's offset can be far
+    // outside int's range.
     const float diff = (float)((double)(when - block_time) * d->osc_to_samples) + 0.5f;
     const float floored = std::floor(diff);
-    w->mSampleOffset = (int)floored;
+    const float last = (float)(w->mBufLength - 1);
+    w->mSampleOffset = !(floored > 0.0f) ? 0 : floored >= last ? w->mBufLength - 1 : (int)floored;
     w->mSubsampleOffset = diff - floored;
-    if (w->mSampleOffset < 0) w->mSampleOffset = 0;
-    else if (w->mSampleOffset >= w->mBufLength) w->mSampleOffset = w->mBufLength - 1;
 }
 
 // The engine's audio is one flat channel-major array: every OUTPUT bus of
