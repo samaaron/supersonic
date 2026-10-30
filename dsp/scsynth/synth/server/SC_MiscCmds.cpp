@@ -557,8 +557,12 @@ SCErr meth_n_set(World* inWorld, int inSize, const char* inData, ReplyAddress* /
                     msg.count++;
                     loop++;
                     break;
+                default:
+                    // A type no control takes: read past it.
+                    msg.getf();
+                    break;
                 }
-            } while (loop);
+            } while (loop && msg.remain());
         } else {
             int32 index = msg.geti();
             do {
@@ -592,8 +596,12 @@ SCErr meth_n_set(World* inWorld, int inSize, const char* inData, ReplyAddress* /
                     msg.count++;
                     loop++;
                     break;
+                default:
+                    // A type no control takes: read past it.
+                    msg.getf();
+                    break;
                 }
-            } while (loop);
+            } while (loop && msg.remain());
         }
     }
 

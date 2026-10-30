@@ -259,9 +259,13 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                         loop += 1;
                         i -= 1;
                         break;
+                    default:
+                        // A type no control takes: read past it.
+                        msg->getf();
+                        break;
                     }
                     ++i;
-                } while (loop);
+                } while (loop && msg->remain());
             } else {
                 int32 index = msg->geti();
                 do {
@@ -294,9 +298,13 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                         loop += 1;
                         i -= 1;
                         break;
+                    default:
+                        // A type no control takes: read past it.
+                        msg->getf();
+                        break;
                     }
                     ++i;
-                } while (loop);
+                } while (loop && msg->remain());
             }
         }
     }
