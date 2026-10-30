@@ -23,6 +23,7 @@
 #include "buffer_commands.h"   // supersonic_guest_alloc_bytes / free_bytes
 
 #include <cstddef>
+#include <cstdint>
 #include <new>
 #include <utility>
 
@@ -47,6 +48,9 @@ template <class T> void guest_delete(T* p) {
 }
 
 template <class T> T* guest_new_array(size_t n) {
+    // A count whose size in bytes does not fit in size_t is refused: wrapped,
+    // it would allocate a few bytes and the loop below would write past them.
+    if (n > (SIZE_MAX - kGuestArrayHeader) / sizeof(T)) throw std::bad_alloc();
     char* raw = static_cast<char*>(guest_alloc_or_throw(kGuestArrayHeader + sizeof(T) * n));
     *reinterpret_cast<size_t*>(raw) = n;
     T* items = reinterpret_cast<T*>(raw + kGuestArrayHeader);

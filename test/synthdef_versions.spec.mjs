@@ -263,4 +263,50 @@ test.describe("corrupted synthdef resilience", () => {
       expect(result.serverAlive).toBe(true);
     });
   }
+
+  // A count is read before the array it sizes, and the web engine's size_t
+  // is 32 bits: 0x3FFFFFFD four-byte constants with the array's header come
+  // to 2^32 + 4 bytes, which wraps to 4. The def claims the count and
+  // carries nothing after it.
+  test("a def claiming more constants than memory holds is refused", async ({ page, sonicConfig }) => {
+    await page.goto("/test/harness.html");
+    const result = await page.evaluate(async (config) => {
+      function waitForMessage(sonic, address, timeoutMs = 5000) {
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            sonic.off("in", handler);
+            reject(new Error("Timeout waiting for " + address));
+          }, timeoutMs);
+          const handler = (msg) => {
+            if (msg[0] === address) {
+              clearTimeout(timer);
+              sonic.off("in", handler);
+              resolve(msg);
+            }
+          };
+          sonic.on("in", handler);
+        });
+      }
+
+      const sonic = new window.SuperSonic(config);
+      await sonic.init();
+
+      const bytes = [];
+      const i32 = (v) => bytes.push((v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255);
+      i32(0x53436766); i32(2); bytes.push(0, 1);   // "SCgf", version 2, one def
+      bytes.push(4, ...new TextEncoder().encode("huge"));
+      i32(0x3FFFFFFD);                             // constants claimed, none carried
+
+      const failed = waitForMessage(sonic, "/fail", 3000).then(() => true, () => false);
+      await sonic.send("/d_recv", new Uint8Array(bytes));
+      const refused = await failed;
+
+      await sonic.send("/status");
+      const status = await waitForMessage(sonic, "/status.reply", 3000);
+      return { refused, serverAlive: status[0] === "/status.reply" };
+    }, sonicConfig);
+
+    expect(result.refused).toBe(true);
+    expect(result.serverAlive).toBe(true);
+  });
 });

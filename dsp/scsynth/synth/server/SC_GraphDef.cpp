@@ -111,6 +111,29 @@ inline int32 readCount(const char*& buffer, const char* end, int version) {
         return readInt16_be(buffer, end);
 }
 
+// A count is read before the array it sizes, and each element of the array
+// takes at least `minBytes` of the def. A count the bytes that follow cannot
+// hold is refused before anything is allocated from it: allocated first, it
+// could exhaust the heap or, where size_t is 32 bits, wrap the array's size.
+static uint32 checkArrayCount(int64 count, const char* buffer, const char* end, size_t minBytes, const char* what) {
+    const size_t remaining = (size_t)(end - buffer);
+    if (count >= 0 && (uint64)count <= remaining / minBytes)
+        return (uint32)count;
+    char str[ERR_BUF_SIZE];
+    snprintf(str, ERR_BUF_SIZE, "SynthDef: %lld %s claimed, but only %zu bytes follow.", (long long)count, what,
+             remaining);
+    g_lastGraphDefError = str;
+    throw std::runtime_error(str);
+}
+
+static uint32 readArrayCount(const char*& buffer, const char* end, int version, size_t minBytes, const char* what) {
+    const int32 count = readCount(buffer, end, version);
+    return checkArrayCount(count, buffer, end, minBytes, what);
+}
+
+// The fewest bytes a count field takes in a def of this version.
+inline size_t countBytes(int version) { return version >= 2 ? 4 : 2; }
+
 void ReadName(const char*& buffer, const char* end, int32* name) {
     uint32 namelen = readUInt8(buffer, end);
     if (namelen >= kSCNameByteLen) {
@@ -168,9 +191,15 @@ void UnitSpec_Read(UnitSpec* inUnitSpec, const char*& buffer, const char* end, i
     }
     inUnitSpec->mCalcRate = readInt8(buffer, end);
 
-    inUnitSpec->mNumInputs = readCount(buffer, end, version);
-    inUnitSpec->mNumOutputs = readCount(buffer, end, version);
+    const int32 numInputs = readCount(buffer, end, version);
+    const int32 numOutputs = readCount(buffer, end, version);
     inUnitSpec->mSpecialIndex = readInt16_be(buffer, end);
+    // Each input is two counts and each output its rate, one byte; the inputs
+    // come first.
+    const size_t inputBytes = 2 * countBytes(version);
+    inUnitSpec->mNumInputs = checkArrayCount(numInputs, buffer, end, inputBytes, "unit inputs");
+    inUnitSpec->mNumOutputs =
+        checkArrayCount(numOutputs, buffer + inputBytes * inUnitSpec->mNumInputs, end, 1, "unit outputs");
     inUnitSpec->mInputSpec = guest_new_array<InputSpec>(inUnitSpec->mNumInputs);
     inUnitSpec->mOutputSpec = guest_new_array<OutputSpec>(inUnitSpec->mNumOutputs);
     for (uint32 i = 0; i < inUnitSpec->mNumInputs; ++i) {
@@ -207,10 +236,12 @@ GraphDef* GraphDefLib_Read(World* inWorld, const char* buffer, size_t size, Grap
         // NB: GraphDef_Read() might not read all the fields so we must explicitly set
         // the begin and end on each iteration!
         for (int i = 0; i < numDefs; ++i) {
-            size_t synthDefSize = readInt32_be(buffer, end);
-            const char* synthDefEnd = buffer + synthDefSize - 4;
-            if (synthDefEnd > end)
+            // The size counts its own four bytes; the def must lie inside
+            // what was sent, which is checked before its end is worked out.
+            const int32 synthDefSize = readInt32_be(buffer, end);
+            if (synthDefSize < 4 || (size_t)(synthDefSize - 4) > (size_t)(end - buffer))
                 throw std::runtime_error("wrong synthdef size");
+            const char* synthDefEnd = buffer + (synthDefSize - 4);
 
             inList = GraphDef_Read(inWorld, buffer, synthDefEnd, inList, version);
 
@@ -359,23 +390,25 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
 
     graphDef->mNodeDef.mHash = Hash(graphDef->mNodeDef.mName);
 
-    graphDef->mNumConstants = readCount(buffer, end, inVersion);
+    graphDef->mNumConstants = readArrayCount(buffer, end, inVersion, sizeof(float32), "constants");
     graphDef->mConstants = guest_new_array<float32>(graphDef->mNumConstants);
     for (uint32 i = 0; i < graphDef->mNumConstants; ++i) {
         graphDef->mConstants[i] = readFloat_be(buffer, end);
     }
     graphDef->mNumWires = graphDef->mNumConstants;
 
-    graphDef->mNumControls = readCount(buffer, end, inVersion);
+    graphDef->mNumControls = readArrayCount(buffer, end, inVersion, sizeof(float32), "controls");
     graphDef->mInitialControlValues = guest_new_array<float32>(graphDef->mNumControls);
     for (uint32 i = 0; i < graphDef->mNumControls; ++i) {
         graphDef->mInitialControlValues[i] = readFloat_be(buffer, end);
     }
 
-    graphDef->mNumParamSpecs = readCount(buffer, end, inVersion);
+    // A control name is its length byte and its control index at the least.
+    graphDef->mNumParamSpecs = readArrayCount(buffer, end, inVersion, 1 + countBytes(inVersion), "control names");
     calcParamSpecs(graphDef.get(), buffer, end, inVersion);
 
-    uint32 numUnitSpecs = readCount(buffer, end, inVersion);
+    // A unit is its name's length byte, its rate, two counts and its special index at the least.
+    uint32 numUnitSpecs = readArrayCount(buffer, end, inVersion, 1 + 1 + 2 * countBytes(inVersion) + 2, "units");
     graphDef->mUnitSpecs = guest_new_array<UnitSpec>(numUnitSpecs);
     graphDef->mNumCalcUnits = 0;
     graphDef->mNumUnitSpecs = 0;
@@ -413,7 +446,10 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     GraphDef_SetAllocSizes(graphDef.get());
 
     if (inVersion >= 1) {
-        uint16 numVariants = readInt16_be(buffer, end);
+        // A variant is its name's length byte and a value for every control at the least.
+        const uint16 claimedVariants = readInt16_be(buffer, end);
+        uint32 numVariants =
+            checkArrayCount(claimedVariants, buffer, end, 1 + sizeof(float32) * graphDef->mNumControls, "variants");
         if (numVariants > 0) {
             graphDef->mVariants = guest_new_array<GraphDef>(numVariants);
             for (uint32 i = 0; i < numVariants; ++i) {
