@@ -3,6 +3,10 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./test",
   testMatch: "**/*.spec.mjs",
+  // Benchmarks measure the machine, which a run with every worker busy is
+  // not a measure of: they run alone, under playwright.benchmark.mjs
+  // (npm run test:benchmark), as the native suite keeps [benchmark] apart.
+  testIgnore: "**/*benchmark*.spec.mjs",
   timeout: 30000, // 30s default - reduced for faster feedback
   retries: 0,
   workers: '100%', // Use all available CPUs

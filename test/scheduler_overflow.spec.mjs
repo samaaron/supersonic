@@ -1,29 +1,19 @@
-import { test, expect } from "./fixtures.mjs";
+import { test, expect, WAIT_FOR_PROGRESS_HELPER } from "./fixtures.mjs";
 
 /**
- * Scheduler Queue Overflow Test
+ * Scheduler queue overflow in the browser.
  *
- * The scheduler is a fixed-capacity RT pool (512 events). Sending more than that
- * in a tight burst overflows it, and the engine is fail-open: it drops the
- * surplus (counted in scheduler metrics) rather than back-pressuring, because
- * the IN ring is drained in order and holding the surplus would head-of-line-
- * block immediate commands until the pool drains.
+ * Timed bundles past the scheduler's capacity are dropped and counted rather
+ * than back-pressured: the IN ring drains in order, and holding the surplus
+ * would block immediate commands behind it. That the bundles which fit play
+ * at their time, and the exact accounting, are proved in
+ * test/native/test_scheduler_overflow.cpp on a manually rendered engine.
+ * This spec checks the web path: a burst past capacity, sent through the
+ * page's ring, is counted, and intake keeps working.
  *
- * This test sends SCHEDULER_CAPACITY + 200 timed bundles and verifies the
- * overflow degrades gracefully: the surplus is dropped, the bundles that fit
- * still fire, and the engine keeps running (no wedge, no corruption). Absorbing
- * a burst larger than the pool is a sizing / prescheduler concern.
+ * Capacity is read from the build (engineSchedulerPoolBytes), not assumed.
  */
 
-/*
- * Capacity is READ FROM THE BUILD, not assumed.
- *
- * This was `const SCHEDULER_CAPACITY = 512`, which is one build's
- * SCHEDULER_SLOT_COUNT. This build has 8192 slots, so 712 bundles fit
- * comfortably, nothing overflowed, and a test about overflow asserted that
- * something had been dropped when nothing should have been. The number that
- * matters is whatever the engine actually reports.
- */
 const OVERFLOW_AMOUNT = 200; // how far past capacity to push
 
 // Audio analysis helpers
@@ -56,349 +46,71 @@ function hasAudio(samples) {
 
 test.describe("Scheduler Queue Overflow", () => {
   // Audio capture requires SharedArrayBuffer - not available in postMessage mode
-  test(`sending timed bundles past capacity drops the surplus cleanly without wedging`, async ({ page, sonicConfig }) => {
+  test("timed bundles past capacity are dropped and counted, and intake keeps working", async ({ page, sonicConfig }) => {
     test.skip(sonicConfig.mode === 'postMessage', 'Audio capture requires SharedArrayBuffer');
-    const errors = [];
-    const debugLogs = [];
-
-    page.on("console", (msg) => {
-      const text = msg.text();
-      debugLogs.push(text);
-
-      if (text.includes("Scheduler queue full") ||
-          text.includes("Failed to schedule bundle")) {
-        errors.push(text);
-        console.log("SCHEDULER OVERFLOW:", text);
-      }
-    });
-
     await page.goto("/test/harness.html");
+    await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
-    await page.waitForFunction(() => window.supersonicReady === true, {
-      timeout: 10000,
-    });
-
-    const result = await page.evaluate(async (config) => {
-      const { OVERFLOW_AMOUNT, helpers, sonicConfig } = config;
-      eval(helpers); // Load audio analysis functions
-
+    const result = await page.evaluate(async ({ OVERFLOW_AMOUNT, helpers, progress, sonicConfig }) => {
+      eval(helpers);
+      eval(progress);
       const sonic = new window.SuperSonic(sonicConfig);
+      await sonic.init();
+      await sonic.loadSynthDefs(["sonic-pi-beep"]);
+      await sonic.sync(1);
 
-      const debugMessages = [];
-      sonic.on('debug', (msg) => {
-        debugMessages.push(msg);
-      });
-
-      try {
-        await sonic.init();
-
-      // The real slot count this build shipped with. A hardcoded number here
-      // was one build's, and this build's is larger, so the burst never
-      // overflowed and the test asserted a drop that should not have happened.
-      const { engineSchedulerCapacity: capacity, engineSchedulerPoolBytes: poolBytes } = sonic.getMetrics();
-      if (!capacity || !poolBytes) throw new Error("no scheduler capacity reported");
-
-      /*
-       * Overflow whichever limit binds FIRST, and reach it without breaking
-       * something else on the way.
-       *
-       * Slot count is 8192 here, and pushing 8392 bundles through a 1MB
-       * ingress ring crashes the renderer long before the queue fills — the
-       * ring binds, not the scheduler, so the burst never tests what it
-       * claims to. The data pool is the reachable limit: each bundle is
-       * padded so a few hundred of them exhaust it, which is the same
-       * "surplus past capacity" condition arriving by size rather than by
-       * count, and the ring drains normally throughout.
-       */
+      // The data pool is the limit a burst reaches first: each bundle is
+      // padded (an unknown control the synth ignores) so a few hundred fill it.
+      const { engineSchedulerPoolBytes: poolBytes } = sonic.getMetrics();
+      if (!poolBytes) throw new Error("no scheduler pool reported");
       const PAD_BYTES = 4096;
-      const TOTAL_MESSAGES = Math.ceil(poolBytes / PAD_BYTES) + OVERFLOW_AMOUNT;
-        await sonic.loadSynthDefs(["sonic-pi-beep"]);
-        await sonic.sync(1);
+      const total = Math.ceil(poolBytes / PAD_BYTES) + OVERFLOW_AMOUNT;
 
-        // ============================================
-        // TEST 1: Audio works BEFORE overflow
-        // ============================================
-        sonic.startCapture();
-        await sonic.send("/s_new", "sonic-pi-beep", 88888, 0, 0, "amp", 0.5, "release", 0.1);
-        await new Promise(r => setTimeout(r, 150));
-        const beforeCapture = sonic.stopCapture();
-        await sonic.send("/n_free", 88888);
-        await new Promise(r => setTimeout(r, 50));
+      const timedBundle = (ntp, nodeId, note) => {
+        const msg = window.SuperSonic.osc.encodeMessage("/s_new", [
+          "sonic-pi-beep", nodeId, 0, 0, "note", note, "amp", 0.05, "release", 0.2, "pad", "x".repeat(PAD_BYTES),
+        ]);
+        const bundle = new Uint8Array(20 + msg.byteLength);
+        const view = new DataView(bundle.buffer);
+        bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
+        view.setUint32(8, Math.floor(ntp), false);
+        view.setUint32(12, Math.floor((ntp % 1) * 0x100000000), false);
+        view.setInt32(16, msg.byteLength, false);
+        bundle.set(msg, 20);
+        return bundle;
+      };
 
-        const audioBeforeOverflow = {
-          hasAudio: hasAudio(beforeCapture.left),
-          rms: calculateRMS(beforeCapture.left, 0, Math.min(beforeCapture.frames, 10000)),
-          peak: findPeak(beforeCapture.left, 0, Math.min(beforeCapture.frames, 10000)),
-          frames: beforeCapture.frames
-        };
-
-        // Get metrics before - dump everything for debugging
-        const metricsBefore = sonic.getMetrics();
-        const droppedBefore = metricsBefore.engineSchedulerDropped || 0;
-        const processCountBefore = metricsBefore.engineProcessCount || 0;
-
-        // Create timed bundle with future timestamp
-        const createTimedBundle = (ntpTime, nodeId, note, padBytes = 0) => {
-          // `pad` is an ignored control whose only job is to make the payload
-          // big enough that a few hundred bundles exhaust the data pool. An
-          // unknown control name is dropped by the engine without error, so
-          // the synth still plays exactly as it would have.
-          const args = ["sonic-pi-beep", nodeId, 0, 0, "note", note, "amp", 0.05, "release", 0.2];
-          if (padBytes > 0) args.push("pad", "x".repeat(padBytes));
-          const encodedMessage = window.SuperSonic.osc.encodeMessage("/s_new", args);
-          const bundleSize = 8 + 8 + 4 + encodedMessage.byteLength;
-          const bundle = new Uint8Array(bundleSize);
-          const view = new DataView(bundle.buffer);
-
-          bundle.set([0x23, 0x62, 0x75, 0x6e, 0x64, 0x6c, 0x65, 0x00], 0);
-          const ntpSeconds = Math.floor(ntpTime);
-          const ntpFraction = Math.floor((ntpTime % 1) * 0x100000000);
-          view.setUint32(8, ntpSeconds, false);
-          view.setUint32(12, ntpFraction, false);
-          view.setInt32(16, encodedMessage.byteLength, false);
-          bundle.set(encodedMessage, 20);
-
-          return bundle;
-        };
-
-        // ============================================
-        // TEST 2: Cause scheduler overflow with capture running
-        // ============================================
-        // Start capture BEFORE sending messages so we capture the scheduled synths
-        sonic.startCapture();
-
-        // The engine's own clock, as its scheduler keeps it: the sample clock it publishes every block
-        const currentContextTime = sonic.node.context.currentTime;
-        const currentNTP = sonic.clock.now();
-
-        // Schedule bundles 300ms in the future
-        const baseNTP = currentNTP + 0.3;
-
-        // Log timing for debugging
-        const timingDebug = {
-          audioContextTime: currentContextTime,
-          currentNTP: currentNTP,
-          targetNTP: baseNTP
-        };
-
-        // Send all bundles as fast as possible
-        // All scheduled within a 26ms window so they pile up in scheduler
-        for (let i = 0; i < TOTAL_MESSAGES; i++) {
-          const targetNTP = baseNTP + (i * 0.0001); // 0.1ms apart
-          const nodeId = 50000 + i;
-          const note = 60 + (i % 24);
-
-          const bundle = createTimedBundle(targetNTP, nodeId, note, PAD_BYTES);
-          sonic.sendOSC(bundle);
-          // Let the ingress ring drain: the pool is what we are filling, and
-          // an unpaced burst overruns the ring instead.
-          if ((i & 31) === 31) await new Promise((r) => setTimeout(r, 0));
-        }
-
-        // Wait a bit for messages to reach the scheduler
-        await new Promise(r => setTimeout(r, 100));
-
-        // Poll metrics multiple times to catch peak
-        let peakDepth = 0;
-        let peakMax = 0;
-        for (let poll = 0; poll < 10; poll++) {
-          await new Promise(r => setTimeout(r, 20));
-          const m = sonic.getMetrics();
-          if (m.engineSchedulerDepth > peakDepth) peakDepth = m.engineSchedulerDepth;
-          if (m.engineSchedulerPeakDepth > peakMax) peakMax = m.engineSchedulerPeakDepth;
-        }
-
-        // Get metrics after sending
-        const metricsAfter = sonic.getMetrics();
-        const droppedAfter = metricsAfter.engineSchedulerDropped || 0;
-        const schedulerMax = metricsAfter.engineSchedulerPeakDepth || 0;
-
-        // Check for scheduler overflow errors in debug
-        const overflowErrors = debugMessages.filter(msg =>
-          msg.text?.includes("Scheduler queue full") ||
-          msg.text?.includes("Failed to schedule bundle")
-        );
-
-        // Wait for all scheduled messages to execute (300ms future + 26ms spread + buffer)
-        await new Promise(r => setTimeout(r, 500));
-
-        // Check if scheduler depth dropped to 0 (events executed)
-        const metricsAfterWait = sonic.getMetrics();
-        const schedulerDepthAfterWait = metricsAfterWait.engineSchedulerDepth || 0;
-
-        // Stop capture to see if the scheduled synths produced audio
-        const overflowCapture = sonic.stopCapture();
-        const audioFromScheduledSynths = {
-          hasAudio: hasAudio(overflowCapture.left),
-          rms: calculateRMS(overflowCapture.left, 0, Math.min(overflowCapture.frames, 40000)),
-          peak: findPeak(overflowCapture.left, 0, Math.min(overflowCapture.frames, 40000)),
-          frames: overflowCapture.frames
-        };
-
-        // Sync to ensure scsynth has processed everything
-        await sonic.sync(2);
-
-        // ============================================
-        // TEST 3: Audio works AFTER overflow (same scsynth instance)
-        // ============================================
-        let audioAfterOverflow = { hasAudio: false, rms: 0, peak: 0, frames: 0, error: null };
-        try {
-          sonic.startCapture();
-          await sonic.send("/s_new", "sonic-pi-beep", 99999, 0, 0, "amp", 0.5, "release", 0.1);
-          await new Promise(r => setTimeout(r, 150));
-          const afterCapture = sonic.stopCapture();
-          await sonic.send("/n_free", 99999);
-          await new Promise(r => setTimeout(r, 50));
-
-          audioAfterOverflow = {
-            hasAudio: hasAudio(afterCapture.left),
-            rms: calculateRMS(afterCapture.left, 0, Math.min(afterCapture.frames, 10000)),
-            peak: findPeak(afterCapture.left, 0, Math.min(afterCapture.frames, 10000)),
-            frames: afterCapture.frames
-          };
-        } catch (e) {
-          audioAfterOverflow.error = e.message;
-        }
-
-        // Check for any scsynth errors in debug messages
-        const scsynthErrors = debugMessages.filter(msg =>
-          msg.text?.includes("FAILURE") ||
-          msg.text?.includes("Command not found") ||
-          msg.text?.includes("Node") && msg.text?.includes("not found")
-        );
-
-        // Final metrics
-        const metricsFinal = sonic.getMetrics();
-
-        // Get final process count to verify WASM is running
-        const processCountAfter = metricsFinal.engineProcessCount || 0;
-
-        return {
-          success: true,
-          totalSent: TOTAL_MESSAGES,
-          droppedBefore,
-          droppedAfter,
-          droppedCount: droppedAfter - droppedBefore,
-          schedulerMax,
-          polledPeakDepth: peakDepth,
-          polledPeakMax: peakMax,
-          schedulerCapacity: 512, // matches SCHEDULER_SLOT_COUNT in EngineScheduler.h
-          overflowErrors,
-          // SAB metrics for debugging
-          processCountBefore,
-          processCountAfter,
-          processCountDelta: processCountAfter - processCountBefore,
-          preschedulerBundlesScheduled: metricsFinal.preschedulerBundlesScheduled,
-          preschedulerDispatched: metricsFinal.preschedulerDispatched,
-          oscOutMessagesSent: metricsFinal.oscOutMessagesSent,
-          engineMessagesProcessed: metricsFinal.engineMessagesProcessed,
-          // Buffer usage
-          inBufferUsed: metricsFinal.inBufferUsed,
-          inBufferCapacity: metricsFinal.inBufferCapacity,
-          finalMetrics: {
-            schedulerDepth: metricsFinal.engineSchedulerDepth,
-            schedulerDropped: metricsFinal.engineSchedulerDropped,
-          },
-          debugCount: debugMessages.length,
-          recentDebug: debugMessages.slice(-20),
-          // Audio tests
-          audioBeforeOverflow,
-          audioFromScheduledSynths,  // Did the scheduled synths produce sound?
-          audioAfterOverflow,
-          scsynthErrors,
-          timingDebug,
-          schedulerDepthAfterWait  // Should be 0 if events executed
-        };
-      } catch (err) {
-        return { success: false, error: err.message };
+      // Due a minute ahead on the engine's clock: the burst is in long before
+      // anything comes due, however slowly the page runs.
+      const droppedBefore = sonic.getMetrics().engineSchedulerDropped || 0;
+      const due = sonic.clock.now() + 60;
+      for (let i = 0; i < total; i++) {
+        sonic.sendOSC(timedBundle(due + i * 0.0001, 50000 + i, 60 + (i % 24)));
+        // Let the IN ring drain: the pool is what this fills, not the ring.
+        if ((i & 31) === 31) await new Promise((r) => setTimeout(r, 0));
       }
-    }, { OVERFLOW_AMOUNT, helpers: AUDIO_HELPERS, sonicConfig });
+      // Answered once every bundle before it has reached the scheduler.
+      await sonic.sync(2);
+      const beforeDue = sonic.clock.now() < due;
+      const after = sonic.getMetrics();
+      const dropped = (after.engineSchedulerDropped || 0) - droppedBefore;
+      const held = after.engineSchedulerDepth || 0;
 
-    console.log(`\nScheduler Overflow Test Results:`);
-    if (result.error) {
-      console.log(`  ERROR: ${result.error}`);
-    }
-    console.log(`  Messages sent (test): ${result.totalSent}`);
-    console.log(`  Scheduler capacity: ${result.schedulerCapacity}`);
-    console.log(`  Peak scheduler depth (metric): ${result.schedulerMax}`);
-    console.log(`  Peak scheduler depth (polled): ${result.polledPeakDepth}`);
-    console.log(`  Peak scheduler max (polled): ${result.polledPeakMax}`);
-    console.log(`  Scheduler depth after wait: ${result.schedulerDepthAfterWait} (should be 0 if executed)`);
-    console.log(`  Messages dropped: ${result.droppedCount}`);
-    console.log(`\nSAB Metrics:`);
-    console.log(`  WASM process count: ${result.processCountBefore} -> ${result.processCountAfter} (delta: ${result.processCountDelta})`);
-    console.log(`  Prescheduler bundles scheduled: ${result.preschedulerBundlesScheduled}`);
-    console.log(`  Prescheduler sent: ${result.preschedulerDispatched}`);
-    console.log(`  Main messages sent: ${result.oscOutMessagesSent}`);
-    console.log(`  Worklet messages processed: ${result.engineMessagesProcessed}`);
-    console.log(`  In buffer: ${result.inBufferUsed} / ${result.inBufferCapacity}`);
-    console.log(`  Debug messages: ${result.debugCount}`);
-    if (result.timingDebug) {
-      console.log(`\nTiming Debug:`);
-      console.log(`  AudioContext time: ${result.timingDebug.audioContextTime?.toFixed(3)}s`);
-      console.log(`  Current NTP: ${result.timingDebug.currentNTP?.toFixed(3)}`);
-      console.log(`  Target NTP: ${result.timingDebug.targetNTP?.toFixed(3)}`);
-    }
+      // Intake still works: an immediate beep is heard within 150 ms of audio.
+      sonic.startCapture();
+      await sonic.send("/s_new", "sonic-pi-beep", 99999, 0, 0, "amp", 0.5, "release", 0.1);
+      await waitForCaptureFrames(sonic, 7200);
+      const capture = sonic.stopCapture();
 
-    if (result.overflowErrors?.length > 0) {
-      console.log(`\nOverflow errors detected:`);
-      result.overflowErrors.forEach(e => console.log(`  - ${e}`));
-    }
+      return { total, beforeDue, dropped, held, peak: findPeak(capture.left), ringDrops: after.engineMessagesDropped || 0 };
+    }, { OVERFLOW_AMOUNT, helpers: AUDIO_HELPERS, progress: WAIT_FOR_PROGRESS_HELPER, sonicConfig });
 
-    if (errors.length > 0) {
-      console.log(`\nConsole errors:`);
-      errors.forEach(e => console.log(`  - ${e}`));
-    }
-
-    if (result.recentDebug?.length > 0) {
-      console.log(`\nRecent debug messages:`);
-      result.recentDebug.slice(-10).forEach(e => console.log(`  - ${e}`));
-    }
-
-    console.log(`\nAudio Test (does scsynth produce sound?):`);
-    console.log(`  BEFORE overflow (single test synth):`);
-    console.log(`    Has audio: ${result.audioBeforeOverflow?.hasAudio ? 'YES' : 'NO'}`);
-    console.log(`    RMS: ${result.audioBeforeOverflow?.rms?.toFixed(4)}`);
-    console.log(`    Peak: ${result.audioBeforeOverflow?.peak?.toFixed(4)}`);
-    console.log(`  DURING overflow (64 scheduled synths should play, 200 dropped):`);
-    console.log(`    Has audio: ${result.audioFromScheduledSynths?.hasAudio ? 'YES' : 'NO'}`);
-    console.log(`    RMS: ${result.audioFromScheduledSynths?.rms?.toFixed(4)}`);
-    console.log(`    Peak: ${result.audioFromScheduledSynths?.peak?.toFixed(4)}`);
-    console.log(`  AFTER overflow (single test synth):`);
-    console.log(`    Has audio: ${result.audioAfterOverflow?.hasAudio ? 'YES' : 'NO'}`);
-    console.log(`    RMS: ${result.audioAfterOverflow?.rms?.toFixed(4)}`);
-    console.log(`    Peak: ${result.audioAfterOverflow?.peak?.toFixed(4)}`);
-    if (result.audioAfterOverflow?.error) {
-      console.log(`    Error: ${result.audioAfterOverflow.error}`);
-    }
-    if (result.scsynthErrors?.length > 0) {
-      console.log(`\nscsynth errors after overflow:`);
-      result.scsynthErrors.forEach(e => console.log(`  - ${e}`));
-    }
-
-    // The scheduler is a fixed-capacity RT pool (SCHEDULER_SLOT_COUNT). Sending
-    // past capacity drops the surplus — by design. What this test locks down is
-    // that overflow degrades gracefully: the engine drops the surplus (counted),
-    // keeps running, and never wedges command intake. Holding a burst larger
-    // than the pool is a sizing / prescheduler concern, not a promise the
-    // bounded engine makes.
-
-    // 1. The run completed without throwing.
-    expect(result.success).toBe(true);
-
-    // 2. The surplus past capacity is dropped (and counted) — not silently lost,
-    //    and not back-pressured into a stall.
-    expect(result.droppedCount).toBeGreaterThan(0);
-
-    // 3. The bundles that fit still fired and produced audio.
-    expect(result.audioFromScheduledSynths?.hasAudio).toBe(true);
-
-    // 4. No wedge: an immediate command sent AFTER the overflow still produces
-    //    audio, and the engine kept processing blocks throughout. A healthy
-    //    fresh synth is the real proof the overflow neither stalled intake nor
-    //    corrupted engine state.
-    expect(result.audioAfterOverflow?.hasAudio).toBe(true);
-    expect(result.processCountDelta).toBeGreaterThan(0);
+    console.log(`  ${result.total} sent: ${result.held} held, ${result.dropped} dropped; immediate beep peak ${result.peak.toFixed(3)}`);
+    expect(result.beforeDue, "the burst must be in before the bundles are due").toBe(true);
+    expect(result.ringDrops, "the IN ring took every bundle").toBe(0);
+    expect(result.dropped).toBeGreaterThan(0);
+    expect(result.held + result.dropped).toBe(result.total);
+    expect(result.peak).toBeGreaterThan(0.01);
   });
 
   test("verify scheduler capacity is 128", async ({ page, sonicConfig }) => {

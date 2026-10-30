@@ -16,6 +16,7 @@
     "test": "playwright test --reporter=list --max-failures=1",
     "test:all": "playwright test --reporter=list",
     "test:native": "./build/native/test/native/SuperSonicNativeTests '~[benchmark]'",
+    "test:benchmark": "playwright test --config=playwright.benchmark.mjs --reporter=line",
     "test:transports": "./test/transport-harness/run.sh",
     "prepublishOnly": "./scripts/build-web.sh --release",
     "test:types": "tsd",

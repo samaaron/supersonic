@@ -9,7 +9,7 @@
  * FreeVerb delay lines) while also loading samples (using the buffer
  * pool), then checks that scsynth's NaN/Inf counter stays at zero.
  */
-import { test, expect } from "./fixtures.mjs";
+import { test, expect, WAIT_FOR_PROGRESS_HELPER } from "./fixtures.mjs";
 
 test.describe("RT Pool / Buffer Pool Isolation", () => {
   test("large RT pool + loaded samples produce no NaN", async ({ page, sonicConfig }) => {
@@ -17,7 +17,8 @@ test.describe("RT Pool / Buffer Pool Isolation", () => {
     await page.goto("/test/harness.html");
     await page.waitForFunction(() => window.supersonicReady === true, { timeout: 10000 });
 
-    const result = await page.evaluate(async (baseConfig) => {
+    const result = await page.evaluate(async ({ baseConfig, progress }) => {
+      eval(progress);
       const sonic = new window.SuperSonic({
         ...baseConfig,
         scsynthOptions: {
@@ -62,8 +63,9 @@ test.describe("RT Pool / Buffer Pool Isolation", () => {
         );
       }
 
-      // Let audio process — corruption manifests within ~1s
-      await new Promise(r => setTimeout(r, 2000));
+      // Two seconds of audio, counted in blocks rendered (128 frames at 48 kHz):
+      // corruption shows within one.
+      await waitForBlocks(sonic, 750);
 
       const metrics = sonic.getMetrics();
       const tree = sonic.getRawTree();
@@ -73,11 +75,11 @@ test.describe("RT Pool / Buffer Pool Isolation", () => {
         processCount: metrics.engineProcessCount || 0,
         nodeCount: tree.nodeCount,
       };
-    }, sonicConfig);
+    }, { baseConfig: sonicConfig, progress: WAIT_FOR_PROGRESS_HELPER });
 
     console.log(`  processCount=${result.processCount}, nodes=${result.nodeCount}, NaN/Inf=${result.audioNanInf}`);
 
-    expect(result.processCount).toBeGreaterThan(100); // sanity: audio actually ran
+    expect(result.processCount).toBeGreaterThanOrEqual(750); // the audio ran for the two seconds
     expect(result.audioNanInf, "NaN/Inf detected — RT pool likely overlaps buffer pool").toBe(0);
   });
 });

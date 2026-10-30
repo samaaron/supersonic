@@ -126,6 +126,37 @@ export const WAIT_FOR_TREE_HELPER = `
 `;
 
 /**
+ * Helper code to wait on the engine's progress rather than on wall time (for
+ * use inside page.evaluate). A test that sleeps N ms assumes the engine
+ * rendered N ms of audio meanwhile, which a loaded machine does not; these
+ * wait for the blocks or frames themselves. The hang bound is wall time and
+ * only stops a wedged engine from holding the test forever.
+ *   - waitForBlocks(sonic, n): the engine has rendered n more blocks
+ *   - waitForCaptureFrames(sonic, n): the running capture holds n frames
+ */
+export const WAIT_FOR_PROGRESS_HELPER = `
+  async function waitForBlocks(sonic, n, hangMs = 30000) {
+    const start = sonic.getMetrics().engineProcessCount || 0;
+    const deadline = performance.now() + hangMs;
+    while ((sonic.getMetrics().engineProcessCount || 0) < start + n) {
+      if (performance.now() > deadline) {
+        throw new Error("the engine rendered fewer than " + n + " blocks in " + hangMs + " ms");
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+  async function waitForCaptureFrames(sonic, n, hangMs = 30000) {
+    const deadline = performance.now() + hangMs;
+    while (sonic.getCaptureFrames() < n) {
+      if (performance.now() > deadline) {
+        throw new Error("the capture held fewer than " + n + " frames after " + hangMs + " ms");
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    }
+  }
+`;
+
+/**
  * Helper code to wait for a specific OSC message with timeout (for use inside page.evaluate).
  * Prevents hanging if expected message never arrives - fails fast instead.
  */
