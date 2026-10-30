@@ -66,6 +66,20 @@ class Message {
 public:
     explicit Message(const char* address) { str(address); mTags = ","; }
     Message& i(int32_t v) { mTags += 'i'; be(static_cast<uint32_t>(v)); return *this; }
+    Message& f(float v) {
+        uint32_t u;
+        std::memcpy(&u, &v, sizeof u);
+        mTags += 'f';
+        be(u);
+        return *this;
+    }
+    Message& s(const char* v) {
+        mTags += 's';
+        mArgs.insert(mArgs.end(), v, v + std::strlen(v));
+        mArgs.push_back(0);
+        while (mArgs.size() % 4) mArgs.push_back(0);
+        return *this;
+    }
     Message& b(const uint8_t* data, size_t n) {
         mTags += 'b';
         be(static_cast<uint32_t>(n));

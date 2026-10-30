@@ -79,6 +79,9 @@ jobs:
   # main, which runs it once on every file it is given and prints the count.
   # vptr is off for the reason given in native.yml's sanitize job;
   # float-cast-overflow is on because gcc leaves it out of undefined.
+  # DISABLE_MEMORY_POOLS makes every real-time allocation a malloc, so ASan
+  # sees an overrun inside what would be the pool, where unit and SynthDef
+  # memory lives. The fuzz job builds the same way.
   replay:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -94,13 +97,13 @@ jobs:
             libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
       - name: Build the fuzz targets under ASan and UBSan
         run: |
-          flags="-fsanitize=address,undefined,float-cast-overflow -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
+          flags="-fsanitize=address,undefined,float-cast-overflow -fno-sanitize=vptr -fno-sanitize-recover=undefined -fno-omit-frame-pointer -DDISABLE_MEMORY_POOLS"
           CC=gcc CXX=g++ cmake -S . -B build/fuzz -DSUPERSONIC_FUZZ=ON \
             -DCLOCKWORK_LINK=OFF -DCLOCKWORK_PLUGINS=OFF -DCLOCKWORK_NIF=OFF \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" \
             "-DCMAKE_EXE_LINKER_FLAGS=$flags"
-          cmake --build build/fuzz --target fuzz_synthdef fuzz_scsynth_commands --parallel 2
+          cmake --build build/fuzz --target fuzz_synthdef fuzz_scsynth_commands fuzz_synthdef_play fuzz_ugen_controls --parallel 2
       - name: Replay every corpus
         env:
           ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=0:allocator_may_return_null=1"
@@ -118,6 +121,8 @@ jobs:
           }
           replay fuzz_synthdef packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef
           replay fuzz_scsynth_commands test/fuzz/corpus/scsynth_commands
+          replay fuzz_synthdef_play packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef_play
+          replay fuzz_ugen_controls test/fuzz/corpus/ugen_controls
 
   # ------------------------------------------------------------------- fuzz --
   # Nightly, and by hand. Not on a push: a run bounded by time can go red by
@@ -132,6 +137,8 @@ jobs:
         include:
           - { target: fuzz_synthdef,         seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef" }
           - { target: fuzz_scsynth_commands, seeds: "test/fuzz/corpus/scsynth_commands" }
+          - { target: fuzz_synthdef_play,    seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef_play" }
+          - { target: fuzz_ugen_controls,    seeds: "test/fuzz/corpus/ugen_controls" }
     steps:
       - uses: actions/checkout@v6
         with:
@@ -145,7 +152,7 @@ jobs:
       - name: Build ${{ matrix.target }}
         # -fno-sanitize=function: see test/fuzz/CMakeLists.txt.
         run: |
-          flags="-fsanitize=fuzzer-no-link,address,undefined -fno-sanitize=function,vptr -fno-sanitize-recover=undefined"
+          flags="-fsanitize=fuzzer-no-link,address,undefined -fno-sanitize=function,vptr -fno-sanitize-recover=undefined -DDISABLE_MEMORY_POOLS"
           CC=clang CXX=clang++ cmake -S . -B build/fuzz -DSUPERSONIC_FUZZ=ON \
             -DCLOCKWORK_LINK=OFF -DCLOCKWORK_PLUGINS=OFF -DCLOCKWORK_NIF=OFF \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \

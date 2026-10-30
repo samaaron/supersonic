@@ -48,3 +48,5 @@ endfunction()
 
 supersonic_fuzz_target(fuzz_synthdef fuzz_synthdef.cpp)
 supersonic_fuzz_target(fuzz_scsynth_commands fuzz_scsynth_commands.cpp)
+supersonic_fuzz_target(fuzz_synthdef_play fuzz_synthdef_play.cpp)
+supersonic_fuzz_target(fuzz_ugen_controls fuzz_ugen_controls.cpp)
