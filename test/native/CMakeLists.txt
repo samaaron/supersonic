@@ -108,6 +108,7 @@ add_executable(SuperSonicNativeTests
     test_synthdef_inputs.cpp
     test_osc_arrays.cpp
     test_sc_msg_iter.cpp
+    test_osc_counts.cpp
     test_clear_sched.cpp
     test_rt_alloc_guest.cpp
     test_graphdef_leak.cpp

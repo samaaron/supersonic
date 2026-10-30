@@ -109,11 +109,13 @@ template <int MaxPacketSize = 8192> struct scpacket {
     }
     void addtag(char c) { *tagwrpos++ = c; }
     void skip(int n) {
-        if (wrpos + n > endpos)
+        if (n < 0 || wrpos + n > endpos)
             throw_overflow_exception();
         wrpos += n;
     }
     void maketags(int n) {
+        if (n < 0)
+            throw_overflow_exception();
         int size4 = (n + 4) >> 2;
         tagwrpos = (char*)wrpos;
         skip(size4);

@@ -441,6 +441,53 @@ SCErr meth_n_map(World* inWorld, int inSize, const char* inData, ReplyAddress* /
     return kSCErr_None;
 }
 
+// SuperSonic: a client's count is bounded before a handler loops on it.
+
+// start + n - 1, held to int32's range.
+static int32 LastIndex(int32 start, int32 n) {
+    const int64 last = (int64)start + n - 1;
+    return last > INT32_MAX ? INT32_MAX : last < INT32_MIN ? INT32_MIN : (int32)last;
+}
+
+// bus + i for consecutive mappings: -1 (unmap) stays -1, and a bus past
+// int32's range becomes INT32_MAX, which no World has.
+static int32 BusPlus(int32 bus, int32 i) {
+    if (bus == -1)
+        return -1;
+    const int64 b = (int64)bus + i;
+    return b > INT32_MAX ? INT32_MAX : (int32)b;
+}
+
+// The most controls any synth at or under inNode has: a control index or a
+// channel past it sets and maps nothing.
+static uint32 Node_MaxControls(Node* inNode) {
+    uint32 most = 0;
+    Node* node = inNode;
+    while (node) {
+        if (node->mIsGroup && ((Group*)node)->mHead) {
+            node = ((Group*)node)->mHead;
+            continue;
+        }
+        if (!node->mIsGroup)
+            most = sc_max(most, GRAPHDEF((Graph*)node)->mNumControls);
+        while (node != inNode && !node->mNext)
+            node = (Node*)node->mParent;
+        if (node == inNode)
+            break;
+        node = node->mNext;
+    }
+    return most;
+}
+
+// How many of the n controls from index exist under a node with `limit`
+// controls at most: the loop over i in [first, end) stays in [0, limit).
+static void ControlRange(int32 index, int32 n, uint32 limit, int32& first, int32& end) {
+    const int64 lo = index < 0 ? -(int64)index : 0;
+    const int64 hi = sc_min((int64)n, (int64)limit - index);
+    first = (int32)sc_min(lo, (int64)INT32_MAX);
+    end = hi > lo ? (int32)hi : first;
+}
+
 SCErr meth_n_mapn(World* inWorld, int inSize, const char* inData, ReplyAddress* /*inReply*/) {
     sc_msg_iter msg(inSize, inData);
     Node* node = Msg_GetNode(inWorld, msg);
@@ -452,16 +499,17 @@ SCErr meth_n_mapn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
             int32* name = msg.gets4();
             int32 hash = Hash(name);
             int bus = msg.geti();
-            int n = msg.geti();
+            const int n = sc_min(msg.geti(), (int32)sc_min(Node_MaxControls(node), (uint32)INT32_MAX));
             for (int i = 0; i < n; ++i) {
-                Node_MapControl(node, hash, name, i, bus == -1 ? -1 : bus + i);
+                Node_MapControl(node, hash, name, i, BusPlus(bus, i));
             }
         } else {
             int32 index = msg.geti();
             int32 bus = msg.geti();
-            int n = msg.geti();
-            for (int i = 0; i < n; ++i) {
-                Node_MapControl(node, index + i, bus == -1 ? -1 : bus + i);
+            int32 first, end;
+            ControlRange(index, msg.geti(), Node_MaxControls(node), first, end);
+            for (int i = first; i < end; ++i) {
+                Node_MapControl(node, index + i, BusPlus(bus, i));
             }
         }
     }
@@ -499,16 +547,17 @@ SCErr meth_n_mapan(World* inWorld, int inSize, const char* inData, ReplyAddress*
             int32* name = msg.gets4();
             int32 hash = Hash(name);
             int bus = msg.geti();
-            int n = msg.geti();
+            const int n = sc_min(msg.geti(), (int32)sc_min(Node_MaxControls(node), (uint32)INT32_MAX));
             for (int i = 0; i < n; ++i) {
-                Node_MapAudioControl(node, hash, name, i, bus == -1 ? -1 : bus + i);
+                Node_MapAudioControl(node, hash, name, i, BusPlus(bus, i));
             }
         } else {
             int32 index = msg.geti();
             int32 bus = msg.geti();
-            int n = msg.geti();
-            for (int i = 0; i < n; ++i) {
-                Node_MapAudioControl(node, index + i, bus == -1 ? -1 : bus + i);
+            int32 first, end;
+            ControlRange(index, msg.geti(), Node_MaxControls(node), first, end);
+            for (int i = first; i < end; ++i) {
+                Node_MapAudioControl(node, index + i, BusPlus(bus, i));
             }
         }
     }
@@ -724,7 +773,7 @@ SCErr meth_n_fill(World* inWorld, int inSize, const char* inData, ReplyAddress* 
         if (msg.nextTag('i') == 's') {
             int32* name = msg.gets4();
             int32 hash = Hash(name);
-            int32 n = msg.geti();
+            const int32 n = sc_min(msg.geti(), (int32)sc_min(Node_MaxControls(node), (uint32)INT32_MAX));
             float32 value = msg.getf();
 
             for (int i = 0; i < n; ++i) {
@@ -746,17 +795,18 @@ SCErr meth_n_fill(World* inWorld, int inSize, const char* inData, ReplyAddress* 
                 if (*string == 'c') {
                     int bus = sc_atoi(string + 1);
                     for (int i = 0; i < n; ++i) {
-                        Node_MapControl(node, hash, name, i, bus + i);
+                        Node_MapControl(node, hash, name, i, BusPlus(bus, i));
                     }
                 }
             }
             // No else block - if no bus mapping string, the value was already set above
         } else {
             int32 index = msg.geti();
-            int32 n = msg.geti();
+            int32 first, end;
+            ControlRange(index, msg.geti(), Node_MaxControls(node), first, end);
             float32 value = msg.getf();
 
-            for (int i = 0; i < n; ++i) {
+            for (int i = first; i < end; ++i) {
                 Node_SetControl(node, index + i, value);
             }
             // =============================================================================
@@ -766,8 +816,8 @@ SCErr meth_n_fill(World* inWorld, int inSize, const char* inData, ReplyAddress* 
                 const char* string = msg.gets();
                 if (*string == 'c') {
                     int bus = sc_atoi(string + 1);
-                    for (int i = 0; i < n; ++i) {
-                        Node_MapControl(node, index + i, bus + i);
+                    for (int i = first; i < end; ++i) {
+                        Node_MapControl(node, index + i, BusPlus(bus, i));
                     }
                 }
             }
@@ -1486,7 +1536,7 @@ SCErr meth_b_setn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     while (msg.remain()) {
         int32 start = msg.geti();
         int32 n = msg.geti();
-        int32 end = start + n - 1;
+        int32 end = LastIndex(start, n);
 
         if (end < 0 || start >= numSamples)
             continue;
@@ -1518,7 +1568,7 @@ SCErr meth_b_fill(World* inWorld, int inSize, const char* inData, ReplyAddress* 
         int32 start = msg.geti();
         int32 n = msg.geti();
         float32 value = msg.getf();
-        int32 end = start + n - 1;
+        int32 end = LastIndex(start, n);
 
         if (end < 0 || start >= numSamples)
             continue;
@@ -1571,7 +1621,7 @@ SCErr meth_c_setn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     while (msg.remain()) {
         int32 start = msg.geti();
         int32 n = msg.geti();
-        int32 end = start + n - 1;
+        int32 end = LastIndex(start, n);
 
         if (start < 0 || end >= maxIndex || start > end)
             return kSCErr_IndexOutOfRange;
@@ -1623,19 +1673,25 @@ SCErr meth_c_getn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     float* data = inWorld->mControlBus;
     int maxIndex = inWorld->mNumControlBusChannels;
 
-    // figure out how many tags to allocate
-    int numcontrols = 0;
+    // figure out how many tags to allocate, checking every range before the
+    // tags are reserved from the counts
+    int64 numcontrols = 0;
     int numheads = msg.remain() >> 3;
 
     while (msg.remain()) {
-        msg.geti(); // skip start
+        int32 start = msg.geti();
         int32 n = msg.geti();
+        int32 end = LastIndex(start, n);
+        if (start < 0 || end >= maxIndex || start > end)
+            return kSCErr_IndexOutOfRange;
         numcontrols += n;
     }
+    if (numcontrols > INT32_MAX / 2)
+        return kSCErr_Failed;
 
     big_scpacket packet;
     packet.adds("/c_setn");
-    packet.maketags(numheads * 2 + numcontrols + 1);
+    packet.maketags(numheads * 2 + (int)numcontrols + 1);
     packet.addtag(',');
 
     // start over at beginning of message
@@ -1644,7 +1700,7 @@ SCErr meth_c_getn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     while (msg.remain()) {
         int32 start = msg.geti();
         int32 n = msg.geti();
-        int32 end = start + n - 1;
+        int32 end = LastIndex(start, n);
 
         if (start < 0 || end >= maxIndex || start > end)
             return kSCErr_IndexOutOfRange;
@@ -1680,7 +1736,7 @@ SCErr meth_c_fill(World* inWorld, int inSize, const char* inData, ReplyAddress* 
         int32 start = msg.geti();
         int32 n = msg.geti();
         float32 value = msg.getf();
-        int32 end = start + n - 1;
+        int32 end = LastIndex(start, n);
 
         if (end < 0 || start >= maxIndex)
             continue;
@@ -1744,19 +1800,25 @@ SCErr meth_b_getn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     float* data = buf->data;
     int32 maxIndex = buf->samples;
 
-    // figure out how many tags to allocate
-    int numcontrols = 0;
+    // figure out how many tags to allocate, checking every range before the
+    // tags are reserved from the counts
+    int64 numcontrols = 0;
     int numheads = msg.remain() >> 3;
 
     while (msg.remain()) {
-        msg.geti(); // skip start
+        int32 start = msg.geti();
         int32 n = msg.geti();
+        int32 end = LastIndex(start, n);
+        if (start < 0 || end >= maxIndex || start > end)
+            return kSCErr_IndexOutOfRange;
         numcontrols += n;
     }
+    if (numcontrols > INT32_MAX / 2)
+        return kSCErr_Failed;
 
     big_scpacket packet;
     packet.adds("/b_setn");
-    packet.maketags(numheads * 2 + numcontrols + 2);
+    packet.maketags(numheads * 2 + (int)numcontrols + 2);
     packet.addtag(',');
 
     // start over at beginning of message
@@ -1769,7 +1831,7 @@ SCErr meth_b_getn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     while (msg.remain()) {
         int32 start = msg.geti();
         int32 n = msg.geti();
-        int32 end = start + n - 1;
+        int32 end = LastIndex(start, n);
 
         if (start < 0 || end >= maxIndex || start > end)
             return kSCErr_IndexOutOfRange;
@@ -1844,19 +1906,25 @@ SCErr meth_s_getn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
     if (!graph)
         return kSCErr_NodeNotFound;
 
-    // figure out how many tags to allocate
-    int numcontrols = 0;
-    int numheads = msg.tags ? (strlen(msg.tags) - 1) >> 1 : msg.remain() >> 3;
+    // figure out how many tags to allocate, checking every count against the
+    // synth's controls before the tags are reserved from them
+    const uint32 limit = GRAPHDEF(graph)->mNumControls;
+    int64 numcontrols = 0;
+    int numheads = msg.tags ? (msg.numTags - 1) >> 1 : msg.remain() >> 3;
 
     while (msg.remain()) {
         msg.geti(); // skip start
         int32 n = msg.geti();
+        if (n < 0 || (uint32)n > limit)
+            return kSCErr_IndexOutOfRange;
         numcontrols += n;
     }
+    if (numcontrols > INT32_MAX / 2)
+        return kSCErr_Failed;
 
     big_scpacket packet;
     packet.adds("/n_setn");
-    packet.maketags(numheads * 2 + numcontrols + 2);
+    packet.maketags(numheads * 2 + (int)numcontrols + 2);
     packet.addtag(',');
 
     // start over at beginning of message
