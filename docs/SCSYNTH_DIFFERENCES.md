@@ -4,7 +4,7 @@ This document describes the key differences between SuperSonic and the original 
 
 ## Overview
 
-SuperSonic is a port of scsynth that runs on three hosts: inside a browser's AudioWorklet (the web), as a standalone native server on macOS, Windows and Linux, and as a BEAM NIF. It keeps most of the scsynth API. Some features are unavailable, some because of the AudioWorklet and some because the engine has no files on any host. Each difference below says which hosts it applies to; one that names none applies to all three.
+SuperSonic is a scsynth-compatible synth that runs on three hosts: inside a browser's AudioWorklet (the web), as a standalone native server on macOS, Windows and Linux, and as a BEAM NIF. It keeps most of scsynth's OSC commands. Some features are unavailable, some because of the AudioWorklet and some because the engine has no files on any host. Each difference below says which hosts it applies to; one that names none applies to all three.
 
 ## Constraints
 

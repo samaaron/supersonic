@@ -6,8 +6,8 @@ Files-Excluded: clockwork/external/ASIOSDK2.3.4
 Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
  GPL-3) is excluded from the Debian source tarball. It is not used on Linux.
  .
- SuperSonic is scsynth (dsp/scsynth, GPL-3+) running on clockwork
- (clockwork/, AGPL-3+ or a commercial licence). The combined program is
+ SuperSonic's synthesis code (dsp/scsynth, GPL-3+, forked from SuperCollider's
+ scsynth) runs on clockwork (clockwork/, AGPL-3+ or a commercial licence). The combined program is
  AGPL-3+. clockwork is a git submodule of the upstream repository; the orig
  tarball carries its sources under clockwork/ (git archive of the pinned
  submodule commit), so the source package is the whole program.

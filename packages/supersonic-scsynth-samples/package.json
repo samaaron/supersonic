@@ -1,7 +1,7 @@
 {
   "name": "supersonic-scsynth-samples",
   "version": "0.92.0",
-  "description": "All 207 Sonic Pi audio samples for SuperSonic scsynth",
+  "description": "All 207 Sonic Pi audio samples for SuperSonic",
   "main": "index.js",
   "exports": {
     ".": {

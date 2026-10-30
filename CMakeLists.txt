@@ -13,7 +13,7 @@ cmake_minimum_required(VERSION 3.24)
 
 project(SuperSonic
     VERSION 0.92.0
-    DESCRIPTION "scsynth on the clockwork substrate"
+    DESCRIPTION "A scsynth-compatible synth powered by clockwork"
     LANGUAGES C CXX)
 
 # ─── The guest ───────────────────────────────────────────────────────────────
@@ -41,7 +41,7 @@ if(NOT DEFINED CLOCKWORK_PRODUCT_HEADER)
         CACHE FILEPATH "Header defining the banner this product boots with")
 endif()
 
-# Ableton Link, on by default: SuperSonic is a drop-in scsynth for Sonic Pi,
+# Ableton Link, on by default: SuperSonic stands in for scsynth in Sonic Pi,
 # and Link tempo sync plus Link Audio are part of what it is. A DEFAULT, like
 # the product name above — an embedder that wants a Link-free binary says so.
 if(NOT DEFINED CLOCKWORK_LINK AND NOT EMSCRIPTEN)

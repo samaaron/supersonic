@@ -5,7 +5,7 @@
 > API that changes as something real is built on it.
 
 SuperSonic also builds as a NIF: a shared library the BEAM loads, with
-scsynth running inside the VM. OSC goes in as binaries and comes back as
+the synth running inside the VM. OSC goes in as binaries and comes back as
 Erlang messages. There is no command port and no separate process.
 
 The NIF is clockwork's (`clockwork/src/nif`): `clockwork_nif.cpp` is the

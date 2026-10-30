@@ -10,7 +10,7 @@
 > process (`host/`, `front/`) and the packages. Files below are named by
 > their path from the repository root.
 
-SuperSonic ports SuperCollider's scsynth audio engine to three hosts: the web, where it runs in a WebAssembly AudioWorklet; a standalone native server on macOS, Windows and Linux; and a BEAM NIF. This document covers the web host and the design decisions behind it. The native server is described in [NATIVE.md](NATIVE.md) and the NIF in [NIF.md](NIF.md). Where a section also holds for those hosts, it says so.
+SuperSonic is a scsynth-compatible synth powered by Clockwork. It runs on three hosts: the web, where it runs in a WebAssembly AudioWorklet; a standalone native server on macOS, Windows and Linux; and a BEAM NIF. This document covers the web host and the design decisions behind it. The native server is described in [NATIVE.md](NATIVE.md) and the NIF in [NIF.md](NIF.md). Where a section also holds for those hosts, it says so.
 
 ## Core Challenges
 

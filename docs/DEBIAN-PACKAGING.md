@@ -17,7 +17,7 @@ discover it.
 ## What gets built
 
 One binary package, `supersonic`: the native server (`/usr/bin/supersonic`,
-an scsynth drop-in), the plugin bridge it spawns
+scsynth-compatible), the plugin bridge it spawns
 (`/usr/libexec/supersonic/clockwork-plugin-bridge`, out of PATH; the engine is
 built knowing to look there) and a man page. The BEAM NIF, npm/web
 assets, synthdefs and samples are not packaged (the latter two remain in the

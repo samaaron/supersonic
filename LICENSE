@@ -13,7 +13,7 @@ PARTICULAR PURPOSE. See the GNU Affero General Public License for more details.
 You should have received a copy of the GNU Affero General Public License along
 with this program (COPYING). If not, see <https://www.gnu.org/licenses/>.
 
-SuperSonic is scsynth running on clockwork. The licence above is that of the
+SuperSonic is a scsynth-compatible synth powered by clockwork. The licence above is that of the
 combined program. Each source file carries an SPDX-License-Identifier header
 giving the licence of that file, and some are more permissive than the whole.
 

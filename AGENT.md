@@ -1,6 +1,6 @@
 # SuperSonic
 
-SuperSonic is a port of SuperCollider's scsynth audio engine to work within the strict constraints of a web audioworklet. The goal is low latency and high reliability for long running sessions.
+SuperSonic is a scsynth-compatible synth powered by Clockwork, built to work within the strict constraints of a web audioworklet as well as natively. The goal is low latency and high reliability for long running sessions.
 
 Since 0.80 SuperSonic runs on [clockwork](https://github.com/samaaron/clockwork), a git submodule at `clockwork/`. clockwork provides the audio device IO, MIDI, OSC, gamepad input, transport clock, Ableton Link, the shared-memory segment, the browser client (`clockwork/js`) and the workers; SuperSonic provides the scsynth guest (`dsp/scsynth`), the native process (`host/`, `front/`), the JavaScript on top of clockwork's client (`js/supersonic.js` extends `Clockwork`), the tests and the packages. Changes to clockwork go to the clockwork repository; this repository then moves the submodule pointer.
 

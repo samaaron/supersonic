@@ -23,12 +23,12 @@ Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Suggests: jackd2 | pipewire-jack
 Description: low-latency scsynth-compatible audio synthesis server
- SuperSonic is SuperCollider's scsynth audio engine running on clockwork,
- a substrate providing audio device I/O, MIDI, OSC, game controller input,
- the transport clock and Ableton Link. The server accepts scsynth
- command-line flags and the scsynth OSC command set, so SuperCollider
- clients (such as Sonic Pi) can launch and drive it as a drop-in
- replacement for scsynth.
+ SuperSonic is a scsynth-compatible synth powered by clockwork, a substrate
+ providing audio device I/O, MIDI, OSC, game controller input, the transport
+ clock and Ableton Link. Its synthesis code was forked from SuperCollider's
+ scsynth. The server accepts scsynth's command-line flags and OSC commands,
+ so clients that start and drive scsynth, such as Sonic Pi, can start and
+ drive it the same way.
  .
  Ableton Link session sync (including Link Audio streaming), MIDI I/O,
  game controller input, and OSC cue networking are built in. Commands

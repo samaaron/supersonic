@@ -1,6 +1,6 @@
 # Building from Source
 
-SuperSonic is scsynth (`dsp/scsynth`) running on [clockwork](https://github.com/samaaron/clockwork),
+SuperSonic is its synth (`dsp/scsynth`, forked from SuperCollider's scsynth) running on [clockwork](https://github.com/samaaron/clockwork),
 which is a git submodule at `clockwork/`. Clone with the submodule, or fetch it
 afterwards:
 

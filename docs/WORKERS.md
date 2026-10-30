@@ -14,7 +14,7 @@ Normally you'd just call `supersonic.send()` - but workers are separate threads 
 
 You could have the worker send messages back to the main thread via `postMessage`, and have the main thread forward them to scsynth. But that puts the main thread back in the middle of every message - defeating the purpose of using a worker.
 
-The solution is to create a direct channel from the worker to scsynth running in the AudioWorklet. SuperSonic gives you an `OscChannel` for exactly this.
+The solution is to create a direct channel from the worker to the synth in the AudioWorklet. SuperSonic gives you an `OscChannel` for exactly this.
 
 You create an `OscChannel` with `createOscChannel` (after `init()`) and then you need to **transfer** it to the worker.
 

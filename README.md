@@ -16,24 +16,24 @@ This then led to a suite of powerful new live coding languages using **scsynth**
 
 _What if you didn't just bring your language to scsynth? What if you brought scsynth to your environment?_
 
-This is SuperSonic. All the synthesis power of the original **scsynth** - rearchitected to reach new places.
+This is SuperSonic: a scsynth-compatible synth powered by Clockwork, built to run in new places.
 
 # Welcome to SuperSonic
 
-**SuperSonic** is a complete reworking of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth** designed to run in new places - in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native server, or as a native shared library running directly in the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
+**SuperSonic** is a scsynth-compatible synth powered by [Clockwork](https://github.com/samaaron/clockwork). It started as a fork of [SuperCollider](https://supercollider.github.io/)'s audio synthesis engine **scsynth**, and keeps scsynth's OSC commands and SynthDefs working where it can. It runs in the browser as an [AudioWorklet](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorklet), as a standalone native server, and as a native shared library in the [BEAM](https://www.erlang.org/) via a NIF. Currently it has the following features:
 
 ### Built on clockwork
 
-SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwork). clockwork provides the audio device IO, MIDI, OSC, gamepad input, the transport clock and, natively, Ableton Link; scsynth provides the synthesis engine, node tree and UGens. The two connect through Clockwork's DSP API in `dsp_api.h`.
+[Clockwork](https://github.com/samaaron/clockwork) provides the audio device IO, MIDI, OSC transports, gamepad input, the transport clock and, natively, Ableton Link. SuperSonic provides the synthesis: the node tree, the UGens and SynthDefs. The two connect through Clockwork's DSP API in `dsp_api.h`.
 
 ### Core
 
-- **scsynth compatible** - *full OSC command compatibility with SuperCollider's scsynth. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
+- **scsynth compatible** - *scsynth's OSC commands and SynthDefs, with the [differences](docs/SCSYNTH_DIFFERENCES.md) listed. See the [command reference](docs/SCSYNTH_COMMAND_REFERENCE.md).*
 - **Live metrics** - *cheap, zero-copy telemetry in both transport modes: OSC throughput, scheduler depth and lateness, ring buffer fill and a live node-tree mirror. See [metrics](docs/METRICS.md).*
 - **Malloc-free audio path** - *zero allocation or blocking on the audio thread.*
 - **Scheduling in the engine** - *far-future bundles are held by the engine itself, timestamped to the sample; `/clearSched` cancels what is still waiting.*
 - **Cold swap** - *the engine can be rebuilt under a running client, for a device or rate change, with synthdefs and buffers restored by the client.*
-- **Upstream compatible** - *kept in sync with the official SuperCollider scsynth server.*
+- **Upstream fixes** - *fixes from SuperCollider's scsynth are taken where they apply. See the [sync guide](docs/UPSTREAM_SYNC_GUIDE.md).*
 
 ### Web
 
@@ -49,7 +49,7 @@ SuperSonic is scsynth running on [clockwork](https://github.com/samaaron/clockwo
 - **Ableton Link v4** - *tempo sync across the network plus streaming Link Audio in and out.*
 - **Live device and driver switching** - *hot-swap at runtime with automatic cold swap on rate mismatch.*
 - **Headless mode** - *high-resolution timer-driven processing for CI and containers.*
-- **scsynth's command line and OSC** - *a drop-in scsynth replacement over UDP, or TCP, Unix sockets, a named pipe or shared memory, with clockwork's `/clockwork/*` verbs for devices, MIDI, gamepad and the clock alongside. See the [native guide](docs/NATIVE.md).*
+- **scsynth's command line and OSC** - *started and driven as scsynth is, over TCP, a Unix socket, a named pipe or shared memory, behind a per-boot secret, with Clockwork's `/clockwork/*` verbs for devices, MIDI, gamepad and the clock alongside. See the [native guide](docs/NATIVE.md).*
 - **Plugin hosting** - *tracks of CLAP and VST3 plugins, run in a separate bridge process.*
 - **Session recording** - *the main output to WAV or FLAC.*
 

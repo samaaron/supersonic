@@ -70,6 +70,6 @@ See the main [SuperSonic repository](https://github.com/samaaron/supersonic) for
 ## License
 
 Mixed - see individual packages:
-- `supersonic-scsynth` and `supersonic-scsynth-core` - AGPL-3.0-or-later (scsynth on clockwork)
+- `supersonic-scsynth` and `supersonic-scsynth-core` - AGPL-3.0-or-later (the synth, powered by clockwork)
 - `supersonic-scsynth-synthdefs` - MIT
 - `supersonic-scsynth-samples` - CC0

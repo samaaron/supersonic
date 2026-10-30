@@ -1,7 +1,7 @@
 # The Native Server
 
-`supersonic` is SuperSonic as a program of its own: scsynth running on
-clockwork, with an audio device and a command port. It takes scsynth's
+`supersonic` is SuperSonic as a program of its own, with an audio device and
+a command port. It takes scsynth's
 command-line flags and answers scsynth's OSC commands, so a client that starts
 and drives scsynth can start and drive it the same way. Sonic Pi does.
 

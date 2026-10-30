@@ -47,7 +47,7 @@ Then serve the `wasm/` directory and `workers/clockwork_audio_worklet.js` from y
 
 ## License
 
-AGPL-3.0-or-later. The engine is scsynth (GPL-3.0-or-later, derived from [SuperCollider](https://supercollider.github.io/) by James McCartney and the SuperCollider community) running on clockwork (AGPL-3.0-or-later), and the combined work is AGPL.
+AGPL-3.0-or-later. The synthesis code is GPL-3.0-or-later, forked from [SuperCollider](https://supercollider.github.io/)'s scsynth by James McCartney and the SuperCollider community; it runs on clockwork (AGPL-3.0-or-later), and the combined work is AGPL.
 
 ## Related Packages
 

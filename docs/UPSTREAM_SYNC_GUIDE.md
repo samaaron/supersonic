@@ -9,7 +9,7 @@
 
 ## Overview
 
-Supersonic is a WASM port of SuperCollider's scsynth audio server. It originated from [SuperCollider PR #6569](https://github.com/supercollider/supercollider/pull/6569) but has diverged. This guide explains how to identify and backport relevant upstream changes from SuperCollider to supersonic.
+SuperSonic's synthesis code was forked from SuperCollider's scsynth (it began as [SuperCollider PR #6569](https://github.com/supercollider/supercollider/pull/6569)) and has diverged. This guide explains how to find upstream changes and take the ones that apply.
 
 ---
 

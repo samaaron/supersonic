@@ -69,8 +69,8 @@ await supersonic.init();
 Calling `init()` boots the scsynth audio engine. Behind the scenes this:
 
 1. Creates an AudioContext and AudioWorklet
-2. Loads the WebAssembly module containing scsynth
-3. Starts scsynth running in a dedicated high-priority audio thread
+2. Loads the WebAssembly module containing the synth
+3. Starts the synth in a dedicated high-priority audio thread
 
 This is an async operation - the `await` ensures we don't proceed until the engine is ready.
 

@@ -10,11 +10,12 @@ supersonic \- low-latency scsynth-compatible audio synthesis server
 .RI [ options ]
 .SH DESCRIPTION
 .B supersonic
-is a port of SuperCollider's scsynth audio engine focused on low latency and
-long-session reliability. It accepts scsynth command-line flags and the
-scsynth OSC command set, so SuperCollider clients (such as Sonic Pi) can
-launch and drive it as a drop-in replacement for
-.BR scsynth (1).
+is a scsynth-compatible synth powered by clockwork, focused on low latency
+and long-session reliability. Its synthesis code was forked from
+SuperCollider's scsynth. It accepts scsynth's command-line flags and OSC
+commands, so clients that start and drive
+.BR scsynth (1),
+such as Sonic Pi, can start and drive it the same way.
 .PP
 Commands arrive as OSC over one command transport, chosen by flag (TCP on
 127.0.0.1 by default for the address, a Unix socket, a Windows named pipe,
