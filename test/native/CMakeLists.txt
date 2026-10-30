@@ -154,9 +154,11 @@ target_include_directories(SuperSonicNativeTests PRIVATE
     ${SUPERSONIC_ROOT}/dsp/scsynth/synth/include/plugin_interface
     ${SUPERSONIC_ROOT}/dsp/scsynth/synth/include/server
 )
-# …and for the same reason, the guest's PUBLIC definition does not arrive
-# either. Its headers change shape under it.
-target_compile_definitions(SuperSonicNativeTests PRIVATE CLOCKWORK_GUEST=1)
+# …and for the same reason, on Linux the guest's PUBLIC definitions do not
+# arrive either. Its headers change shape under them (SC_HiddenWorld.h under
+# NO_LIBSNDFILE), so take them from the target.
+target_compile_definitions(SuperSonicNativeTests PRIVATE
+    $<TARGET_PROPERTY:scsynth,INTERFACE_COMPILE_DEFINITIONS>)
 
 target_compile_definitions(SuperSonicNativeTests PRIVATE
     CLOCKWORK_SYNTHDEFS_DIR="${SUPERSONIC_ROOT}/packages/supersonic-scsynth-synthdefs/synthdefs"
