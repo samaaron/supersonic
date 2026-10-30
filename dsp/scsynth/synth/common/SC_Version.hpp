@@ -21,16 +21,18 @@
 #include <string>
 #include <sstream>
 
+// SuperSonic: the upstream SuperCollider commit the scsynth fork was last
+// synced with (docs/UPSTREAM_SYNC_GUIDE.md); updated by every sync.
 static const int SC_VersionMajor = 3;
-static const int SC_VersionMinor = 14;
-static const int SC_VersionPatch = 1;
-static const char SC_VersionTweak[] = "";
-static const char SC_RefType[] = "tag";
-static const char SC_BranchOrTag[] = "Version-3.14.1";
-static const char SC_CommitHash[] = "8a3bc4f";
+static const int SC_VersionMinor = 15;
+static const int SC_VersionPatch = 0;
+static const char SC_VersionTweak[] = "-dev";
+static const char SC_RefType[] = "branch";
+static const char SC_BranchOrTag[] = "develop";
+static const char SC_CommitHash[] = "9a749de";
 
 // For backward compatibility in scsynth and supernova only.
-static const char SC_VersionPostfix[] = ".1";
+static const char SC_VersionPostfix[] = ".0-dev";
 
 static inline std::string SC_VersionString()
 {

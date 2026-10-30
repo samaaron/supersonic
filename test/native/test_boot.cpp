@@ -3,6 +3,9 @@
  */
 #include "EngineFixture.h"
 
+#include <fstream>
+#include <string>
+
 TEST_CASE("Engine boots and responds to /status", "[boot]") {
     EngineFixture fx;
 
@@ -25,7 +28,20 @@ TEST_CASE("/sync returns /synced with matching id", "[boot]") {
     CHECK(r.parsed().argInt(0) == 42);
 }
 
-TEST_CASE("/version returns version info", "[boot]") {
+// The upstream SuperCollider commit the scsynth fork was last synced with,
+// from the "**Last Sync Commit**:" line of docs/UPSTREAM_SYNC_GUIDE.md.
+static std::string lastSyncCommit() {
+    std::ifstream guide(std::string(SUPERSONIC_SOURCE_DIR) + "/docs/UPSTREAM_SYNC_GUIDE.md");
+    const std::string key = "**Last Sync Commit**: ";
+    for (std::string line; std::getline(guide, line);)
+        if (line.rfind(key, 0) == 0) return line.substr(key.size());
+    return {};
+}
+
+// /version.reply: program name, major, minor, patch and tweak, branch, commit.
+// The version is the upstream base the fork tracks, and the commit is the
+// one the sync guide records.
+TEST_CASE("/version reports the upstream base the scsynth fork is synced to", "[boot]") {
     EngineFixture fx;
 
     fx.send(osc_test::message("/version"));
@@ -33,8 +49,15 @@ TEST_CASE("/version returns version info", "[boot]") {
     REQUIRE(fx.waitForReply("/version.reply", r));
 
     auto p = r.parsed();
-    CHECK(!p.argString(0).empty());   // program name
-    CHECK(p.argCount() >= 3);         // name, major, minor at minimum
+    REQUIRE(p.argCount() == 6);
+    CHECK(p.argString(0) == "scsynth");
+    CHECK(p.argInt(1) == 3);
+    CHECK(p.argInt(2) == 15);
+    CHECK(p.argString(3) == ".0-dev");
+    CHECK(p.argString(4) == "develop");
+    const std::string commit = lastSyncCommit();
+    REQUIRE(!commit.empty());
+    CHECK(p.argString(5) == commit);
 }
 
 TEST_CASE("/notify responds with /done", "[boot]") {

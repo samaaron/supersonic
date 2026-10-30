@@ -159,6 +159,7 @@ target_compile_definitions(SuperSonicNativeTests PRIVATE
     # The process itself, for test_supersonic_binary.cpp to spawn.
     SUPERSONIC_BINARY="$<TARGET_FILE:SuperSonic>"
     CLOCKWORK_TEST_SYNTHDEFS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../synthdefs"
+    SUPERSONIC_SOURCE_DIR="${SUPERSONIC_ROOT}"
     CLOCKWORK_SAMPLES_DIR="${SUPERSONIC_ROOT}/packages/supersonic-scsynth-samples/samples"
     JUCE_APPLICATION_NAME_STRING="supersonic-tests"
     JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
