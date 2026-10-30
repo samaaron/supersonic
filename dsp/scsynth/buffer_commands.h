@@ -53,7 +53,8 @@ uint32_t       supersonic_returns_bytes(void);
 // nova's aligned malloc when there is none. Everything the server makes while
 // sound plays — a buffer's samples, a synth definition's tables, the piano
 // wavetable — is kept here and never with new or malloc, which clockwork keeps
-// off the audio thread. 16-aligned; NULL for 0 bytes, or when the heap is out.
+// off the audio thread. 64-byte aligned, as nova-simd's aligned vector loads
+// need (32 with AVX); NULL for 0 bytes, or when the heap is out.
 void*          supersonic_guest_alloc_bytes(size_t bytes);
 void           supersonic_guest_free_bytes(void* ptr);
 
