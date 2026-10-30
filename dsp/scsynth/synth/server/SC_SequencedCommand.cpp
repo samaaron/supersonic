@@ -120,6 +120,13 @@ constexpr size_t ERR_BUF_SIZE = 512;
         }                                                                                                              \
     }
 
+// SuperSonic: the Buf*Cmd stages index mSndBufUpdates[mBufIndex] unchecked, and
+// World_GetBuf / World_GetNRTBuf clamp an out-of-range index to 0, so Init
+// rejects any mBufIndex outside [0, mNumSndBufs).
+static bool BufIndexExists(World* inWorld, int inBufIndex) {
+    return inBufIndex >= 0 && (uint32)inBufIndex < inWorld->mNumSndBufs;
+}
+
 void SndBuf_Init(SndBuf* buf) {
     buf->data = nullptr;
     buf->channels = 0;
@@ -327,6 +334,8 @@ BufAllocCmd::BufAllocCmd(World* inWorld, const ReplyAddress* inReplyAddress):
 int BufAllocCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
     mNumFrames = msg.geti();
     mNumChannels = msg.geti(1);
 
@@ -383,6 +392,8 @@ int BufGenCmd::Init(const char* inData, int inSize) {
 
     sc_msg_iter msg(mSize, mData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     int32* genName = msg.gets4();
     if (!genName)
@@ -430,6 +441,8 @@ BufFreeCmd::BufFreeCmd(World* inWorld, const ReplyAddress* inReplyAddress):
 int BufFreeCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     GET_COMPLETION_MSG(msg);
 
@@ -489,6 +502,8 @@ BufZeroCmd::BufZeroCmd(World* inWorld, const ReplyAddress* inReplyAddress):
 int BufZeroCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     GET_COMPLETION_MSG(msg);
 
@@ -517,6 +532,8 @@ BufAllocReadCmd::BufAllocReadCmd(World* inWorld, const ReplyAddress* inReplyAddr
 int BufAllocReadCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     const char* filename = msg.gets();
     if (!filename)
@@ -566,6 +583,8 @@ BufReadCmd::BufReadCmd(World* inWorld, const ReplyAddress* inReplyAddress):
 int BufReadCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     const char* filename = msg.gets();
     if (!filename)
@@ -667,6 +686,8 @@ BufAllocReadChannelCmd::BufAllocReadChannelCmd(World* inWorld, const ReplyAddres
 int BufAllocReadChannelCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     const char* filename = msg.gets();
     if (!filename)
@@ -718,6 +739,8 @@ BufReadChannelCmd::BufReadChannelCmd(World* inWorld, const ReplyAddress* inReply
 int BufReadChannelCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     const char* filename = msg.gets();
     if (!filename)
@@ -772,6 +795,8 @@ int BufWriteCmd::Init(const char* inData, int inSize) {
     // format names are the client's concern now, at the gateway.
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
     const char* filename = msg.gets();
     if (!filename)
         return kSCErr_WrongArgType;
@@ -814,6 +839,8 @@ BufCloseCmd::BufCloseCmd(World* inWorld, const ReplyAddress* inReplyAddress):
 int BufCloseCmd::Init(const char* inData, int inSize) {
     sc_msg_iter msg(inSize, inData);
     mBufIndex = msg.geti();
+    if (!BufIndexExists(mWorld, mBufIndex))
+        return kSCErr_IndexOutOfRange;
 
     GET_COMPLETION_MSG(msg);
 

@@ -121,3 +121,34 @@ TEST_CASE("World_CopySndBuf: index == mNumSndBufs is out of range",
     // without locking/copying, so this isolates the boundary predicate.
     CHECK(World_CopySndBuf(&w, kNumBufs, &out, true, &changed) == kSCErr_IndexOutOfRange);
 }
+
+// /b_alloc, /b_free, /b_zero and /b_gen index mSndBufUpdates with the client's
+// buffer number, and World_GetBuf clamps an out-of-range number to buffer 0.
+// An out-of-range number gets /fail, and buffer 0 is unchanged.
+TEST_CASE("Buffer commands: a buffer number the World does not have is refused",
+          "[buffer][bounds][security]") {
+    EngineFixture fx;
+    fx.send(osc_test::message("/b_alloc", 0, 1024, 1));
+    OscReply r;
+    REQUIRE(fx.waitForReply("/done", r));
+
+    auto refused = [&](const osc_test::Packet& p, const char* cmd) {
+        fx.clearReplies();
+        fx.send(p);
+        REQUIRE(fx.waitForReply("/fail", r));
+        CHECK(r.parsed().argString(0) == cmd);
+    };
+    for (const int32_t bufnum : {int32_t(0x7FFFFFFF), int32_t(-1)}) {
+        refused(osc_test::message("/b_free", bufnum), "/b_free");
+        refused(osc_test::message("/b_zero", bufnum), "/b_zero");
+        refused(osc_test::message("/b_alloc", bufnum, 16, 1), "/b_alloc");
+        osc_test::Builder gen;
+        gen.begin("/b_gen") << bufnum << "sine1" << int32_t(7) << 1.0f;
+        refused(gen.end(), "/b_gen");
+    }
+
+    fx.clearReplies();
+    fx.send(osc_test::message("/b_query", 0));
+    REQUIRE(fx.waitForReply("/b_info", r));
+    CHECK(r.parsed().argInt(1) == 1024);
+}
