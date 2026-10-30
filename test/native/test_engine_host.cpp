@@ -12,6 +12,7 @@
 #include "EngineHost.h"
 #include "EngineFixture.h"
 #include "OscTestUtils.h"
+#include "TestSecret.h"
 
 #include <chrono>
 #include <cstring>
@@ -55,11 +56,12 @@ TEST_CASE("host args: the scsynth-shaped flags land in the engine's config", "[h
                               "-B", "127.0.0.1", "-b", "2048", "-n", "4096", "-i", "0", "-o", "2",
                               "-S", "44100", "-w", "128", "-c", "8192",
                               "--default-bpm", "60", "--app-name", "Probe", "--audio-driver", "CoreAudio",
-                              "--max-connections", "16", "--assets-mb", "64", "--headless",
+                              "--assets-mb", "64", "--headless", "--tcp", "4100",
                               "-D", "0", "-R", "0", "-l", "1" }, &err, &ok);
     INFO(err);
     REQUIRE(ok);
-    CHECK(o.cfg.udpPort == 4000);
+    CHECK(o.shmPort == 4000);
+    CHECK(o.cfg.shmSegment);
     CHECK(guestOption(o.cfg, "numAudioBusChannels") == "512");
     CHECK(guestOption(o.cfg, "realTimeMemorySize") == "65536");
     CHECK(o.cfg.bufferSize == 128);
@@ -75,7 +77,6 @@ TEST_CASE("host args: the scsynth-shaped flags land in the engine's config", "[h
     CHECK(o.cfg.defaultBpm == 60.0);
     CHECK(o.cfg.appName == "Probe");
     CHECK(o.cfg.audioDriver == "CoreAudio");
-    CHECK(o.maxConnections == 16);
     CHECK(o.cfg.assetsBytes == 64u * 1024u * 1024u);
     CHECK(o.cfg.headless);
     CHECK(o.headless);
@@ -87,25 +88,24 @@ TEST_CASE("host args: the scsynth-shaped flags land in the engine's config", "[h
 }
 
 TEST_CASE("host args: defaults, and what the host derives", "[host][args]") {
-    const Options o = parse({});
-    CHECK(o.cfg.udpPort == 57110);
+    const Options o = parse({ "--tcp", "4009" });
+    CHECK(o.shmPort == 57110);
+    CHECK(o.cfg.shmSegment);
     CHECK(o.cfg.sampleRate == 48000);
     CHECK(o.cfg.bufferSize == 0);
     CHECK(o.cfg.callbackWatchdog);
     CHECK(o.cfg.assetsBytes == 512u * 1024u * 1024u);   // address space, not memory
-    CHECK(o.maxConnections == 4);
     CHECK_FALSE(o.headless);
     CHECK(o.desiredInputChannels == ClockworkEngine::kAutoChannelCount);
     CHECK_FALSE(o.shmEndpoint.empty());
 
     // -u 0: no segment, no endpoint.
     const Options none = parse({ "-u", "0", "--tcp", "4010" });
-    CHECK(none.cfg.udpPort == 0);
+    CHECK_FALSE(none.cfg.shmSegment);
     CHECK(none.shmEndpoint.empty());
 
-    // Clamps: a thread bomb and a lane past the header's reach are both refused quietly.
-    const Options big = parse({ "--max-connections", "99999", "--assets-mb", "99999" });
-    CHECK(big.maxConnections == 1024);
+    // Clamp: a lane past the header's reach is refused quietly.
+    const Options big = parse({ "--assets-mb", "99999", "--tcp", "4011" });
     CHECK(big.cfg.assetsBytes == 3072u * 1024u * 1024u);
 }
 
@@ -113,39 +113,39 @@ TEST_CASE("host args: an unknown flag is reported, not silently applied", "[host
     // An unknown long flag may or may not take a value, so the word after it
     // is reported too; an unknown single-letter flag takes one, as all of
     // scsynth's do.
-    const Options o = parse({ "--no-such-flag", "7", "-q", "3", "-u", "4001" });
+    const Options o = parse({ "--no-such-flag", "7", "-q", "3", "-u", "4001", "--tcp", "4012" });
     REQUIRE(o.warnings.size() == 3);
     CHECK(o.warnings[0].find("--no-such-flag") != std::string::npos);
     CHECK(o.warnings[1].find("7") != std::string::npos);
     CHECK(o.warnings[2].find("-q") != std::string::npos);
-    CHECK(o.cfg.udpPort == 4001);   // parsing carried on past them
+    CHECK(o.shmPort == 4001);   // parsing carried on past them
 }
 
 TEST_CASE("host args: -H names the devices, scsynth's way", "[host][args]") {
-    const Options one = parse({ "-H", "MacBook Pro Speakers" });
+    const Options one = parse({ "-H", "MacBook Pro Speakers", "--tcp", "4013" });
     CHECK(one.cfg.hardwareDevice == "MacBook Pro Speakers");
     CHECK(one.cfg.inputDevice == "MacBook Pro Speakers");
-    const Options two = parse({ "-H", "Mic In", "Speakers Out", "-u", "4002" });
+    const Options two = parse({ "-H", "Mic In", "Speakers Out", "-u", "4002", "--tcp", "4014" });
     CHECK(two.cfg.inputDevice == "Mic In");
     CHECK(two.cfg.hardwareDevice == "Speakers Out");
-    CHECK(two.cfg.udpPort == 4002);
+    CHECK(two.shmPort == 4002);
 
     // A flag after one name is a flag, not the output.
-    const Options flagged = parse({ "-H", "MOTU M4", "-u", "4003" });
+    const Options flagged = parse({ "-H", "MOTU M4", "-u", "4003", "--tcp", "4015" });
     CHECK(flagged.cfg.inputDevice == "MOTU M4");
     CHECK(flagged.cfg.hardwareDevice == "MOTU M4");
-    CHECK(flagged.cfg.udpPort == 4003);
+    CHECK(flagged.shmPort == 4003);
 
     // The sentinels keep to their direction.
-    const Options noInputs = parse({ "-H", "__none__" });
+    const Options noInputs = parse({ "-H", "__none__", "--tcp", "4016" });
     CHECK(noInputs.cfg.inputDevice == "__none__");
     CHECK(noInputs.cfg.hardwareDevice.empty());
     CHECK(noInputs.cfg.numInputChannels == 0);   // inputs off, as it says
     CHECK(noInputs.desiredInputChannels == 0);
-    const Options followDefault = parse({ "-H", "__system__" });
+    const Options followDefault = parse({ "-H", "__system__", "--tcp", "4017" });
     CHECK(followDefault.cfg.hardwareDevice == "__system__");
     CHECK(followDefault.cfg.inputDevice.empty());
-    const Options both = parse({ "-H", "__none__", "MacBook Pro Speakers" });
+    const Options both = parse({ "-H", "__none__", "MacBook Pro Speakers", "--tcp", "4018" });
     CHECK(both.cfg.inputDevice == "__none__");
     CHECK(both.cfg.hardwareDevice == "MacBook Pro Speakers");
     CHECK(both.cfg.numInputChannels == 0);
@@ -156,7 +156,7 @@ TEST_CASE("host args: -H names the devices, scsynth's way", "[host][args]") {
 TEST_CASE("host args: a flag missing its value, or a number that is not one, stops the boot", "[host][args]") {
     for (const auto& args : std::vector<std::vector<std::string>>{
              { "-u" }, { "-u", "abc" }, { "-S", "48k" }, { "-i", "two" }, { "-Z" },
-             { "--tcp" }, { "--tcp", "x" }, { "--max-connections", "many" }, { "--assets-mb" },
+             { "--tcp" }, { "--tcp", "x" }, { "--assets-mb" },
              { "--default-bpm", "fast" }, { "-m" }, { "-H" } }) {
         std::string err;
         bool ok = true;
@@ -168,21 +168,53 @@ TEST_CASE("host args: a flag missing its value, or a number that is not one, sto
 }
 
 TEST_CASE("host args: a word that is not a flag, or a long single-dash flag, is reported", "[host][args]") {
-    const Options o = parse({ "stray", "-foo", "-u", "4006" });
+    const Options o = parse({ "stray", "-foo", "-u", "4006", "--tcp", "4019" });
     REQUIRE(o.warnings.size() == 2);
     CHECK(o.warnings[0].find("stray") != std::string::npos);
     CHECK(o.warnings[1].find("-foo") != std::string::npos);
-    CHECK(o.cfg.udpPort == 4006);
+    CHECK(o.shmPort == 4006);
 }
 
-TEST_CASE("host args: -u 0 with no other command transport is refused", "[host][args]") {
+TEST_CASE("host args: no command transport is refused, and so are two", "[host][args]") {
     std::string err;
     bool ok = true;
     parse({ "-u", "0" }, &err, &ok);
     CHECK_FALSE(ok);
-    CHECK(err.find("-u 0") != std::string::npos);
+    CHECK(err.find("no command transport") != std::string::npos);
+    parse({ "-u", "4008" }, &err, &ok);
+    CHECK_FALSE(ok);
+    parse({ "--tcp", "4007", "--uds", "/tmp/x.sock" }, &err, &ok);
+    CHECK_FALSE(ok);
+    CHECK(err.find("exactly one") != std::string::npos);
     parse({ "-u", "0", "--tcp", "4007" }, &err, &ok);
     CHECK(ok);
+}
+
+// The secret on stdin: one line of 64 hex digits, and nothing else is one.
+TEST_CASE("host secret: 64 hex digits and a newline on stdin, nothing else", "[host][secret]") {
+    auto read = [](const std::string& text, std::string* err) {
+        Options o;
+        FILE* f = tmpfile();   // fmemopen refuses an empty buffer; a file takes any text
+        REQUIRE(f);
+        REQUIRE(fwrite(text.data(), 1, text.size(), f) == text.size());
+        rewind(f);
+        const bool ok = supersonic_host::readSecret(o, f, err);
+        fclose(f);
+        CHECK(ok == (o.secret != nullptr));
+        return ok;
+    };
+    const std::string hex = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+    std::string err;
+    CHECK(read(hex + "\n", &err));
+    CHECK(read(hex + "\r\n", &err));
+    CHECK_FALSE(read("", &err));              CHECK(err.find("no secret") != std::string::npos);
+    CHECK_FALSE(read(hex, &err));             // no newline: stdin closed mid-line
+    CHECK_FALSE(read(hex.substr(2) + "\n", &err));
+    CHECK_FALSE(read(hex + "00\n", &err));
+    CHECK_FALSE(read(hex.substr(2) + "zz\n", &err));
+    CHECK_FALSE(read(std::string(64, '0') + "\n", &err)); CHECK(err.find("zeros") != std::string::npos);
+    Options none;
+    CHECK_FALSE(supersonic_host::readSecret(none, nullptr, &err));
 }
 
 // scsynth's -V is verbosity, and goes to the guest like its other flags; -v is
@@ -209,7 +241,7 @@ TEST_CASE("host args: at most one command transport, and the segment ones need a
     std::string err;
     parse({ "--tcp", "4003", "--uds", "/tmp/x.sock" }, &err, &ok);
     CHECK_FALSE(ok);
-    CHECK(err.find("at most one") != std::string::npos);
+    CHECK(err.find("exactly one") != std::string::npos);
     parse({ "-u", "0", "--shm-commands" }, &err, &ok);
     CHECK_FALSE(ok);
     CHECK(err.find("-u > 0") != std::string::npos);
@@ -230,16 +262,16 @@ TEST_CASE("host usage: a default the host chooses is the one the help shows", "[
     const std::string line = u.substr(d, u.find('\n', d) - d);
     INFO(line);
     CHECK(line.find("(default: 1)") != std::string::npos);
-    CHECK(parse({}).loadDefinitionsAtBoot);
-    CHECK_FALSE(parse({ "-D", "0" }).loadDefinitionsAtBoot);
+    CHECK(parse({ "--tcp", "4021" }).loadDefinitionsAtBoot);
+    CHECK_FALSE(parse({ "-D", "0", "--tcp", "4022" }).loadDefinitionsAtBoot);
 }
 
 TEST_CASE("host usage: every flag the parser knows is in the help text", "[host][args]") {
     const std::string u = supersonic_host::usage("Probe");
     CHECK(u.find("Probe") != std::string::npos);
     for (const char* flag : { "-u", "-S", "-Z", "-z", "-i", "-o", "-n", "-b", "-a", "-c", "-m", "-w", "-B", "-H",
-                              "--default-bpm", "--app-name", "--audio-driver", "--tcp", "--uds", "--uds-dgram",
-                              "--pipe", "--shm-commands", "--max-connections", "--assets-mb", "--shm-endpoint",
+                              "--default-bpm", "--app-name", "--audio-driver", "--tcp", "--uds",
+                              "--pipe", "--shm-commands", "--assets-mb", "--shm-endpoint",
                               "--headless", "--list-devices" })
         CHECK(u.find(flag) != std::string::npos);
 }
@@ -280,17 +312,6 @@ int freePort(int type) {
     return ntohs(sa.sin_port);
 }
 
-void sendUdp(int port, const osc_test::Packet& p) {
-    int fd = socket(AF_INET, SOCK_DGRAM, 0);
-    REQUIRE(fd >= 0);
-    sockaddr_in sa {};
-    sa.sin_family = AF_INET;
-    sa.sin_port = htons(static_cast<uint16_t>(port));
-    sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    REQUIRE(sendto(fd, p.ptr(), p.size(), 0, reinterpret_cast<sockaddr*>(&sa), sizeof sa) == static_cast<ssize_t>(p.size()));
-    close(fd);
-}
-
 int connectTcp(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     REQUIRE(fd >= 0);
@@ -301,7 +322,18 @@ int connectTcp(int port) {
     REQUIRE(connect(fd, reinterpret_cast<sockaddr*>(&sa), sizeof sa) == 0);
     timeval tv { 2, 0 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    // The secret first, as every client of a command port.
+    std::vector<uint8_t> auth(256);
+    auth.resize(clockwork_comms_secret_auth_packet(testSecret(), auth.data(), static_cast<uint32_t>(auth.size())));
+    const uint32_t be = htonl(static_cast<uint32_t>(auth.size()));
+    REQUIRE(write(fd, &be, 4) == 4);
+    REQUIRE(write(fd, auth.data(), auth.size()) == static_cast<ssize_t>(auth.size()));
     return fd;
+}
+// The options a transport test starts from: the flags, and the test's secret.
+Options withSecret(Options o) {
+    o.secret.reset(clockwork_comms_secret_clone(testSecret()));
+    return o;
 }
 void writeFramed(int fd, const osc_test::Packet& p) {
     const uint32_t be = htonl(static_cast<uint32_t>(p.size()));
@@ -328,46 +360,18 @@ std::vector<uint8_t> readFramed(int fd) {
 
 } // namespace
 
-TEST_CASE("host transports: UDP receives from the start and holds what arrives until the engine is ready",
-          "[host][transports][rt]") {
-    const int port = freePort(SOCK_DGRAM);
-    Options o = parse({ "-u", std::to_string(port), "-B", "127.0.0.1" });
-    IngestLog log;
+TEST_CASE("host transports: no secret, no transport", "[host][transports]") {
+    Options o = parse({ "-u", "0", "--tcp", "4020", "-B", "127.0.0.1" });
     CommandTransports t;
     std::string err;
-    IOscTransport* transport = t.select(o, nullptr, [&](const uint8_t* d, uint32_t n, uint32_t tok) { log.record(d, n, tok); }, &err);
-    INFO(err);
-    REQUIRE(transport != nullptr);
-    CHECK(t.description().find(std::to_string(port)) != std::string::npos);
-
-    // Before the engine is up: received and held, in order.
-    sendUdp(port, osc_test::message("/first"));
-    sendUdp(port, osc_test::message("/second"));
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    CHECK(log.count() == 0);
-
-    // The engine is up: the queue drains in order, and new packets go straight through.
-    REQUIRE(t.start());
-    REQUIRE(waitUntil([&] { return log.count() == 2; }));
-    CHECK(log.at(0).second == "/first");
-    CHECK(log.at(1).second == "/second");
-    sendUdp(port, osc_test::message("/third"));
-    REQUIRE(waitUntil([&] { return log.count() == 3; }));
-    CHECK(log.at(2).second == "/third");
-
-    // Stopped: nothing more arrives.
-    t.stop();
-    sendUdp(port, osc_test::message("/fourth"));
-    std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    CHECK(log.count() == 3);
-    t.stop();   // idempotent
+    CHECK(t.select(o, nullptr, [](const uint8_t*, uint32_t, uint32_t) {}, &err) == nullptr);
+    CHECK(err.find("secret") != std::string::npos);
 }
 
 TEST_CASE("host transports: TCP is the command port when asked, and a reply goes back to its sender",
           "[host][transports][rt]") {
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
-    Options o = parse({ "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1",
-                        "--max-connections", "2" });
+    Options o = withSecret(parse({ "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1" }));
     IngestLog log;
     CommandTransports t;
     std::string err;
@@ -394,55 +398,21 @@ TEST_CASE("host transports: TCP is the command port when asked, and a reply goes
 #endif
 
 #ifndef _WIN32
-namespace {
-// A UDP client that keeps its socket, to hear the reply.
-struct UdpClient {
-    int fd = -1;
-    UdpClient() {
-        fd = socket(AF_INET, SOCK_DGRAM, 0);
-        REQUIRE(fd >= 0);
-        sockaddr_in me {};
-        me.sin_family = AF_INET;
-        me.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        REQUIRE(bind(fd, reinterpret_cast<sockaddr*>(&me), sizeof me) == 0);
-        timeval tv { 3, 0 };
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-    }
-    ~UdpClient() { if (fd >= 0) close(fd); }
-    void send(int port, const osc_test::Packet& p) {
-        sockaddr_in sa {};
-        sa.sin_family = AF_INET;
-        sa.sin_port = htons(static_cast<uint16_t>(port));
-        sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        REQUIRE(sendto(fd, p.ptr(), p.size(), 0, reinterpret_cast<sockaddr*>(&sa), sizeof sa) == static_cast<ssize_t>(p.size()));
-    }
-    std::string recvAddress() {
-        uint8_t buf[65536];
-        const ssize_t n = recv(fd, buf, sizeof buf, 0);
-        if (n <= 0) return "";
-        return osc_test::parseAddress(buf, static_cast<uint32_t>(n));
-    }
-};
-} // namespace
-
 TEST_CASE("host egress pump: the engine's replies reach the socket through the client API, not the engine's gateway",
           "[host][egress][rt]") {
-    // The whole path a running host has, in one process: a UDP command port,
+    // The whole path a running host has, in one process: a TCP command port,
     // an engine that leaves its egress rings to the host, and the pump that
     // takes from them and routes to the transport.
-    const int port = freePort(SOCK_DGRAM);
-    Options o = parse({ "-u", std::to_string(port), "-B", "127.0.0.1", "--headless" });
+    const int port = freePort(SOCK_STREAM);
+    Options o = withSecret(parse({ "-u", "0", "--tcp", std::to_string(port), "-B", "127.0.0.1", "--headless" }));
     o.cfg.hostDrainsEgress = true;
     o.cfg.manualAudioPump = false;
-    o.cfg.udpPort = 0;   // the fixture's engine: no segment needed here
     o.cfg.headless = true;
 
     EngineFixture fx(o.cfg);
     CommandTransports t;
     std::string err;
-    Options wire = o;
-    wire.cfg.udpPort = port;
-    IOscTransport* transport = t.select(wire, nullptr,
+    IOscTransport* transport = t.select(o, nullptr,
         [&](const uint8_t* d, uint32_t n, uint32_t tok) { fx.engine().ingest(d, n, tok); }, &err);
     REQUIRE(transport != nullptr);
     fx.engine().setTransport(transport);   // the token registry is the transport's
@@ -452,11 +422,16 @@ TEST_CASE("host egress pump: the engine's replies reach the socket through the c
     supersonic_host::EgressPump pump(fx.engine(), *transport, [&](const std::string& s) { debug.push_back(s); });
     pump.start();
 
-    UdpClient c;
-    c.send(port, osc_test::message("/status"));
-    CHECK(c.recvAddress() == "/status.reply");
-    c.send(port, osc_test::message("/b_query", int32_t{0}));
-    CHECK(c.recvAddress() == "/b_info");
+    const int fd = connectTcp(port);
+    auto replyAddress = [&] {
+        const auto got = readFramed(fd);
+        return got.empty() ? std::string() : osc_test::parseAddress(got.data(), static_cast<uint32_t>(got.size()));
+    };
+    writeFramed(fd, osc_test::message("/status"));
+    CHECK(replyAddress() == "/status.reply");
+    writeFramed(fd, osc_test::message("/b_query", int32_t{0}));
+    CHECK(replyAddress() == "/b_info");
+    close(fd);
 
     // Stopped, the pump takes nothing more; the engine's own transport
     // never saw these (the fixture listens there).

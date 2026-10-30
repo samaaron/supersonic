@@ -23,7 +23,7 @@ prefix:
 ```bash
 supersonic -v      # prints "SuperSonic <version>" and exits
 supersonic -h      # prints the options and exits
-supersonic         # opens the default audio device and listens on UDP 57110
+supersonic --tcp 57110   # opens the default audio device and listens on TCP 57110
 ```
 
 Once it is up it prints a banner on stderr, under the SuperSonic logo:
@@ -34,17 +34,16 @@ Once it is up it prints a banner on stderr, under the SuperSonic logo:
   Compiled: synth Link Link-Audio MIDI Gamepad
   MacBook Pro Speakers (CoreAudio)
   48000 Hz | block 128 | buffer 128 | out 2 | in 0
-  UDP
+  TCP (one client)
 ```
 
 `Compiled:` lists what the build has. The next two lines give the device and
 its driver, then the rate, the DSP block size, the hardware buffer and the
 channels in use; `out 2/8` would mean 2 of the device's 8 outputs. With
 `--headless` one line, `headless (no audio device)`, takes their place. The
-last line is the command transport — `UDP`, `TCP (max 4 connections)`,
-`UDS stream socket (max 4 connections)`, `UDS dgram socket`,
-`named pipe (max 4 connections)` or `SHM command plane` — named without its
-port or path.
+last line is the command transport — `TCP (one client)`,
+`UDS stream socket (one client)`, `named pipe (one client)` or
+`SHM command plane` — named without its port or path.
 
 Ctrl-C stops it.
 
@@ -71,20 +70,26 @@ appear. Every other single-letter flag takes the word after it as its value.
 
 | Flag | Default | |
 |---|---|---|
-| `-u <port>` | 57110 | The UDP command port. It also numbers the shared-memory segment. `-u 0` opens neither, so pair it with one of the transports below or the server has no command port. |
-| `-B <addr>` | 127.0.0.1 | The address the UDP and TCP command ports bind. The default is IPv4 loopback only: other machines cannot reach the server. `0.0.0.0` binds every IPv4 interface. An empty address (`-B ""`) binds every IPv4 and IPv6 interface for UDP, and every IPv4 interface for TCP. |
+| `-u <port>` | 57110 | Numbers the shared-memory segment and its attach endpoint. `-u 0` creates no segment. Not a command port. |
+| `-B <addr>` | 127.0.0.1 | The address the TCP command port binds. The default is IPv4 loopback only: other machines cannot reach the server. `0.0.0.0` binds every IPv4 interface. |
 | `--tcp <port>` | | TCP command port. |
 | `--uds <path>` | | Unix stream socket (macOS, Linux). |
-| `--uds-dgram <path>` | | Unix datagram socket (macOS, Linux). |
 | `--pipe <name>` | | Named pipe (Windows). |
 | `--shm-commands` | | The shared-memory segment's command plane, for one trusted peer on the same machine. Needs `-u` > 0. |
 | `--shm-endpoint <path\|pipe>` | from `-u` | Where the shared-memory segment is served. Needs `-u` > 0. |
-| `--max-connections <n>` | 4 | Connections allowed at once on TCP, a Unix stream socket or a named pipe, 1–1024. |
 
-Pick at most one of `--tcp`, `--uds`, `--uds-dgram`, `--pipe` and
-`--shm-commands`. The one you pick replaces the UDP command port. The cue
-server and outbound OSC are unaffected.
+Pick exactly one of `--tcp`, `--uds`, `--pipe` and `--shm-commands`; there
+is no UDP command port. The cue server and outbound OSC are unaffected.
 [Connecting a client](#connecting-a-client) describes each.
+
+**The secret.** Every command transport, and the attach endpoint that hands
+out the shared-memory segment, asks a client for a per-boot secret. Whoever
+launches the server makes 32 random bytes and writes them to the server's
+stdin as 64 hex digits and a newline; the server reads that line before
+anything listens and exits without it. A client's first frame on a
+connection is `/clockwork/auth` with the 32 bytes as a blob; a connection
+that sends anything else first, or nothing within 2 s, is closed. A server
+serves one client at a time.
 
 ### Engine
 
@@ -141,20 +146,11 @@ The server exits with status 1 when:
 - two command transports are given, or `-u 0` with none of the others;
 - `--shm-commands` or `--shm-endpoint` is given with `-u 0`;
 - the engine cannot start (the log says why);
-- a TCP, Unix socket, named pipe or shared-memory transport cannot start —
-  the port is taken, the path cannot be used, the pipe name is held.
-
-A UDP port that cannot be bound is logged and the server carries on.
+- the command transport cannot start — the port is taken, the path cannot
+  be used, the pipe name is held;
+- there is no secret on stdin.
 
 ## Connecting a client
-
-### UDP
-
-The default. The port is open before the audio device is: commands sent while
-the device opens (an ASIO device can take more than ten seconds) are held, up
-to 1024 packets, and run in order once the engine is ready. Replies go to the
-address a command came from. A datagram carries at most 64 KB; use a stream
-transport for anything larger.
 
 ### TCP
 
@@ -163,17 +159,17 @@ supersonic --tcp 57120
 ```
 
 Each OSC packet is preceded by its length, as a 4-byte big-endian integer, in
-both directions. A packet may be up to 256 KB. The port binds the `-B`
-address. A connection beyond `--max-connections` is closed at once. A
+both directions; the first packet a client sends is the secret's
+`/clockwork/auth`. A packet may be up to 256 KB. The port binds the `-B`
+address. One client at a time: a second connection is closed at once. A
 client's notification subscriptions end with its connection.
 
-### Unix sockets (macOS, Linux)
+### Unix socket (macOS, Linux)
 
-`--uds <path>` is a stream socket framed as TCP is. `--uds-dgram <path>`
-carries one OSC packet per datagram; a client that wants replies binds a
-socket path of its own. The server removes any file already at the path,
-creates the socket and sets its mode to 0600. Put it in a directory only you
-can enter (mode 0700), which closes the gap between the two.
+`--uds <path>` is a stream socket framed as TCP is, secret included. The
+server removes any file already at the path, creates the socket and sets its
+mode to 0600. Put it in a directory only you can enter (mode 0700), which
+closes the gap between the two.
 
 ### Named pipe (Windows)
 

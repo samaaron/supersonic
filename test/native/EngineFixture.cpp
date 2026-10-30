@@ -32,7 +32,7 @@ ClockworkEngine::Config EngineFixture::defaultConfig() {
     ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
-    cfg.udpPort           = 0;
+    cfg.shmSegment           = false;
     setGuestOption(cfg, "numBuffers", 1024);
     setGuestOption(cfg, "maxNodes", 1024);
     setGuestOption(cfg, "maxGraphDefs", 512);

@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cerrno>
+#include <cctype>
 #include <cstring>
 #include <thread>
 #ifdef _WIN32
@@ -106,17 +107,18 @@ std::string usage(const char* productName) {
         "  --list-devices     List audio devices and exit\n"
         "  -U -R -l -I -O <value>  scsynth's; accepted and ignored\n"
         "\n"
-        "Command transports (pick at most one; it replaces the UDP command\n"
-        "port — the cue server and outbound OSC are unaffected; -u > 0 is\n"
-        "what creates the SHM segment, and -u 0 disables it):\n"
+        "Command transport (pick exactly one). Every transport asks the client\n"
+        "for the per-boot secret, which this process reads from its stdin at\n"
+        "boot: 64 hex digits and a newline, written by whoever launched it.\n"
+        "Nothing starts without it. The cue server and outbound OSC are\n"
+        "unaffected. -u <port> names the SHM segment (and its attach endpoint);\n"
+        "-u 0 means no segment:\n"
         "  --tcp <port>        TCP, OSC framed by a 4-byte big-endian length\n"
-        "                      (respects -B)\n"
+        "                      (respects -B); one client at a time\n"
         "  --uds <path>        Unix socket, stream (macOS/Linux; file 0600)\n"
-        "  --uds-dgram <path>  Unix socket, datagram (macOS/Linux; file 0600)\n"
         "  --pipe <name>       Named pipe (Windows; owner-only DACL)\n"
         "  --shm-commands      SHM segment's peer command plane (one trusted\n"
         "                      co-located peer; requires -u > 0)\n"
-        "  --max-connections <n>  Stream/pipe connection cap, 1-1024 (default 4)\n"
         "  --assets-mb <n>      The assets area lane a client loads samples and other\n"
         "                      assets into, in MB, 1-3072 (default 512). Address\n"
         "                      space, not memory: pages are committed as they are\n"
@@ -148,11 +150,35 @@ static bool wholeNumber(const char* s, long& out) {
     return errno == 0 && end && *end == '\0';
 }
 
+bool readSecret(Options& o, FILE* in, std::string* err) {
+    char line[80] = {};
+    if (!in || !std::fgets(line, sizeof line, in)) {
+        if (err) *err = "no secret on stdin: the launcher writes 64 hex digits and a newline";
+        return false;
+    }
+    const size_t n = std::strlen(line);
+    const bool shaped = (n == 65 && line[64] == '\n') || (n == 66 && line[64] == '\r' && line[65] == '\n');
+    uint8_t bytes[32];
+    for (int i = 0; shaped && i < 32; ++i) {
+        unsigned v = 0;
+        if (std::sscanf(line + 2 * i, "%2x", &v) != 1 || !std::isxdigit(static_cast<unsigned char>(line[2 * i]))
+            || !std::isxdigit(static_cast<unsigned char>(line[2 * i + 1]))) {
+            if (err) *err = "the secret on stdin is not 64 hex digits";
+            return false;
+        }
+        bytes[i] = static_cast<uint8_t>(v);
+    }
+    if (!shaped) { if (err) *err = "the secret on stdin is not 64 hex digits and a newline"; return false; }
+    o.secret.reset(clockwork_comms_secret_from_bytes(bytes));
+    if (!o.secret) { if (err) *err = "the secret on stdin is all zeros"; return false; }
+    return true;
+}
+
 bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
     ClockworkEngine::Config& cfg = o.cfg;
     cfg.sampleRate       = 48000;
     cfg.bufferSize       = 0;
-    cfg.udpPort          = 57110;
+    o.shmPort            = 57110;
     // Recover automatically if the device's callback thread wedges (e.g. a
     // DirectSound cursor-poll spin), so a standalone process keeps running.
     cfg.callbackWatchdog = true;
@@ -197,7 +223,6 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
             continue;
         }
         if (std::strcmp(arg, "--uds") == 0)          { if (!val) return missing(); o.udsStreamPath = val; ++i; continue; }
-        if (std::strcmp(arg, "--uds-dgram") == 0)    { if (!val) return missing(); o.udsDgramPath = val; ++i; continue; }
         if (std::strcmp(arg, "--pipe") == 0)         { if (!val) return missing(); o.pipeName = val; ++i; continue; }
         if (std::strcmp(arg, "--shm-commands") == 0) { o.shmCommands = true; continue; }
         if (std::strcmp(arg, "--shm-endpoint") == 0) { if (!val) return missing(); o.shmEndpoint = val; ++i; continue; }
@@ -207,15 +232,6 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
             // Header offsets are 32-bit: the lane and everything before it
             // must stay under 4 GB.
             assetsMb = n < 1 ? 1 : (n > 3072 ? 3072 : n);
-            ++i;
-            continue;
-        }
-        if (std::strcmp(arg, "--max-connections") == 0) {
-            if (!val) return missing();
-            if (!wholeNumber(val, n)) return notANumber();
-            // Clamp: the named-pipe backend pre-spawns one thread per
-            // connection slot, so an unclamped value is a thread bomb.
-            o.maxConnections = static_cast<uint32_t>(n < 1 ? 1 : (n > 1024 ? 1024 : n));
             ++i;
             continue;
         }
@@ -250,7 +266,7 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
         };
         {
             switch (arg[1]) {
-            case 'u': if (!number(cfg.udpPort))           return notANumber(); break;
+            case 'u': if (!number(o.shmPort))             return notANumber(); break;
             case 'i': if (!number(cfg.numInputChannels))  return notANumber(); break;
             case 'o': if (!number(cfg.numOutputChannels)) return notANumber(); break;
             case 'B': cfg.bindAddress = val; ++i; break;
@@ -297,27 +313,27 @@ bool parseArgs(int argc, char* const argv[], Options& o, std::string* err) {
 
     o.desiredInputChannels = cfg.numInputChannels;
 
-    const int alternatives = (o.tcpPort > 0 ? 1 : 0) + (o.udsStreamPath.empty() ? 0 : 1)
-                           + (o.udsDgramPath.empty() ? 0 : 1) + (o.pipeName.empty() ? 0 : 1)
-                           + (o.shmCommands ? 1 : 0);
-    if (alternatives > 1) {
-        if (err) *err = "pick at most one of --tcp / --uds / --uds-dgram / --pipe / --shm-commands";
+    const int transports = (o.tcpPort > 0 ? 1 : 0) + (o.udsStreamPath.empty() ? 0 : 1)
+                         + (o.pipeName.empty() ? 0 : 1) + (o.shmCommands ? 1 : 0);
+    if (transports > 1) {
+        if (err) *err = "pick exactly one of --tcp / --uds / --pipe / --shm-commands";
         return false;
     }
-    if (cfg.udpPort <= 0 && alternatives == 0) {
-        if (err) *err = "-u 0 leaves no command port: add --tcp, --uds, --uds-dgram or --pipe";
+    if (transports == 0) {
+        if (err) *err = "no command transport: add --tcp, --uds, --pipe or --shm-commands";
         return false;
     }
-    if (o.shmCommands && cfg.udpPort <= 0) {
+    cfg.shmSegment = o.shmPort > 0;
+    if (o.shmCommands && !cfg.shmSegment) {
         if (err) *err = "--shm-commands needs -u > 0 (-u > 0 is what creates the SHM segment)";
         return false;
     }
-    if (!o.shmEndpoint.empty() && cfg.udpPort <= 0) {
+    if (!o.shmEndpoint.empty() && !cfg.shmSegment) {
         if (err) *err = "--shm-endpoint needs -u > 0 (-u > 0 is what creates the SHM segment)";
         return false;
     }
-    if (cfg.udpPort > 0 && o.shmEndpoint.empty())
-        o.shmEndpoint = shm_attach::default_endpoint(static_cast<unsigned>(cfg.udpPort));
+    if (cfg.shmSegment && o.shmEndpoint.empty())
+        o.shmEndpoint = shm_attach::default_endpoint(static_cast<unsigned>(o.shmPort));
     cfg.headless    = o.headless;
     cfg.shmCommands = o.shmCommands;
     cfg.assetsBytes  = static_cast<size_t>(assetsMb) * 1024u * 1024u;
@@ -353,88 +369,38 @@ IOscTransport* CommandTransports::select(const Options& o, std::atomic<ShmPeerPl
         mKind = "SHM command plane";
         return &mShm;
     }
-    if (!o.udsDgramPath.empty()) {
-        mUdsDgram.setIngest(mIngest);
-        mUdsDgram.initialise(o.udsDgramPath);
-        mStart = [this] { return mUdsDgram.start(); };
-        snprintf(desc, sizeof desc, "UDS dgram socket %s", o.udsDgramPath.c_str());
-        mDesc = desc;
-        mKind = "UDS dgram socket";
-        return &mUdsDgram;
+    if (!(o.tcpPort > 0 || !o.udsStreamPath.empty() || !o.pipeName.empty())) {
+        if (err) *err = "no command transport chosen";
+        return nullptr;
     }
-    if (o.tcpPort > 0 || !o.udsStreamPath.empty() || !o.pipeName.empty()) {
-        mStream.setIngest(mIngest);
-        mStream.setMaxConnections(o.maxConnections);
-        const char* kind;
-        if (o.tcpPort > 0) {
-            mStream.initialiseTcp(o.tcpPort, cfg.bindAddress);
-            snprintf(desc, sizeof desc, "TCP port %d", o.tcpPort);
-            kind = "TCP";
-        } else if (!o.udsStreamPath.empty()) {
-            mStream.initialiseUds(o.udsStreamPath);
-            snprintf(desc, sizeof desc, "UDS stream socket %s", o.udsStreamPath.c_str());
-            kind = "UDS stream socket";
-        } else {
-            mStream.initialisePipe(o.pipeName);
-            snprintf(desc, sizeof desc, "named pipe %s", o.pipeName.c_str());
-            kind = "named pipe";
-        }
-        mStart = [this] { return mStream.start(); };
-        mDesc = desc;
-        mKind = std::string(kind) + " (max " + std::to_string(o.maxConnections) + " connections)";
-        return &mStream;
+    if (!o.secret) { if (err) *err = "no secret: the command transport asks every client for it"; return nullptr; }
+    mStream.setIngest(mIngest);
+    mStream.setSecret(o.secret.get());
+    const char* kind;
+    if (o.tcpPort > 0) {
+        mStream.initialiseTcp(o.tcpPort, cfg.bindAddress);
+        snprintf(desc, sizeof desc, "TCP port %d", o.tcpPort);
+        kind = "TCP";
+    } else if (!o.udsStreamPath.empty()) {
+        mStream.initialiseUds(o.udsStreamPath);
+        snprintf(desc, sizeof desc, "UDS stream socket %s", o.udsStreamPath.c_str());
+        kind = "UDS stream socket";
+    } else {
+        mStream.initialisePipe(o.pipeName);
+        snprintf(desc, sizeof desc, "named pipe %s", o.pipeName.c_str());
+        kind = "named pipe";
     }
-
-    // UDP, the default. Bound and receiving NOW, before the engine boots, so
-    // nothing a client sends during a slow device open (an ASIO open can take
-    // >10 s) bounces as ICMP port-unreachable and is lost — a client fires its
-    // subsystem subscriptions as soon as it boots, and a lost subscribe costs
-    // every event that subsystem would ever push. Packets queue here and
-    // flush, in arrival order, on start(); one that races the flush waits on
-    // the mutex and lands after it. UDP stays forgiving (scsynth-compatible):
-    // a bind failure is logged, not fatal.
-    mUdp.setIngest([this](const uint8_t* d, uint32_t n, uint32_t token) {
-        if (mReady.load(std::memory_order_acquire)) { mIngest(d, n, token); return; }
-        std::lock_guard<std::mutex> lk(mPendingMut);
-        if (mReady.load(std::memory_order_acquire)) { mIngest(d, n, token); return; }
-        if (mPending.size() < kMaxPending) {
-            mPending.emplace_back(std::vector<uint8_t>(d, d + n), token);
-        } else if (!mDropWarned) {
-            mDropWarned = true;
-            fprintf(stderr, CLOCKWORK_LOG_PREFIX "boot command queue full — dropping further packets until init completes\n");
-            fflush(stderr);
-        }
-    });
-    mUdp.initialise(cfg.udpPort, cfg.bindAddress);
-    if (cfg.udpPort > 0 && !mUdp.start()) {
-        fprintf(stderr, CLOCKWORK_LOG_PREFIX "failed to bind control port %d\n", cfg.udpPort);
-        fflush(stderr);
-    }
-    mStart = [this] {
-        std::lock_guard<std::mutex> lk(mPendingMut);
-        for (auto& p : mPending) mIngest(p.first.data(), static_cast<uint32_t>(p.first.size()), p.second);
-        if (!mPending.empty()) {
-            fprintf(stderr, CLOCKWORK_LOG_PREFIX "flushed %zu command packet(s) queued during boot\n", mPending.size());
-            fflush(stderr);
-        }
-        mPending.clear();
-        mReady.store(true, std::memory_order_release);
-        return true;
-    };
-    snprintf(desc, sizeof desc, "UDP port %d", cfg.udpPort);
+    mStart = [this] { return mStream.start(); };
     mDesc = desc;
-    mKind = "UDP";
-    return &mUdp;
+    mKind = std::string(kind) + " (one client)";
+    return &mStream;
 }
 
 bool CommandTransports::start() { return mStart ? mStart() : false; }
 
 void CommandTransports::stop() {
-    // Every receiving transport, so no recv thread is left feeding an
-    // engine that is coming down. Each stop() is idempotent.
-    mUdp.stop();
+    // No recv thread is left feeding an engine that is coming down.
     mStream.stop();
-    mUdsDgram.stop();
 }
 
 // ── The egress pump ──────────────────────────────────────────────────────────
@@ -486,13 +452,13 @@ void EgressPump::run() {
 
 bool serveSegment(shm_attach::server& server, ClockworkEngine& engine, const Options& o,
                   const std::function<void(const std::string&)>& log) {
-    if (o.cfg.udpPort <= 0) return false;
+    if (!o.cfg.shmSegment) return false;
     std::string err;
     if (!detail_shm_segment::shm_handle_valid(engine.shmNativeHandle())) {
         log("no shared-memory segment; attach endpoint not started");
         return false;
     }
-    if (server.start(o.shmEndpoint, engine.shmNativeHandle(), engine.shmSegmentSize(), &err)) {
+    if (server.start(o.shmEndpoint, engine.shmNativeHandle(), engine.shmSegmentSize(), o.secret.get(), &err)) {
         log("shared memory served at " + o.shmEndpoint);
         return true;
     }

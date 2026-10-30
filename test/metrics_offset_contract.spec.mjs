@@ -72,6 +72,7 @@ const CPP_TO_JS = {
   clock_drift_us:                'CLOCK_DRIFT_US',
   clock_anchors:                 'CLOCK_ANCHORS',
   scheduler_late_dropped: 'SCHEDULER_LATE_DROPPED',
+  cues_dropped:           'CUES_DROPPED',
 };
 
 // Pure padding slots — asserted in C++ for alignment but have no JS counterpart.

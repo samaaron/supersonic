@@ -11,7 +11,7 @@
  *
  *   supersonic::EmbeddedHost host;
  *   ClockworkEngine::Config cfg;            // the device, the guest's options
- *   cfg.udpPort = 57110;                    // > 0: a shared-memory segment for scopes and metrics (nothing is bound)
+ *   cfg.shmSegment = true;                    // > 0: a shared-memory segment for scopes and metrics (nothing is bound)
  *   cfg.assetsBytes = size_t(512) << 20;     // where samples are staged: hold the largest you will load (address space only)
  *   host.boot(cfg, { onMessage, onLog }, &err);
  *   host.loadDefinitions("/path/to/synthdefs", &why);
@@ -82,7 +82,7 @@ public:
 
     // Brings the engine up. Blocks for the boot. False, with `err`, when the
     // engine could not start (no device, an option the guest refused ...).
-    // `cfg.udpPort` > 0 creates the shared-memory segment (dupSegmentHandle);
+    // `cfg.shmSegment` creates the shared-memory segment (dupSegmentHandle);
     // no socket is ever bound by this host.
     bool boot(const ClockworkEngine::Config& cfg, Callbacks callbacks, std::string* err);
     // Takes the engine down in the order the rings need. Idempotent.

@@ -40,7 +40,6 @@ public:
     uint32_t broadcastLink(const uint8_t* data, uint32_t size) override { return broadcastIf(mLink, data, size); }
     bool hasNotifySubscribers() const override { std::lock_guard<std::mutex> lk(mMutex); return !mNotify.empty(); }
     bool subscribeNotify(uint32_t token) override { std::lock_guard<std::mutex> lk(mMutex); return mNotify.insert(token).second; }
-    bool subscribeNotifyPort(int) override { return false; }   // an in-process peer has no port: the caller is subscribed
     void unsubscribeNotify(uint32_t token) override { std::lock_guard<std::mutex> lk(mMutex); mNotify.erase(token); }
     void clearNotify() override { std::lock_guard<std::mutex> lk(mMutex); mNotify.clear(); }
     bool subscribeLink(uint32_t) override { mLink = true; return true; }

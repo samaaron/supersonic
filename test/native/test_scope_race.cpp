@@ -47,7 +47,7 @@ static ClockworkEngine::Config scopeStressConfig() {
     ClockworkEngine::Config cfg;
     cfg.sampleRate        = 48000;
     cfg.bufferSize        = 128;
-    cfg.udpPort           = 57200;  // non-zero enables shared memory
+    cfg.shmSegment           = true;  // non-zero enables shared memory
     setGuestOption(cfg, "numBuffers", 1024);
     setGuestOption(cfg, "maxNodes", 1024);
     setGuestOption(cfg, "maxGraphDefs", 512);

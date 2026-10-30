@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Transport harness (macOS/Linux) — boots the real SuperSonic binary once per
-# command transport (UDP, TCP, UDS stream, UDS datagram), sends /status over
-# that transport with the transport_probe client, and requires a reply.
+# command transport (TCP, UDS stream, the SHM command plane), sends /status
+# over that transport with the transport_probe client, and requires a reply.
+# The secret goes to the server's stdin at boot and to the probe's, as a
+# launcher would give it to both.
 # Headless throughout, so it runs on CI runners with no audio device.
 #
 #   test/transport-harness/run.sh [path-to-SuperSonic-binary]
@@ -26,11 +28,13 @@ PROBE="$REPO/clockwork/rust/target/debug/examples/transport_probe"
 
 SERVER_PID=""
 FAILURES=0
+SECRET="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 
-# boot <log> <server-args…> — start the server headless, remember its pid.
+# boot <log> <server-args…> — start the server headless with the secret on
+# its stdin, remember its pid.
 boot() {
     local log="$1"; shift
-    "$BIN" --headless -u 0 "$@" > "$log" 2>&1 &
+    printf '%s\n' "$SECRET" | "$BIN" --headless -u 0 "$@" > "$log" 2>&1 &
     SERVER_PID=$!
 }
 
@@ -38,7 +42,7 @@ boot() {
 # boot; retry the probe until it answers or ~10s elapse.
 probe_retry() {
     for _ in $(seq 1 20); do
-        if "$PROBE" "$1" "$2" 2>/dev/null; then
+        if printf '%s\n' "$SECRET" | "$PROBE" "$1" "$2" 2>/dev/null; then
             return 0
         fi
         kill -0 "$SERVER_PID" 2>/dev/null || return 1  # server died
@@ -48,9 +52,7 @@ probe_retry() {
 }
 
 # Medium end-to-end load per transport: enough to exercise the real engine's
-# ring drain + reply path without dominating CI wall-time. Stream transports
-# run saturated; datagram transports, which drop what does not fit, run with a
-# bounded window and must lose nothing (transport_probe's dgram_load).
+# ring drain + reply path without dominating CI wall-time.
 LOAD_COUNT=5000
 
 check() {
@@ -59,7 +61,7 @@ check() {
     local why=""
     if ! probe_retry "$proto" "$target"; then
         why="no reply"
-    elif ! "$PROBE" load "$proto" "$target" "$LOAD_COUNT"; then
+    elif ! printf '%s\n' "$SECRET" | "$PROBE" load "$proto" "$target" "$LOAD_COUNT"; then
         why="load failed"
     fi
     if [ -z "$why" ]; then
@@ -75,16 +77,13 @@ check() {
 }
 
 # Distinct ports/paths per transport so a leaked server can't cross-answer.
-UDP_PORT=$((20000 + RANDOM % 20000))
 TCP_PORT=$((20000 + RANDOM % 20000))
 SHM_PORT=$((20000 + RANDOM % 20000))
 
-check "udp"       udp       "127.0.0.1:$UDP_PORT" "$WORK/udp.log"  -u "$UDP_PORT"
 check "tcp"       tcp       "127.0.0.1:$TCP_PORT" "$WORK/tcp.log"  --tcp "$TCP_PORT" -B 127.0.0.1
 check "uds"       uds       "$WORK/uds.sock"      "$WORK/uds.log"  --uds "$WORK/uds.sock"
-check "uds-dgram" uds-dgram "$WORK/dg.sock"       "$WORK/dg.log"   --uds-dgram "$WORK/dg.sock"
 # SHM command plane: --shm-commands needs -u > 0 (the port names the segment);
-# the trailing -u overrides boot()'s -u 0 (last flag wins, as for udp).
+# the trailing -u overrides boot()'s -u 0 (last flag wins).
 check "shm"       shm       "$SHM_PORT"           "$WORK/shm.log"  -u "$SHM_PORT" --shm-commands
 
 if [ "$FAILURES" -gt 0 ]; then

@@ -31,6 +31,8 @@
 #include <fcntl.h>
 
 #include <chrono>
+#include <random>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -69,7 +71,37 @@ std::string logPath() {
     return (std::filesystem::temp_directory_path() / ("supersonic-binary-" + std::to_string(::getpid()) + ".log")).string();
 }
 
-// The process, with stderr to a file this test can read.
+// The secret this test launches the process with, as a launcher writes it
+// to the process's stdin, and presents on every connection.
+const std::array<uint8_t, 32>& secretBytes() {
+    static const std::array<uint8_t, 32> b = [] {
+        std::array<uint8_t, 32> s {};
+        std::random_device rd;
+        for (auto& x : s) x = static_cast<uint8_t>(rd());
+        s[0] |= 1;
+        return s;
+    }();
+    return b;
+}
+std::string secretLine() {
+    static const char hex[] = "0123456789abcdef";
+    std::string line;
+    for (const uint8_t b : secretBytes()) { line += hex[b >> 4]; line += hex[b & 15]; }
+    return line + "\n";
+}
+// The first frame on a connection: /clockwork/auth with the secret as a blob.
+std::vector<uint8_t> authFrame() {
+    std::vector<uint8_t> f(60, 0);
+    f[3] = 56;
+    std::memcpy(f.data() + 4, "/clockwork/auth\0", 16);
+    std::memcpy(f.data() + 20, ",b\0\0", 4);
+    f[27] = 32;
+    std::memcpy(f.data() + 28, secretBytes().data(), 32);
+    return f;
+}
+
+// The process, with the secret on its stdin and stderr to a file this test
+// can read.
 struct Process {
     pid_t pid = -1;
     std::string log;
@@ -81,14 +113,23 @@ struct Process {
         std::vector<char*> argv;
         for (auto& a : all) argv.push_back(a.data());
         argv.push_back(nullptr);
+        int in[2];
+        REQUIRE(pipe(in) == 0);
         pid = fork();
         REQUIRE(pid >= 0);
         if (pid == 0) {
+            close(in[1]);
+            dup2(in[0], 0);
+            close(in[0]);
             const int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
             if (fd >= 0) { dup2(fd, 2); dup2(fd, 1); close(fd); }
             execv(argv[0], argv.data());
             _exit(127);
         }
+        close(in[0]);
+        const std::string line = secretLine();
+        REQUIRE(write(in[1], line.data(), line.size()) == static_cast<ssize_t>(line.size()));
+        close(in[1]);
     }
     // Sends the signal; returns the exit status, or -1 if it did not exit in time.
     int kill(int sig, int timeoutMs = 10000) {
@@ -124,6 +165,8 @@ struct Client {
             if (connect(fd, reinterpret_cast<sockaddr*>(&sa), sizeof sa) == 0) {
                 timeval tv { 5, 0 };
                 setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+                const auto auth = authFrame();
+                REQUIRE(write(fd, auth.data(), auth.size()) == static_cast<ssize_t>(auth.size()));
                 return true;
             }
             close(fd); fd = -1;
@@ -174,7 +217,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
     Process p;
     p.start({ "--headless", "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort),
-              "--max-connections", "4", "-B", "127.0.0.1", "--assets-mb", "32" });
+              "-B", "127.0.0.1", "--assets-mb", "32" });
 
     Client c;
     REQUIRE(c.connectWithin(tcpPort, 20000));
@@ -205,7 +248,7 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
     ClockworkStatus st = CLOCKWORK_OK;
     ClockworkClient* shm = nullptr;
     for (int i = 0; i < 50 && !shm; ++i) {
-        shm = clockwork_client_open_shm(endpoint, &st);
+        shm = clockwork_client_open_shm(endpoint, secretBytes().data(), &st);
         if (!shm) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     REQUIRE(shm != nullptr);
@@ -338,7 +381,7 @@ TEST_CASE("the SuperSonic binary: /clockwork/summary sends the version and featu
     CHECK(log.find(versionLine + "\n  " + features + "\n") != std::string::npos);
     CHECK(count(log, "Compiled:") == 1);
     CHECK(count(log, "headless (no audio device)") == 1);
-    CHECK(count(log, "TCP (max 4 connections)") == 1);
+    CHECK(count(log, "TCP (one client)") == 1);
     CHECK(log.find('\x01') == std::string::npos);   // the GUI's marker stays out of the log
     CHECK(log.find("TCP port") == std::string::npos);
     CHECK(log.find("port " + std::to_string(tcpPort)) == std::string::npos);

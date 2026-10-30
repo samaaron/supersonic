@@ -13,7 +13,7 @@
 
 static ClockworkEngine::Config scopeConfig() {
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
-    cfg.udpPort       = 57199;  // Non-zero enables shared memory (needed for scope buffers)
+    cfg.shmSegment       = true;  // Non-zero enables shared memory (needed for scope buffers)
     return cfg;
 }
 

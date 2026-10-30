@@ -61,7 +61,7 @@ int main(int argc, char* argv[]) {
             engine.onReply = [](const uint8_t*, uint32_t) {};
             ClockworkEngine::Config cfg;
             cfg.headless = false;
-            cfg.udpPort  = 0;
+            cfg.shmSegment = false;
             engine.init(cfg);
             printDeviceList(engine);
             engine.shutdown();
@@ -74,6 +74,8 @@ int main(int argc, char* argv[]) {
     std::string err;
     if (!parseArgs(argc, argv, o, &err)) { log("ERROR: " + err); return 1; }
     for (const auto& w : o.warnings) log(w);
+    // The launcher's secret, before anything listens: no secret, no ports.
+    if (!readSecret(o, stdin, &err)) { log("ERROR: " + err); return 1; }
 #ifdef __APPLE__
     const std::string micStatus = applyMicPermissionGuard(o);
 #endif

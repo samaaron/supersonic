@@ -18,15 +18,16 @@
 
 #include "ClockworkEngine.h"
 #include "IOscTransport.h"
-#include "UdpOscTransport.h"
 #include "StreamOscTransport.h"
-#include "UdsDgramOscTransport.h"
 #include "ShmTransport.h"
 #include "shm_attach.hpp"
+#include "clockwork_comms_secret.h"
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -38,12 +39,15 @@ namespace supersonic_host {
 // Everything the command line says, and what the host derives from it.
 struct Options {
     ClockworkEngine::Config cfg;          // the host's defaults, then the flags
+    int         shmPort = 0;              // -u: names the segment and its endpoint; 0 = no segment
     int         tcpPort = 0;
-    std::string udsStreamPath, udsDgramPath, pipeName;
+    std::string udsStreamPath, pipeName;
     std::string shmEndpoint;              // derived from -u when not given
     bool        shmCommands = false;
-    uint32_t    maxConnections = 4;
     bool        headless = false;
+    // The per-boot secret every command port and the attach endpoint ask a
+    // client for (clockwork_comms_secret.h): read from stdin by readSecret.
+    std::unique_ptr<ClockworkCommsSecret, void (*)(ClockworkCommsSecret*)> secret { nullptr, &clockwork_comms_secret_free };
     // Inputs as asked for, before any platform guard zeroes them (macOS mic
     // permission): what to restore once the guard lifts.
     int         desiredInputChannels = ClockworkEngine::kAutoChannelCount;
@@ -57,16 +61,18 @@ struct Options {
 std::string usage(const char* productName);
 
 // argv into `out`. False, with `err`, on a combination that cannot run: two
-// command transports, or a segment flag without the -u > 0 that makes one.
-// -v, --help and --list-devices are the caller's: they need the product's
-// name or an engine.
+// command transports or none, or a segment flag without the -u > 0 that
+// makes one. -v, --help and --list-devices are the caller's: they need the
+// product's name or an engine.
 bool parseArgs(int argc, char* const argv[], Options& out, std::string* err);
+
+// The secret from `in` (the process's stdin): one line of 64 hex digits.
+// False, with `err`, for anything else; a transport does not start without it.
+bool readSecret(Options& out, FILE* in, std::string* err);
 
 // The command transport, chosen from the options and wired to `ingest` —
 // the caller's function, so a product may stand in front of the engine.
-// UDP binds and receives as soon as it is selected and holds what arrives
-// until start(); a connection-oriented transport starts on start(). Both
-// happen around engine.init: select before, start after.
+// Selected before engine.init and started after it, once the rings exist.
 class CommandTransports {
 public:
     using Ingest = std::function<void(const uint8_t*, uint32_t, uint32_t)>;
@@ -84,22 +90,12 @@ public:
     const std::string& kind() const { return mKind; }
 
 private:
-    UdpOscTransport      mUdp;
     StreamOscTransport   mStream;
-    UdsDgramOscTransport mUdsDgram;
     ShmTransport         mShm;
     Ingest               mIngest;
     std::function<bool()> mStart;
     std::string          mDesc;
     std::string          mKind;
-
-    // UDP's boot queue: what arrives before the engine can ingest.
-    static constexpr size_t kMaxPending = 1024;
-    std::mutex        mPendingMut;
-    std::vector<std::pair<std::vector<uint8_t>, uint32_t>> mPending;
-    std::atomic<bool> mReady { false };
-    bool              mDropWarned = false;
-    std::function<void(const std::string&)> mLog;
 };
 
 // The egress pump: the host is the consumer of the engine's two egress

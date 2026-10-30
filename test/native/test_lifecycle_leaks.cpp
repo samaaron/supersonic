@@ -151,7 +151,7 @@ TEST_CASE("Repeated init/shutdown does not leak FDs or threads", "[lifecycle][st
 
     ClockworkEngine::Config cfg;
     cfg.headless = true;
-    cfg.udpPort  = 0;
+    cfg.shmSegment  = false;
 
     // Warm-up cycle: first boot allocates one-shot caches (JUCE's device-type
     // list, sndfile lookup tables, etc.) that persist until process exit and
@@ -270,7 +270,7 @@ TEST_CASE("Partial-init failure cleans up allocated resources",
     // exercised here; that path needs a non-headless test environment.
     ClockworkEngine::Config cfg;
     cfg.headless = true;
-    cfg.udpPort  = 0;
+    cfg.shmSegment  = false;
 
     {
         ClockworkEngine engine;

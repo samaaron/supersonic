@@ -1,10 +1,12 @@
 # Transport harness (Windows) -- boots the real SuperSonic binary once per
-# command transport (UDP, TCP, named pipe, SHM), sends /status over that transport
+# command transport (TCP, named pipe, SHM), sends /status over that transport
 # with the transport_probe client, and requires a reply. Headless throughout.
+# The secret goes to the server's stdin at boot and to the probe's, as a
+# launcher would give it to both.
 #
 #   powershell -File test\transport-harness\run.ps1 [path-to-SuperSonic.exe]
 #
-# Exit 0 = every transport answered. macOS/Linux (UDP/TCP/UDS) is run.sh.
+# Exit 0 = every transport answered. macOS/Linux (TCP/UDS/SHM) is run.sh.
 #
 # CI runs it on the windows-x64 runner; it has also run on Windows on ARM.
 param([string]$Bin = "")
@@ -22,10 +24,16 @@ Pop-Location
 $Probe = Join-Path $Repo "clockwork\rust\target\debug\examples\transport_probe.exe"
 
 $Failures = 0
+# The secret, as a file both processes read as their stdin.
+$SecretFile = Join-Path $env:TEMP "ss-harness-secret-$PID.txt"
+$Secret = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Minimum 0 -Maximum 256) })
+Set-Content -Path $SecretFile -Value $Secret -NoNewline
+Add-Content -Path $SecretFile -Value "`n" -NoNewline
 
 function Check($Name, $Proto, $Target, $ServerArgs) {
     $log = Join-Path $env:TEMP "ss-harness-$Name.log"
     $proc = Start-Process -FilePath $Bin -ArgumentList (@("--headless", "-u", "0") + $ServerArgs) `
+        -RedirectStandardInput $SecretFile `
         -RedirectStandardError $log -RedirectStandardOutput "$log.out" -PassThru -NoNewWindow
     $ok = $false
     # The server binds its transport shortly after boot, so the first probes
@@ -35,6 +43,7 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
     foreach ($i in 1..20) {
         # The probe blocks <=3s itself; treat a hung pipe read as failure too.
         $p = Start-Process -FilePath $Probe -ArgumentList @($Proto, $Target) `
+            -RedirectStandardInput $SecretFile `
             -RedirectStandardError $smokeErr -PassThru -NoNewWindow -Wait
         if ($p.ExitCode -eq 0) { $ok = $true; break }
         if ($proc.HasExited) { break }
@@ -45,7 +54,7 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
     # ids through the real engine, verify the /synced replies.
     if ($ok) {
         $lp = Start-Process -FilePath $Probe -ArgumentList @("load", $Proto, $Target, "$LoadCount") `
-            -PassThru -NoNewWindow -Wait
+            -RedirectStandardInput $SecretFile -PassThru -NoNewWindow -Wait
         if ($lp.ExitCode -ne 0) { $ok = $false }
     }
     if ($ok) {
@@ -61,17 +70,16 @@ function Check($Name, $Proto, $Target, $ServerArgs) {
 # Medium end-to-end load per transport (see run.sh for rationale).
 $LoadCount = 5000
 
-$UdpPort = Get-Random -Minimum 20000 -Maximum 40000
 $TcpPort = Get-Random -Minimum 20000 -Maximum 40000
 $ShmPort = Get-Random -Minimum 20000 -Maximum 40000
 $Pipe    = "ss-harness-$PID"
 
-Check "udp"  "udp"  "127.0.0.1:$UdpPort" @("-u", "$UdpPort")
 Check "tcp"  "tcp"  "127.0.0.1:$TcpPort" @("--tcp", "$TcpPort", "-B", "127.0.0.1")
 Check "pipe" "pipe" $Pipe                @("--pipe", $Pipe)
 # SHM command plane: --shm-commands needs -u > 0 (the port names the segment);
-# the trailing -u overrides the -u 0 in Check (last flag wins, as for udp).
+# the trailing -u overrides the -u 0 in Check (last flag wins).
 Check "shm"  "shm"  "$ShmPort"           @("-u", "$ShmPort", "--shm-commands")
 
+Remove-Item -Path $SecretFile -ErrorAction SilentlyContinue
 if ($Failures -gt 0) { Write-Host "harness: $Failures transport(s) failed"; exit 1 }
 Write-Host "harness: all transports answered"

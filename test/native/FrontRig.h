@@ -46,7 +46,6 @@ struct RecordingSink final : IOscTransport {
     uint32_t broadcastLink(const uint8_t*, uint32_t) override { return 0; }
     bool hasNotifySubscribers() const override { return false; }
     bool subscribeNotify(uint32_t) override { return false; }
-    bool subscribeNotifyPort(int) override { return false; }
     void unsubscribeNotify(uint32_t) override {}
     void clearNotify() override {}
     bool subscribeLink(uint32_t) override { return false; }

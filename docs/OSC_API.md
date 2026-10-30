@@ -35,30 +35,27 @@ Every verb says which hosts answer it:
 
 ### Getting messages in
 
-**S.** UDP by default.
+**S.** One command transport, chosen by flag; there is no UDP command port.
 
 | Flag | Default | |
 |---|---|---|
-| `-u <port>` | `57110` | UDP command port. `-u 0` turns UDP off, and the shared-memory segment with it. |
-| `-B <addr>` | `127.0.0.1` | Bind address, for UDP and TCP. |
-
-UDP is bound before the engine boots. Up to 1024 packets that arrive
-during boot are held and handled in order once it is up.
-
-At most one alternative transport may replace the UDP command port:
+| `-u <port>` | `57110` | Numbers the shared-memory segment and its attach endpoint; `-u 0` creates none. |
+| `-B <addr>` | `127.0.0.1` | Bind address for TCP. |
 
 | Flag | Transport |
 |---|---|
 | `--tcp <port>` | TCP, bound to `-B` |
 | `--uds <path>` | Unix-domain stream socket (macOS, Linux; file mode 0600) |
-| `--uds-dgram <path>` | Unix-domain datagram socket (macOS, Linux; file mode 0600) |
 | `--pipe <name>` | Named pipe (Windows; owner-only) |
 | `--shm-commands` | The shared-memory segment's command plane: one trusted peer on the same machine. Needs `-u > 0`. |
 
 On TCP, UDS stream and named pipes each OSC packet is preceded by its
-length as a 4-byte big-endian integer. A connection is a client: its
-subscriptions end when it closes. `--max-connections <n>` caps them
-(default 4).
+length as a 4-byte big-endian integer, and the first packet a client sends
+is `/clockwork/auth` with the per-boot secret as a 32-byte blob: the server
+reads the secret from its stdin at boot (64 hex digits and a newline), and
+closes a connection whose first packet is anything else. One client at a
+time; its subscriptions end when it closes. The attach endpoint that hands
+out the shared-memory segment asks for the same frame first.
 
 **N.** No socket. `clockwork:send_osc/1` takes one packet. Every reply and
 push goes to every registered process as `{osc_reply, Binary}`.
@@ -84,8 +81,8 @@ Replies arrive on its `in` and `in:osc` events.
 - **A bundle is scsynth's**, whole and unopened. A `/clockwork/` message
   inside a bundle reaches scsynth and is dropped there. To time a clockwork
   verb, wrap it in [`/clockwork/schedule`](#scheduling).
-- A reply goes to the sender: a UDP source address, or a stream
-  connection. A push goes to an audience: the notify targets
+- A reply goes to the sender: a stream connection, or the shared-memory
+  peer. A push goes to an audience: the notify targets
   ([`/clockwork/notify`](#notify-and-lifecycle)) or a subsystem's
   subscribers.
 - `/clockwork/debug s:line` is the engine's log. S prints it to stderr and
@@ -176,10 +173,9 @@ device report follows a successful change.
 
 `→ /clockwork/devices/report [i:replyPort]`
 
-No argument, or 0: the sender becomes a notify target. `replyPort > 0`:
-over UDP, `127.0.0.1:replyPort` becomes one; over any other transport the
-sender does, as with no argument. No direct reply: the report is four pushes to
-every notify target, in this order (tolerate any):
+The sender becomes a notify target; the argument named a reply port when the
+command port was UDP, and is accepted and ignored. No direct reply: the
+report is four pushes to every notify target, in this order (tolerate any):
 
 1. `← /clockwork/device-table s:currentDriver s:intendedDriver i:numDrivers`,
    then per driver `s:driver i:numOutputs (s:name s:flags)… i:numInputs (s:name s:flags)…`.

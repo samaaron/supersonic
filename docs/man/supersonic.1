@@ -16,9 +16,9 @@ scsynth OSC command set, so SuperCollider clients (such as Sonic Pi) can
 launch and drive it as a drop-in replacement for
 .BR scsynth (1).
 .PP
-Commands arrive as OSC over UDP by default, on 127.0.0.1 only. Alternative
-command transports (TCP, Unix sockets, a Windows named pipe, shared memory)
-can be selected with the transport options below. Ableton Link session sync
+Commands arrive as OSC over one command transport, chosen by flag (TCP on
+127.0.0.1 by default for the address, a Unix socket, a Windows named pipe,
+shared memory), every one of which asks a client for the per-boot secret. Ableton Link session sync
 (including Link Audio streaming), MIDI I/O, game controller input, and OSC cue
 networking are built in; a client turns them on, or subscribes to them,
 with OSC commands.
@@ -78,15 +78,14 @@ tests and CI.
 .SS Network
 .TP
 .BI \-u " port"
-UDP command port (default: 57110). It also numbers the shared-memory segment;
+Numbers the shared-memory segment and its attach endpoint (default: 57110);
 .B \-u 0
-opens neither, so give one of the other command transports with it.
+creates none. Not a command port: give one of the command transports below.
 .TP
 .BI \-B " addr"
-Address the UDP and TCP command ports bind (default: 127.0.0.1).
+Address the TCP command port binds (default: 127.0.0.1).
 .B 0.0.0.0
-binds every IPv4 interface. An empty address binds every IPv4 and IPv6
-interface for UDP, and every IPv4 interface for TCP.
+binds every IPv4 interface.
 .SS Engine
 Each value goes to the engine, which refuses one outside its range with a
 log line naming it. The process then stays up without a running synth.
@@ -152,7 +151,12 @@ scsynth's options, accepted and ignored.
 .PP
 An unknown option is reported in the log and skipped.
 .SS Command transports
-Pick at most one; it replaces the UDP command port. The cue server and
+Pick exactly one; there is no UDP command port. Every transport asks a client
+for the per-boot secret, which the server reads from its stdin at boot as 64
+hex digits and a newline, written by whoever launched it; the server exits
+without it. A client's first packet is
+.B /clockwork/auth
+with the 32 bytes as a blob. One client at a time. The cue server and
 outbound OSC are unaffected, and
 .B \-u
 still numbers the shared-memory segment.
@@ -165,10 +169,6 @@ address.
 .TP
 .BI \-\-uds " path"
 Unix socket, stream, framed as for TCP (macOS and Linux; file mode 0600).
-.TP
-.BI \-\-uds\-dgram " path"
-Unix socket, datagram, one OSC packet each (macOS and Linux; file mode 0600).
-A client that wants replies binds a path of its own.
 .TP
 .BI \-\-pipe " name"
 Windows named pipe
@@ -227,9 +227,8 @@ or
 .B \-\-shm\-endpoint
 is given with
 .BR "\-u 0" ;
-the engine cannot start; or a TCP, Unix socket, named pipe or shared-memory
-command transport cannot start. A UDP port that cannot be bound is logged and
-the server carries on.
+the engine cannot start; the command transport cannot start; or there is no
+secret on stdin.
 .SH SEE ALSO
 .BR scsynth (1),
 .BR jackd (1)

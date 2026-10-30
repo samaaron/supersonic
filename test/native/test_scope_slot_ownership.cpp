@@ -30,7 +30,7 @@ namespace {
 
 ClockworkEngine::Config scopeOwnershipConfig() {
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
-    cfg.udpPort           = 57210;  // non-zero enables shared memory
+    cfg.shmSegment           = true;  // non-zero enables shared memory
     setGuestOption(cfg, "numBuffers", 64);
     setGuestOption(cfg, "maxNodes", 256);
     setGuestOption(cfg, "maxGraphDefs", 64);

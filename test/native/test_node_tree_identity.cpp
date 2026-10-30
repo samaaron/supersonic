@@ -21,7 +21,7 @@
 namespace {
 ClockworkEngine::Config segmentConfig(unsigned port) {
     ClockworkEngine::Config cfg = EngineFixture::defaultConfig();
-    cfg.udpPort       = port;   // non-zero: the public shm segment exists
+    cfg.shmSegment       = true;   // non-zero: the public shm segment exists
     setGuestOption(cfg, "numBuffers", 256);
     setGuestOption(cfg, "maxNodes", 256);
     setGuestOption(cfg, "maxGraphDefs", 64);

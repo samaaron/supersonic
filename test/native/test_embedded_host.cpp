@@ -26,7 +26,7 @@ namespace {
 // The headless config the engine fixture boots with (EngineFixture.cpp).
 ClockworkEngine::Config headless() {
     ClockworkEngine::Config cfg;
-    cfg.udpPort           = 0;
+    cfg.shmSegment           = false;
     cfg.headless          = true;
     cfg.numOutputChannels = 2;
     cfg.numInputChannels  = 0;
@@ -73,7 +73,7 @@ TEST_CASE("embedded host: boots headless, answers /status on the callback, shuts
     REQUIRE(host.send(status.ptr(), status.size()));
     CHECK(replies.waitFor("/status.reply"));
 
-    // no segment was asked for (udpPort 0): no handle
+    // no segment was asked for (shmSegment false): no handle
     CHECK(!detail_shm_segment::shm_handle_valid(host.dupSegmentHandle()));
 
     host.shutdown();
@@ -97,11 +97,11 @@ TEST_CASE("embedded host: the front answers a file verb for nothing with scsynth
     host.shutdown();
 }
 
-TEST_CASE("embedded host: a segment when udpPort names one", "[embedded]") {
+TEST_CASE("embedded host: a segment when shmSegment asks for one", "[embedded]") {
     supersonic::EmbeddedHost host;
     std::string err;
     auto cfg = headless();
-    cfg.udpPort = 57199;   // the segment's identity; nothing is bound
+    cfg.shmSegment = true;   // the segment's identity; nothing is bound
     REQUIRE(host.boot(cfg, {}, &err));
     const auto h = host.dupSegmentHandle();
     REQUIRE(detail_shm_segment::shm_handle_valid(h));
