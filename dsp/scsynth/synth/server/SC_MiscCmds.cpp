@@ -33,7 +33,6 @@
 #include "SC_Prototypes.h"
 #include "scsynthsend.h"
 #include "SC_WorldOptions.h"
-#include "clockwork_product.h"   // CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_VERSION
 #include <cstdlib>
 
 extern int gMissingNodeID;
@@ -1483,7 +1482,7 @@ SCErr meth_dumpOSC(World* inWorld, int inSize, const char* inData, ReplyAddress*
 // minor, the rest of the version, branch, commit) and reports SuperSonic and
 // its version (package.json's, from the build). Branch and commit are empty.
 SCErr meth_version(World* inWorld, int /*inSize*/, const char* /*inData*/, ReplyAddress* inReply) {
-    const char* version = CLOCKWORK_PRODUCT_VERSION;
+    const char* version = SUPERSONIC_VERSION_STRING;
     char* rest = nullptr;
     const long major = std::strtol(version, &rest, 10);
     const long minor = *rest == '.' ? std::strtol(rest + 1, &rest, 10) : 0;
@@ -1494,7 +1493,7 @@ SCErr meth_version(World* inWorld, int /*inSize*/, const char* /*inData*/, Reply
     packet.maketags(7);
     packet.addtag(',');
     packet.addtag('s');
-    packet.adds(CLOCKWORK_PRODUCT_NAME);
+    packet.adds(SUPERSONIC_NAME_STRING);
     packet.addtag('i');
     packet.addi((int)major);
     packet.addtag('i');

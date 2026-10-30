@@ -155,7 +155,12 @@ target_compile_definitions(scsynth PRIVATE
     # Without this, PluginLoad(Chaos) expands to a dynamic plugin's anonymous
     # load() instead of Chaos_Load — the ugens compile, and the four whose
     # loaders have C++ linkage silently never register.
-    STATIC_PLUGINS=1)
+    STATIC_PLUGINS=1
+    # The name and version the guest reports, in /version.reply and its DspInfo:
+    # the product's, as the binary's banner says them. Set here rather than read
+    # from clockwork_product.h, which is past the guest boundary.
+    SUPERSONIC_NAME_STRING="${CLOCKWORK_PRODUCT_NAME}"
+    SUPERSONIC_VERSION_STRING="${CLOCKWORK_PRODUCT_VERSION}")
 
 target_link_libraries(scsynth PRIVATE clockwork scsynth_tlsf)
 if(EMSCRIPTEN)
