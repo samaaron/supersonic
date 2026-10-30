@@ -29,7 +29,7 @@ jobs:
   # channel the hosts surface, and takes the stdio stream lock on the audio
   # thread. This guard fails on any live printf-family call in the core.
   # Exemptions are narrow and deliberate:
-  #   external_libraries/  vendored code (TLSF, boost)
+  #   external_libraries/  vendored code (TLSF, nova-simd)
   #   SC_Win32Utils.cpp    native-only Win32 helpers, never compiled to WASM
   #   SC_World.cpp         World_New exception handlers must not use ss_log
   #                        (the ring may not exist when they fire); the NRT
