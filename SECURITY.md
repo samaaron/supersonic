@@ -1,98 +1,103 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 <!-- Copyright (c) 2026 Sam Aaron -->
-# Security
+# Security policy
 
 ## Reporting a vulnerability
 
-Report it privately, through GitHub:
+Please report it privately, through GitHub:
 <https://github.com/samaaron/supersonic/security/advisories/new>,
 or by email to <security@sonic-pi.net>.
 
-Please do not open a public issue, pull request or discussion for a
+Please don't open a public issue, pull request or discussion for a
 vulnerability.
 
-A useful report says:
+A useful report tells us:
 
 - what is affected: the npm package, the native `supersonic` server or the
   Debian package, its version or commit, and the platform
-- what an attacker needs: a SynthDef or sample file a user loads, the secret
-  for a command port, a page that embeds SuperSonic
+- what an attacker needs: a SynthDef or sample file a user loads, or the
+  secret for a command port
 - how to reproduce it, ideally with the smallest input that does
 - whether you know of it being **actively exploited**. If so, put that in the
-  title, and it goes to the front of the queue.
+  title and we'll deal with it first.
 
-The scsynth code SuperSonic takes from SuperCollider, and Clockwork, which
-SuperSonic is built on, are in scope here too.
+You can report vulnerabilities in Clockwork, which SuperSonic is built on,
+here too.
 
-## What happens next
+## What counts as a vulnerability
 
-SuperSonic handles vulnerabilities as the EU Cyber Resilience Act (Regulation
-(EU) 2024/2847, Annex I Part II) requires of a manufacturer, and promises
-nothing beyond that:
+[docs/THREATS.md](docs/THREATS.md) describes what SuperSonic defends against
+and what it trusts by design.
 
-- Your report is acknowledged, and you are told who is handling it.
-- A report is assessed, and a confirmed vulnerability is fixed without undue
-  delay. The fix is released as a security update, on its own rather than
-  inside other changes where that is practical, and free of charge.
-- Disclosure is coordinated: you tell us before you publish, and we tell you
-  before we do. When the fix is out, a GitHub Security Advisory with a CVE ID
-  (GitHub is a CVE Numbering Authority) says what the vulnerability was, what
-  it affects, how severe it is and what to do. In a justified case publication
-  waits until users have had the chance to apply the fix. The reporter is
-  credited unless they ask otherwise.
-- A report of active exploitation goes to the front of the queue. SuperSonic
-  gives ENISA an early warning within 24 hours of becoming aware of an
-  actively exploited vulnerability, a notification within 72 hours and a
-  final report within 14 days of a fix.
+We treat as a vulnerability anything that lets a SynthDef, a sample file or a
+command crash the engine, read or write memory it shouldn't, or run code.
 
+We don't treat these as vulnerabilities:
+
+- Anything a client can do once it has the server's secret, such as
+  controlling the engine, overloading it, shutting it down with `/quit`, or
+  reading and writing files the server can reach. That's what the command
+  port is for, so keep the secret safe.
+- A SynthDef that uses a lot of CPU or memory, as long as it stays within the
+  engine's limits.
+
+## What happens after you report
+
+We'll acknowledge your report, keep you updated while we fix it, and agree with
+you when to make it public. We'll credit you unless you'd rather we didn't.
 There is no bug bounty.
 
-## Supported versions
+## Which versions get fixes
 
-SuperSonic is not at 1.0 yet. A security fix goes into the next release, and
-earlier releases are not updated: update to the latest release to take a fix.
-Each advisory names the first fixed version.
+SuperSonic is not at 1.0 yet. We put a security fix in the next release and
+don't update earlier ones, so update to the latest release to get a fix.
 
-From 1.0, each release states its support period and the date it ends.
+From 1.0, each release will say how long we support it.
 
-## How it is tested
+## How we test SuperSonic
 
-The SynthDef reader, scsynth's command handlers, a SynthDef played and the
-controls of every shipped SynthDef each have a fuzz target. On every push,
-each target is replayed over its corpus, the seeds and every crasher ever
-found, deterministically, under AddressSanitizer and
-UndefinedBehaviorSanitizer, with the real-time memory pool replaced by
-`malloc` so the sanitizers see inside it. The native suite also plays every
-unit generator with no inputs, with extreme ones and with control-rate ones.
-Every night, each target runs under libFuzzer for two hours; a crasher is
-sealed to a key only the maintainer holds before it leaves the runner, and
-once fixed joins the corpus.
-`.github/workflows/security.yml` is the whole of it. What is not fuzzed yet is
-listed in [docs/THREATS.md](docs/THREATS.md#known-gaps).
+We fuzz four parts of SuperSonic:
 
-Clockwork's transports, sample decoder, audio file writer and rings are fuzzed
-in Clockwork's own workflow.
+- the SynthDef reader
+- playing a SynthDef
+- scsynth's command handlers
+- the controls of every SynthDef we ship
 
-## What SuperSonic contains
+On every push, CI replays each fuzz target over its corpus (its seed inputs
+and every input that has ever crashed it) under AddressSanitizer and
+UndefinedBehaviorSanitizer. For these runs we replace the real-time memory
+pool with `malloc`, so the sanitizers can see out-of-bounds reads and writes
+inside it.
 
-What SuperSonic carries besides its own code and Clockwork, and where each part
-came from, is in [docs/components.cdx.json](docs/components.cdx.json). On every
-push, and every night, CI writes a CycloneDX SBOM for each build target, with
-Clockwork's from the pinned commit, and looks every component up for
-advisories. The same documents can be written from any commit with
-`node clockwork/scripts/sbom.mjs --root . target all`. See
-[docs/THREATS.md](docs/THREATS.md#supply-chain).
+Every night, CI fuzzes each target with libFuzzer for two hours. Before it
+uploads a crashing input, it encrypts it to a key only the maintainer has.
+When we fix the bug, we add the input to the corpus, so every push replays it
+from then on.
 
-## Scope
+The native test suite also plays every unit generator with no inputs, with
+extreme input values and with control-rate inputs.
 
-[docs/THREATS.md](docs/THREATS.md) says what SuperSonic defends against and
-what it trusts by design. In short:
+It's all in `.github/workflows/security.yml`. What we don't fuzz yet is listed
+in [docs/THREATS.md](docs/THREATS.md#known-gaps).
 
-- **In scope:** anything that lets a SynthDef, a sample file or a command
-  crash the process, read or write out of bounds, or run code.
-- **Out of scope:** a client on a command port controlling the engine,
-  including reading and writing files the process can reach (that is what the
-  port is for: keep the secret); a denial of service that needs the attacker
-  to already be such a client; a SynthDef using the CPU or memory its graph
-  asks for, within the engine's limits; a page that embeds SuperSonic doing
-  what its own code does.
+Clockwork fuzzes its own transports, sample decoder, audio file writer and
+ring buffers in its own workflow.
+
+## Third-party code and SBOMs
+
+Besides our own code and Clockwork, SuperSonic includes a few third-party
+libraries: nova-simd, TLSF and two files from sc3-plugins.
+[docs/components.cdx.json](docs/components.cdx.json) lists each one and the
+upstream commit it came from. It also records SuperCollider, which we forked
+SuperSonic's synthesis engine from, as SuperSonic's ancestor.
+
+From 0.93.0, each release includes a software bill of materials (SBOM) in
+CycloneDX format for each build target, with Clockwork's alongside. CI also
+writes them on every push and every night, and checks every component in them
+against the OSV and NVD vulnerability databases.
+
+To write them yourself from any commit, run:
+
+`node clockwork/scripts/sbom.mjs --root . target all`
+
+There is more detail in [docs/THREATS.md](docs/THREATS.md#supply-chain).
