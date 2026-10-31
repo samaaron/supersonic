@@ -14,7 +14,8 @@
 #   replay     each scsynth fuzz target over its corpus, the seeds and every
 #              crasher ever found, deterministically, under ASan and UBSan, on
 #              every push. Red here means a change broke something.
-#   fuzz       nightly only: each target under libFuzzer for two hours. A
+#   fuzz       nightly, and by hand: each target under libFuzzer for two
+#              hours, or only the target a hand-started run picks. A
 #              crasher is sealed to Clockwork's .github/fuzz-crasher.pub
 #              (clockwork/scripts/encrypt-crasher.sh) before it is uploaded,
 #              since an artifact on a public repository is readable by anyone
@@ -33,6 +34,12 @@ on:
   schedule:
     - cron: "47 4 * * *"
   workflow_dispatch:
+    inputs:
+      target:
+        description: Fuzz target
+        type: choice
+        default: all
+        options: [all, fuzz_synthdef, fuzz_scsynth_commands, fuzz_synthdef_play, fuzz_ugen_controls]
 
 permissions:
   contents: read
@@ -127,18 +134,35 @@ jobs:
   # ------------------------------------------------------------------- fuzz --
   # Nightly, and by hand. Not on a push: a run bounded by time can go red by
   # chance, and a red push must always mean a change.
+  #
+  # The targets and their seeds: all of them nightly, the one a hand-started
+  # run picks. A job's if cannot see the matrix, so the matrix is chosen here.
+  fuzz-targets:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        env:
+          PICK: ${{ inputs.target || 'all' }}
+        run: |
+          matrix=$(jq -nc --arg pick "$PICK" '
+            [ {target: "fuzz_synthdef",         seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef"},
+              {target: "fuzz_scsynth_commands", seeds: "test/fuzz/corpus/scsynth_commands"},
+              {target: "fuzz_synthdef_play",    seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef_play"},
+              {target: "fuzz_ugen_controls",    seeds: "test/fuzz/corpus/ugen_controls"} ]
+            | {include: map(select($pick == "all" or .target == $pick))}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   fuzz:
+    needs: fuzz-targets
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { target: fuzz_synthdef,         seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef" }
-          - { target: fuzz_scsynth_commands, seeds: "test/fuzz/corpus/scsynth_commands" }
-          - { target: fuzz_synthdef_play,    seeds: "packages/supersonic-scsynth-synthdefs/synthdefs test/synthdefs test/fuzz/corpus/synthdef_play" }
-          - { target: fuzz_ugen_controls,    seeds: "test/fuzz/corpus/ugen_controls" }
+      matrix: ${{ fromJSON(needs.fuzz-targets.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
         with:
