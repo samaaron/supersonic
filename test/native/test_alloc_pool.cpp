@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "SC_AllocPool.h"
+#include "SC_Wire.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -51,16 +52,17 @@ TEST_CASE("AllocPool: a request larger than the pool is refused", "[alloc_pool]"
 }
 
 // A synth's memory comes from the pool, and its wires start on a vector load
-// only if the block does (SC_Wire.h). With the pool off, the blocks are the C
-// library's, aligned the same.
-TEST_CASE("AllocPool: every block starts on the pool's alignment", "[alloc_pool]") {
+// only if the block does (SC_Wire.h). The pool's blocks start on 64 bytes with
+// 64-bit pointers and 32 bytes past them with 32-bit ones; with the pool off
+// they are the C library's, on 64 bytes.
+TEST_CASE("AllocPool: every block starts on the widest vector load", "[alloc_pool]") {
     AllocPool pool(newArea, freeArea, kPoolSize, 0);
     std::vector<void*> held;
     for (size_t i = 0; i < 200; ++i) {
         void* block = pool.Alloc(1 + (i * 37) % 3000);
         REQUIRE(block != nullptr);
         INFO("block " << i << " at " << block);
-        CHECK(reinterpret_cast<uintptr_t>(block) % kAlign == 0);
+        CHECK(reinterpret_cast<uintptr_t>(block) % kSCVectorAlign == 0);
         held.push_back(block);
     }
     for (void* block : held)

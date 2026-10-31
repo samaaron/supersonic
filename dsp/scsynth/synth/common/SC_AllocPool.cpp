@@ -25,7 +25,7 @@
 #include "SC_BoundsMacros.h"
 #ifdef DISABLE_MEMORY_POOLS
 #    include "malloc_aligned.hpp"
-static_assert(nova::malloc_memory_alignment >= kAlign, "blocks with the pool off are aligned as the pool's are");
+static_assert(nova::malloc_memory_alignment >= kAlign, "blocks with the pool off are at least as aligned as the pool's");
 #endif
 #include <assert.h>
 #include <string>
@@ -290,7 +290,7 @@ void* AllocPool::Alloc(size_t inReqSize) {
     // A request a fixed pool could never hold fails here too.
     if (mAreaMoreSize == 0 && inReqSize > mAreaInitSize)
         return 0;
-    // Aligned as the pool's blocks are: a synth's wires rely on it (SC_Wire.h).
+    // At least as aligned as the pool's blocks: a synth's wires rely on it (SC_Wire.h).
     return nova::malloc_aligned(inReqSize);
 #endif
 
