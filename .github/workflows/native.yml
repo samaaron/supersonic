@@ -451,6 +451,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Download all artifacts
@@ -460,6 +462,13 @@ jobs:
 
       - name: List assets
         run: find release-assets -type f
+
+      # Provenance for each binary and its debug symbols: `gh attestation
+      # verify <file> --repo samaaron/supersonic`.
+      - name: Attest the binaries
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release-assets/**/*
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2

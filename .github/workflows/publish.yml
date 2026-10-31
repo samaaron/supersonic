@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -170,6 +171,17 @@ jobs:
           VERSION="${{ github.ref_name }}"
           cp supersonic-dist.zip "supersonic-${VERSION}.zip"
           cp supersonic-dist.zip supersonic.zip
+
+      # Provenance a user checks with `gh attestation verify <file> --repo
+      # samaaron/supersonic`: this workflow, this commit, built on GitHub. The
+      # npm packages carry npm's own. supersonic.zip is the same bytes as the
+      # versioned zip, so one attestation covers both.
+      - name: Attest the release assets
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            supersonic-${{ github.ref_name }}.zip
+            build/sbom/*.cdx.json
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

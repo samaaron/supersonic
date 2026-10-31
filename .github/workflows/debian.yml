@@ -51,10 +51,13 @@ jobs:
     name: debian-${{ matrix.dist }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
-    # contents:write is for the release-attach step; the default token is
-    # restricted (native.yml and publish.yml declare theirs the same way).
+    # contents:write is for the release-attach step, id-token and attestations
+    # for the deb's provenance; the default token is restricted (native.yml and
+    # publish.yml declare theirs the same way).
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout
@@ -126,6 +129,14 @@ jobs:
       # Attach the stable-target deb to tagged releases alongside the raw
       # binaries native.yml uploads. The dist guard keeps this trixie-only
       # if sid is ever added back to the matrix.
+      # Provenance for the deb: `gh attestation verify <file> --repo
+      # samaaron/supersonic`.
+      - name: Attest the deb
+        if: startsWith(github.ref, 'refs/tags/') && matrix.dist == 'trixie'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: build/debian/build-area/*.deb
+
       - name: Attach deb to release
         if: startsWith(github.ref, 'refs/tags/') && matrix.dist == 'trixie'
         uses: softprops/action-gh-release@v2
