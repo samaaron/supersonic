@@ -23,6 +23,7 @@
 #include "SC_Node.h"
 #include "SC_Rate.h"
 #include "SC_SndBuf.h"
+#include "SC_Wire.h"
 
 enum { kGraph_Reblock = 0x1, kGraph_Resample = 0x2 };
 
@@ -75,3 +76,7 @@ struct Graph {
     void* mPrivate;
 };
 typedef struct Graph Graph;
+
+// SuperSonic: Graph_Ctor carves a synth's arrays from the memory after its
+// Graph, each starting on kSCVectorAlign (GraphDef_SetAllocSizes).
+constexpr size_t kSCGraphHeaderSize = sc_align_up(sizeof(Graph), kSCVectorAlign);

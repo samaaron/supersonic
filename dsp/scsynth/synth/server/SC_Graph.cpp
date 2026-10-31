@@ -173,7 +173,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
     // scprintf("->Graph_Ctor\n");
 
     // hit the memory allocator only once.
-    char* memory = (char*)graph + sizeof(Graph);
+    char* memory = (char*)graph + kSCGraphHeaderSize;
 
     // allocate space for children
     uint32 numUnits = inGraphDef->mNumUnitSpecs;

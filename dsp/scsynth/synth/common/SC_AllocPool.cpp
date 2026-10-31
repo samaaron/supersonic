@@ -23,6 +23,10 @@
 #include "SC_AllocPool.h"
 #include <limits>
 #include "SC_BoundsMacros.h"
+#ifdef DISABLE_MEMORY_POOLS
+#    include "malloc_aligned.hpp"
+static_assert(nova::malloc_memory_alignment >= kAlign, "blocks with the pool off are aligned as the pool's are");
+#endif
 #include <assert.h>
 #include <string>
 
@@ -147,7 +151,7 @@ void AllocPool::Reinit() {
 
 void AllocPool::Free(void* inPtr) {
 #ifdef DISABLE_MEMORY_POOLS
-    free(inPtr);
+    nova::free_aligned(inPtr);
     return;
 #endif
 
@@ -286,7 +290,8 @@ void* AllocPool::Alloc(size_t inReqSize) {
     // A request a fixed pool could never hold fails here too.
     if (mAreaMoreSize == 0 && inReqSize > mAreaInitSize)
         return 0;
-    return malloc(inReqSize);
+    // Aligned as the pool's blocks are: a synth's wires rely on it (SC_Wire.h).
+    return nova::malloc_aligned(inReqSize);
 #endif
 
     // OK it has a lot of gotos, but these remove a whole lot of common code
@@ -430,7 +435,13 @@ return_chunk:
 
 void* AllocPool::Realloc(void* inPtr, size_t inReqSize) {
 #ifdef DISABLE_MEMORY_POOLS
+#    ifdef _WIN32
+    return _aligned_realloc(inPtr, inReqSize, nova::malloc_memory_alignment);
+#    else
+    // A block that moves keeps only malloc's alignment: World_Realloc holds
+    // plain arrays, never a synth.
     return realloc(inPtr, inReqSize);
+#    endif
 #endif
 
 

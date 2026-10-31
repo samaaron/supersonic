@@ -320,12 +320,12 @@ inline static void calcParamSpecs(GraphDef* graphDef, const char*& buffer, const
 }
 
 // The GraphDef block is bump-allocated as a sequence of sub-arrays (Wires,
-// Unit*, controls, float*, ints, …). Each sub-array's start must be at
-// least pointer-aligned: a section of N×4-byte ints would otherwise leave
-// the bump pointer 4-aligned, misaligning the next section's 8-byte
-// pointers.
+// Unit*, controls, float*, ints, …). Each sub-array starts on kSCVectorAlign:
+// at least pointer-aligned, since a section of N×4-byte ints would otherwise
+// leave the bump pointer 4-aligned and misalign the next section's 8-byte
+// pointers, and the wires' single values start on a vector load.
 static void GraphDef_SetAllocSizes(GraphDef* graphDef) {
-    constexpr size_t a = alignof(void*);
+    constexpr size_t a = kSCVectorAlign;
     graphDef->mWiresAllocSize           = sc_align_up(graphDef->mNumWires     * sizeof(Wire),    a);
     graphDef->mUnitsAllocSize           = sc_align_up(graphDef->mNumUnitSpecs * sizeof(Unit*),   a);
     graphDef->mCalcUnitsAllocSize       = sc_align_up(graphDef->mNumCalcUnits * sizeof(Unit*),   a);
@@ -385,7 +385,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
 
     graphDef->mOriginal = graphDef.get();
 
-    graphDef->mNodeDef.mAllocSize = sizeof(Graph);
+    graphDef->mNodeDef.mAllocSize = kSCGraphHeaderSize;
 
     memcpy(graphDef->mNodeDef.mName, name, kSCNodeDefNameByteLen);
 

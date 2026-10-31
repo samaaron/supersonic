@@ -23,10 +23,23 @@
 
 #include "SC_Types.h"
 
-struct Wire {
-    struct Unit* mFromUnit;
-    int32 mCalcRate;
-    float32* mBuffer;
+#include <cstddef>
+
+// SuperSonic: the widest load nova-simd makes from a unit's buffer, 32 bytes
+// with AVX and 16 with SSE, NEON or wasm SIMD. Every buffer a unit is handed
+// starts on it, a wire's single value included.
+#if defined(__AVX__)
+constexpr std::size_t kSCVectorAlign = 32;
+#else
+constexpr std::size_t kSCVectorAlign = 16;
+#endif
+
+// SuperSonic: mScalarValue first and the wire aligned to kSCVectorAlign, so a
+// single value held in its wire starts on a vector load as well.
+struct alignas(kSCVectorAlign) Wire {
     float32 mScalarValue;
+    int32 mCalcRate;
+    struct Unit* mFromUnit;
+    float32* mBuffer;
 };
 typedef struct Wire Wire;

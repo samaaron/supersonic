@@ -71,6 +71,27 @@ std::vector<uint8_t> unitGiven(const char* name, const std::string& ugen, int8_t
     return d.bytes();
 }
 
+// One def holding a control and one `ugen` at `rate`, with `inputs` inputs all
+// the control's output, and `outputs` outputs. A unit at audio rate given a
+// control-rate input reads one value held in its wire.
+std::vector<uint8_t> unitFedByControl(const char* name, const std::string& ugen, int8_t rate, int32_t inputs,
+                                      int32_t outputs) {
+    Def d;
+    d.i32(0x53436766).i32(2).i16(1);
+    d.str(name);
+    d.i32(0);                                          // no constants
+    d.i32(1).f32(0.5f);                                // one control
+    d.i32(1).str("level").i32(0);
+    d.i32(2);
+    d.str("Control").i8(kControl).i32(0).i32(1).i16(0);
+    d.i8(kControl);
+    d.str(ugen.c_str()).i8(rate).i32(inputs).i32(outputs).i16(0);
+    for (int32_t i = 0; i < inputs; ++i) d.i32(0).i32(0);
+    for (int32_t o = 0; o < outputs; ++o) d.i8(rate);
+    d.i16(0);                                          // no variants
+    return d.bytes();
+}
+
 void startNode(EngineFixture& fx, const char* def) {
     osc_test::Builder b;
     b.begin("/s_new") << def << 2000 << 0 << 0;
@@ -119,6 +140,23 @@ TEST_CASE("UGen ports: every unit type given extreme inputs plays and frees", "[
                 fx.send(osc_test::message("/n_free", 2000));
                 fx.pumpBlock(1);
             }
+        }
+    }
+    poolStillSound(fx);
+}
+
+TEST_CASE("UGen ports: every unit type given control-rate inputs plays and frees", "[ugen_ports]") {
+    EngineFixture fx;
+    REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 1024, 1)));
+
+    for (const auto& ugen : everyUnitType()) {
+        for (const int8_t rate : {kScalar, kControl, kAudio}) {
+            INFO(ugen << " rate " << int(rate));
+            REQUIRE(loads(fx, unitFedByControl("fed", ugen, rate, 16, 2)));
+            startNode(fx, "fed");
+            fx.pumpBlock(4);
+            fx.send(osc_test::message("/n_free", 2000));
+            fx.pumpBlock(1);
         }
     }
     poolStillSound(fx);

@@ -49,3 +49,20 @@ TEST_CASE("AllocPool: a request larger than the pool is refused", "[alloc_pool]"
     pool.Free(first);
     CHECK(pool.LargestFreeChunk() >= kPoolSize / 2);
 }
+
+// A synth's memory comes from the pool, and its wires start on a vector load
+// only if the block does (SC_Wire.h). With the pool off, the blocks are the C
+// library's, aligned the same.
+TEST_CASE("AllocPool: every block starts on the pool's alignment", "[alloc_pool]") {
+    AllocPool pool(newArea, freeArea, kPoolSize, 0);
+    std::vector<void*> held;
+    for (size_t i = 0; i < 200; ++i) {
+        void* block = pool.Alloc(1 + (i * 37) % 3000);
+        REQUIRE(block != nullptr);
+        INFO("block " << i << " at " << block);
+        CHECK(reinterpret_cast<uintptr_t>(block) % kAlign == 0);
+        held.push_back(block);
+    }
+    for (void* block : held)
+        pool.Free(block);
+}
