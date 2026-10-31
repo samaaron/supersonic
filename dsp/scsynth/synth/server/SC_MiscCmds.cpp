@@ -113,6 +113,23 @@ Graph* Msg_GetGraph(World* inWorld, sc_msg_iter& msg) {
     return !node || node->mIsGroup ? nullptr : (Graph*)node;
 }
 
+// SuperSonic: where a node may be moved. Calculating, freeing and querying all
+// walk each group's children, so a group moved into itself or a group inside
+// it would be walked for ever. The root group has no parent and does not move,
+// and a node does not move beside itself or beside the root.
+static bool Node_CanMoveInto(const Node* node, const Group* group) {
+    if (!node->mParent)
+        return false;
+    for (const Group* g = group; g; g = g->mNode.mParent)
+        if (&g->mNode == node)
+            return false;
+    return true;
+}
+
+static bool Node_CanMoveBeside(const Node* node, const Node* target) {
+    return node != target && target->mParent && Node_CanMoveInto(node, target->mParent);
+}
+
 SCErr meth_none(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) { return kSCErr_None; }
 
 SCErr meth_sync(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) {
@@ -1122,7 +1139,7 @@ SCErr meth_n_before(World* inWorld, int inSize, const char* inData, ReplyAddress
         Node* node = Msg_GetNode(inWorld, msg);
         Node* target = Msg_GetNode(inWorld, msg);
 
-        if (!node || !target)
+        if (!node || !target || !Node_CanMoveBeside(node, target))
             continue; // tolerate failure
 
         if (prevNode && prevNode != node) {
@@ -1154,7 +1171,7 @@ SCErr meth_n_after(World* inWorld, int inSize, const char* inData, ReplyAddress*
         Node* node = Msg_GetNode(inWorld, msg);
         Node* target = Msg_GetNode(inWorld, msg);
 
-        if (!node || !target)
+        if (!node || !target || !Node_CanMoveBeside(node, target))
             continue; // tolerate failure
 
         if (prevNode && prevNode != node) {
@@ -1195,6 +1212,8 @@ SCErr meth_n_order(World* inWorld, int inSize, const char* inData, ReplyAddress*
         }
         if (!node)
             return kSCErr_NodeNotFound;
+        if (!Node_CanMoveInto(node, group))
+            return kSCErr_Failed;
 
         Group* prevGroup = node->mParent;
 
@@ -1221,6 +1240,8 @@ SCErr meth_n_order(World* inWorld, int inSize, const char* inData, ReplyAddress*
         }
         if (!node)
             return kSCErr_NodeNotFound;
+        if (!Node_CanMoveInto(node, group))
+            return kSCErr_Failed;
 
         Group* prevGroup = node->mParent;
 
@@ -1247,7 +1268,8 @@ SCErr meth_n_order(World* inWorld, int inSize, const char* inData, ReplyAddress*
         }
         if (!node)
             return kSCErr_NodeNotFound;
-
+        if (!Node_CanMoveBeside(node, beforeNode))
+            return kSCErr_Failed;
 
         Node_Remove(node);
         Node_AddBefore(node, beforeNode);
@@ -1264,7 +1286,8 @@ SCErr meth_n_order(World* inWorld, int inSize, const char* inData, ReplyAddress*
         }
         if (!node)
             return kSCErr_NodeNotFound;
-
+        if (!Node_CanMoveBeside(node, afterNode))
+            return kSCErr_Failed;
 
         Node_Remove(node);
         Node_AddAfter(node, afterNode);
@@ -1279,7 +1302,7 @@ SCErr meth_n_order(World* inWorld, int inSize, const char* inData, ReplyAddress*
     // now iterate through in order
     while (msg.remain()) {
         node = Msg_GetNode(inWorld, msg);
-        if (!node)
+        if (!node || !Node_CanMoveBeside(node, prevNode))
             continue;
         Node_Remove(node);
         Node_AddAfter(node, prevNode);
@@ -1301,6 +1324,8 @@ SCErr meth_g_head(World* inWorld, int inSize, const char* inData, ReplyAddress* 
         Node* node = Msg_GetNode(inWorld, msg);
         if (!node)
             return kSCErr_NodeNotFound;
+        if (!Node_CanMoveInto(node, group))
+            return kSCErr_Failed;
 
         Node_Remove(node);
         Group_AddHead(group, node);
@@ -1320,6 +1345,8 @@ SCErr meth_g_tail(World* inWorld, int inSize, const char* inData, ReplyAddress* 
         Node* node = Msg_GetNode(inWorld, msg);
         if (!node)
             return kSCErr_NodeNotFound;
+        if (!Node_CanMoveInto(node, group))
+            return kSCErr_Failed;
 
         Node_Remove(node);
         Group_AddTail(group, node);
@@ -1339,6 +1366,8 @@ SCErr meth_g_insert(World* inWorld, int inSize, const char* inData, ReplyAddress
         Node* node = Msg_GetNode(inWorld, msg);
         if (!node)
             return kSCErr_NodeNotFound;
+        if (!Node_CanMoveInto(node, group))
+            return kSCErr_Failed;
 
         Group* prevGroup = node->mParent;
 

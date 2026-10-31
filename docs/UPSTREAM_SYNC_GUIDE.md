@@ -349,6 +349,7 @@ Keep these when merging; each is also a candidate to send upstream.
 - `meth_b_setn` / `meth_b_fill`: each range is clipped to the buffer's samples, and a buffer never allocated has none: the clip to 0 .. -1 gave index -1, and a negative start wrote below the buffer's null data. They now write nothing to a buffer with no samples.
 - `bufAlloc`: an allocation that failed set the buffer's data to null and kept its old frames, channels and samples, so the next `/b_gen` on it wrote to null. It now leaves the buffer as it was.
 - `Msg_GetNode`: the `u` step of a node path took the root group's parent through a null pointer. It now names no node.
+- `/g_head`, `/g_tail`, `/n_before`, `/n_after`, `/n_order` (and the unregistered `meth_g_insert`): a group could be moved into itself or a group inside it, the root group could be moved, and a node could be moved beside itself or the root. The first two made a cycle that freeing, querying and calculating walk for ever (a stack overflow); the last left a node out of its list with links into it. Such a move is now refused (`Node_CanMoveInto`, `Node_CanMoveBeside`).
 
 ---
 

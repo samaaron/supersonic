@@ -3,6 +3,9 @@
  */
 #include "EngineFixture.h"
 
+#include <utility>
+#include <vector>
+
 static osc_test::Packet sNew(const char* def, int32_t id, int32_t addAction, int32_t target) {
     osc_test::Builder b;
     auto& s = b.begin("/s_new");
@@ -152,4 +155,44 @@ TEST_CASE("/g_queryTree returns tree structure", "[group]") {
 
     fx.send(osc_test::message("/n_free", 1000));
     fx.send(osc_test::message("/n_free", 100));
+}
+
+// A move that would make a node its own ancestor, or move the root group, is
+// refused: the tree is walked to calculate, free and query it, and a cycle
+// in it is walked for ever. Group 101 is inside group 100, and after each
+// move group 100 still holds 101 and nothing else.
+TEST_CASE("Group moves: a node cannot move into itself or below itself and the root cannot move", "[group]") {
+    const std::vector<std::pair<const char*, std::vector<int32_t>>> moves = {
+        {"/g_head", {101, 100}},     // 100 into its own child
+        {"/g_tail", {100, 100}},     // 100 into itself
+        {"/n_before", {100, 101}},   // 100 beside its own child
+        {"/n_after", {100, 101}},
+        {"/n_after", {100, 100}},    // 100 beside itself
+        {"/n_order", {0, 101, 100}}, // 100 to the head of its own child
+        {"/n_order", {3, 101, 100}}, // 100 after its own child
+        {"/g_head", {100, 0}},       // the root into its own child
+        {"/n_before", {100, 0}},     // 100 beside the root
+    };
+    for (const auto& [command, args] : moves) {
+        INFO(command << " " << args[0] << " " << args[1]);
+        EngineFixture fx;
+        OscReply r;
+        fx.send(osc_test::message("/g_new", 100, 0, 0));
+        fx.send(osc_test::message("/g_new", 101, 0, 100));
+
+        osc_test::Builder b;
+        auto& s = b.begin(command);
+        for (const int32_t a : args) s << a;
+        fx.send(b.end());
+
+        fx.clearReplies();
+        fx.send(osc_test::message("/g_queryTree", 100, 0));
+        REQUIRE(fx.waitForReply("/g_queryTree.reply", r));
+        const auto p = r.parsed();
+        REQUIRE(p.argCount() == 5);
+        CHECK(p.argInt(1) == 100);
+        CHECK(p.argInt(2) == 1);
+        CHECK(p.argInt(3) == 101);
+        CHECK(p.argInt(4) == 0);
+    }
 }
