@@ -113,6 +113,19 @@ private:
         const char* next = str + ((nul - str) / 4 + 1) * 4;
         return next < endpos ? next : endpos;
     }
+    // Whether the string at `str`, terminated at `nul`, can be read a word at a
+    // time (Hash and the name tables read up to the first word whose last byte
+    // is zero): the word holding the terminator lies inside the message and is
+    // padded with zeros.
+    bool wholeWords(const char* str, const char* nul) const {
+        const char* wordEnd = str + ((nul - str) / 4 + 1) * 4;
+        if (wordEnd > endpos)
+            return false;
+        for (const char* p = nul; p < wordEnd; ++p)
+            if (*p)
+                return false;
+        return true;
+    }
     // The size of the blob at rdpos, or -1 when it does not fit what is left.
     int64 blobSize() const {
         if (endpos - rdpos < (ptrdiff_t)sizeof(int32))
@@ -332,11 +345,12 @@ inline int32* sc_msg_iter::gets4(char* defaultValue) {
     if (tags ? count >= numTags : rdpos >= endpos)
         return 0; // no argument left
     if (!tags || tags[count] == 's') {
-        if (!memchr(rdpos, 0, (size_t)(endpos - rdpos))) {
+        const char* nul = static_cast<const char*>(memchr(rdpos, 0, (size_t)(endpos - rdpos)));
+        if (!nul) {
             rdpos = endpos;
             value = const_cast<int32*>(kOSCEmptyName);
         } else {
-            value = (int32*)rdpos;
+            value = wholeWords(rdpos, nul) ? (int32*)rdpos : const_cast<int32*>(kOSCEmptyName);
             rdpos = skipString(rdpos);
         }
     } else {

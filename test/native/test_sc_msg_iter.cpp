@@ -108,6 +108,33 @@ TEST_CASE("sc_msg_iter: a string tagged with no bytes left reads as empty", "[sc
     CHECK(msg.gets() == nullptr);
 }
 
+// gets4 hands back a name that Hash and the name tables read a word at a time,
+// up to the first word whose last byte is zero: the word holding the
+// terminator must lie inside the message and be padded with zeros.
+TEST_CASE("sc_msg_iter: a name whose padding is not zero reads as empty", "[sc_msg_iter]") {
+    // A string and an int tagged; the string's word is "ab", its terminator
+    // and an 'X' where the padding belongs.
+    const Args a = Args(",si").raw("ab\0X", 4).i(5);
+    auto bytes = a.exact();
+    sc_msg_iter msg(a.size(), bytes.get());
+    const int32* name = msg.gets4();
+    REQUIRE(name != nullptr);
+    CHECK(*name == 0);
+    CHECK(msg.geti() == 5);
+}
+
+TEST_CASE("sc_msg_iter: a name whose last word runs past the message reads as empty", "[sc_msg_iter]") {
+    // A string tagged; "ab" and its terminator end the message one byte short
+    // of a whole word.
+    const Args a = Args(",s").raw("ab\0", 3);
+    auto bytes = a.exact();
+    sc_msg_iter msg(a.size(), bytes.get());
+    const int32* name = msg.gets4();
+    REQUIRE(name != nullptr);
+    CHECK(*name == 0);
+    CHECK(msg.remain() == 0);
+}
+
 TEST_CASE("sc_msg_iter: a blob longer than the message is not read", "[sc_msg_iter]") {
     // A blob tagged, claiming 1000 bytes and carrying four.
     const Args a = Args(",b").i(1000).raw("abcd", 4);
