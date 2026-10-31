@@ -29,6 +29,7 @@
     "wasm/",
     "workers/clockwork_audio_worklet.js",
     "index.js",
+    "sbom/",
     "README.md",
     "LICENSE"
   ]

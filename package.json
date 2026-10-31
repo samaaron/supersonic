@@ -71,6 +71,7 @@
     "dist/workers/osc_in_worker.js",
     "dist/workers/osc_out_log_sab_worker.js",
     "dist/chunks/*.js",
+    "sbom/",
     "README.md",
     "LICENSE"
   ],

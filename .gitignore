@@ -23,6 +23,10 @@ erl_crash.dump
 test/assets/fast-check.bundle.js
 
 
+# The release SBOMs publish.yml writes into the packages it publishes.
+/sbom/
+packages/supersonic-scsynth-core/sbom/
+
 .DS_Store
 
 # nova-simd wasm test outputs (test/wasm_simd/run_tests.mjs)

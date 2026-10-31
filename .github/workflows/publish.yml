@@ -99,6 +99,19 @@ jobs:
           echo "Timed out after 2h waiting for CI to complete"
           exit 1
 
+      # One CycloneDX SBOM per build target, with Clockwork's for the pinned
+      # commit beside each: SuperSonic's document refers to Clockwork's by BOM
+      # link and file name, so the two travel together. The npm packages that
+      # carry code and the zip get the web pair; the GitHub release gets all.
+      - name: Write the SBOMs
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          node clockwork/scripts/sbom.mjs --root . target all build/sbom "$VERSION"
+          for dir in . packages/supersonic-scsynth-core; do
+            mkdir -p "$dir/sbom"
+            cp build/sbom/supersonic-web.cdx.json build/sbom/clockwork-web.cdx.json "$dir/sbom/"
+          done
+
       # The generated README stands in for the repository one on npm. It is
       # generated under build/, which is not packed: npm packs every README*
       # it finds at the root whatever `files` says, and a generated file at the
@@ -146,6 +159,7 @@ jobs:
           mkdir -p supersonic
           cp -r dist/* supersonic/
           rm -rf supersonic/.github-pages
+          cp -r sbom supersonic/
           VERSION="${GITHUB_REF_NAME:-dev}"
           sed "s/{{VERSION}}/$VERSION/" docs/README.dist.md > supersonic/README.md
           zip -r supersonic-dist.zip supersonic
@@ -163,4 +177,5 @@ jobs:
           files: |
             supersonic-${{ github.ref_name }}.zip
             supersonic.zip
+            build/sbom/*.cdx.json
           generate_release_notes: true
