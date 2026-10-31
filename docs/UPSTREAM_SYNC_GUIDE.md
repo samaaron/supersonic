@@ -346,6 +346,7 @@ Keep these when merging; each is also a candidate to send upstream.
 - A wire's single value starts on `kSCVectorAlign`. An audio-rate unit given a single-value input loads it with an aligned SIMD load (`MulAdd` with a control-rate first input), and `mScalarValue` sat 8 bytes off that alignment in half of all synth layouts: undefined, and a crash on x86.
 - `GrainBuf`: a grain refused for its buffer or for a position that is not a number took a slot first and was removed only if the slot's old counter had run out. The slot held a stale grain or memory never written, so the refused grain stayed and played, with its output channel read from that memory. A grain now takes a slot only once it will play.
 - `normalize_wsamples`, `add_wpartial`, `add_wchebyshev` (`OscUGens.cpp`): a wavetable is pairs of samples, and in a buffer of odd size the last pair ran one sample past the end. `/b_gen` `sine1`, `sine2`, `sine3` and `cheby` as a wavetable wrote past their copy of the buffer, and `wnormalize` read past the buffer. They now step through whole pairs.
+- `meth_b_setn` / `meth_b_fill`: each range is clipped to the buffer's samples, and a buffer never allocated has none: the clip to 0 .. -1 gave index -1, and a negative start wrote below the buffer's null data. They now write nothing to a buffer with no samples.
 
 ---
 

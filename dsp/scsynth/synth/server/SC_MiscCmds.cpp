@@ -1540,6 +1540,10 @@ SCErr meth_b_setn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
 
     float* data = buf->data;
     int numSamples = buf->samples;
+    // SuperSonic: a range is clipped to the buffer's samples, and a buffer
+    // never allocated has none to clip it to.
+    if (numSamples <= 0)
+        return kSCErr_None;
 
     while (msg.remain()) {
         int32 start = msg.geti();
@@ -1571,6 +1575,9 @@ SCErr meth_b_fill(World* inWorld, int inSize, const char* inData, ReplyAddress* 
 
     float* data = buf->data;
     int numSamples = buf->samples;
+    // SuperSonic: as /b_setn.
+    if (numSamples <= 0)
+        return kSCErr_None;
 
     while (msg.remain() >= 12) {
         int32 start = msg.geti();

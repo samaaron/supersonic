@@ -152,3 +152,27 @@ TEST_CASE("Buffer commands: a buffer number the World does not have is refused",
     REQUIRE(fx.waitForReply("/b_info", r));
     CHECK(r.parsed().argInt(1) == 1024);
 }
+
+// /b_setn and /b_fill hold each range to the buffer's samples. A buffer never
+// allocated has no samples to hold a range to, so they write nothing to it.
+TEST_CASE("Buffer commands: /b_setn and /b_fill on a buffer with no samples write nothing",
+          "[buffer][bounds][security]") {
+    EngineFixture fx;
+    for (const int32_t start : {int32_t(-1), int32_t(-1000), int32_t(0), int32_t(0x7FFFFFF0)}) {
+        INFO("start " << start);
+        osc_test::Builder setn;
+        setn.begin("/b_setn") << int32_t(0) << start << int32_t(4) << 0.5f << 0.5f << 0.5f << 0.5f;
+        fx.send(setn.end());
+        osc_test::Builder fill;
+        fill.begin("/b_fill") << int32_t(0) << start << int32_t(4) << 0.5f;
+        fx.send(fill.end());
+    }
+
+    OscReply r;
+    fx.clearReplies();
+    fx.send(osc_test::message("/sync", 1));
+    REQUIRE(fx.waitForReply("/synced", r));
+    fx.send(osc_test::message("/b_query", 0));
+    REQUIRE(fx.waitForReply("/b_info", r));
+    CHECK(r.parsed().argInt(1) == 0);
+}
