@@ -9,9 +9,11 @@
 
 #include "SC_AllocPool.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <vector>
 
 namespace {
 
@@ -27,8 +29,14 @@ TEST_CASE("AllocPool: a request larger than the pool is refused", "[alloc_pool]"
     void* first = pool.Alloc(64);
     REQUIRE(first != nullptr);
 
-    for (const size_t size : {kPoolSize * 2, size_t(0x3FFFFFFFC), size_t(1) << 34,
-                              std::numeric_limits<size_t>::max() - 8, std::numeric_limits<size_t>::max()}) {
+    // Past the pool at either width, the half-range limit among them; and on a
+    // 64-bit size_t, about 16 GB, whose remainder against a small chunk does not
+    // fit an int.
+    constexpr size_t kMax = std::numeric_limits<size_t>::max();
+    std::vector<size_t> sizes = {kPoolSize * 2, kMax / 2, kMax / 2 + 1, kMax - 8, kMax};
+    if (sizeof(size_t) == 8)
+        sizes.insert(sizes.end(), {size_t(uint64_t(0x3FFFFFFFC)), size_t(uint64_t(1) << 34)});
+    for (const size_t size : sizes) {
         INFO("request " << size);
         CHECK(pool.Alloc(size) == nullptr);
     }
