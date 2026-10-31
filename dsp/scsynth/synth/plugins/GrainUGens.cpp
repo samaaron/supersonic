@@ -1107,27 +1107,28 @@ static inline void GrainBuf_next_start_new(GrainBuf* unit, int inNumSamples, int
     if (!success)
         return;
 
-    GrainBufG* grain = unit->mGrains + unit->mNumActive++;
     int32 bufnum = sc_float_to_int32(grain_in_at<full_rate>(unit, 2, position));
-    grain->bufnum = bufnum;
 
     GRAIN_BUF
 
-    if ((bufChannels != 1) || (!bufData)) {
-        GrainBuf_grain_cleanup(unit, grain);
+    if ((bufChannels != 1) || (!bufData))
         return;
-    }
 
     float bufSampleRate = buf->samplerate;
     float bufRateScale = bufSampleRate * SAMPLEDUR;
     double loopMax = (double)bufFrames;
 
-    double rate = grain->rate = grain_in_at<full_rate>(unit, 3, position) * bufRateScale;
+    double rate = grain_in_at<full_rate>(unit, 3, position) * bufRateScale;
     double phase = grain_in_at<full_rate>(unit, 4, position) * bufFrames;
-    if (!sc_isfinite(phase)) {
-        GrainBuf_grain_cleanup(unit, grain);
+    if (!sc_isfinite(phase))
         return;
-    }
+
+    // SuperSonic: a grain takes a slot only once it will play. A slot past
+    // the active grains holds a stale grain or memory never written, so a
+    // refused grain left in one would play from it.
+    GrainBufG* grain = unit->mGrains + unit->mNumActive++;
+    grain->bufnum = bufnum;
+    grain->rate = rate;
 
     double counter = grain_in_at<full_rate>(unit, 1, position) * SAMPLERATE;
     counter = sc_max(4., counter);
