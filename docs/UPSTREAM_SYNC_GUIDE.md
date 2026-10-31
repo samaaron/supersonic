@@ -348,6 +348,7 @@ Keep these when merging; each is also a candidate to send upstream.
 - `normalize_wsamples`, `add_wpartial`, `add_wchebyshev` (`OscUGens.cpp`): a wavetable is pairs of samples, and in a buffer of odd size the last pair ran one sample past the end. `/b_gen` `sine1`, `sine2`, `sine3` and `cheby` as a wavetable wrote past their copy of the buffer, and `wnormalize` read past the buffer. They now step through whole pairs.
 - `meth_b_setn` / `meth_b_fill`: each range is clipped to the buffer's samples, and a buffer never allocated has none: the clip to 0 .. -1 gave index -1, and a negative start wrote below the buffer's null data. They now write nothing to a buffer with no samples.
 - `bufAlloc`: an allocation that failed set the buffer's data to null and kept its old frames, channels and samples, so the next `/b_gen` on it wrote to null. It now leaves the buffer as it was.
+- `Msg_GetNode`: the `u` step of a node path took the root group's parent through a null pointer. It now names no node.
 
 ---
 

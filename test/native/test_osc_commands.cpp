@@ -223,3 +223,30 @@ TEST_CASE("/rtMemoryStatus returns memory info", "[osc]") {
     CHECK(p.argInt(0) > 0);  // free memory > 0
     CHECK(p.argInt(1) > 0);  // largest free block > 0
 }
+
+// A node can be named by a path from a node ID: "u" is the node's parent
+// group. The root group has none, so the path names no node.
+TEST_CASE("Node paths: up from a group is its parent and up from the root is no node", "[osc]") {
+    EngineFixture fx;
+    OscReply r;
+    fx.send(osc_test::message("/g_new", 1000, 0, 0));
+    fx.send(osc_test::message("/g_new", 1001, 0, 1000));
+
+    auto freeUp = [&](int32_t from) {
+        fx.clearReplies();
+        osc_test::Builder b;
+        b.begin("/n_free") << "u" << from;
+        fx.send(b.end());
+        fx.send(osc_test::message("/sync", 1));
+        REQUIRE(fx.waitForReply("/synced", r));
+    };
+
+    freeUp(0);
+    CHECK(fx.waitForReply("/fail", r, 500));
+
+    freeUp(1001);
+    fx.clearReplies();
+    fx.send(osc_test::message("/n_query", 1000));
+    REQUIRE(fx.waitForReply("/fail", r));
+    CHECK(r.parsed().argString(0) == "/n_query");
+}

@@ -83,7 +83,8 @@ Node* Msg_GetNode(World* inWorld, sc_msg_iter& msg) {
                 node = ((Group*)node)->mTail;
                 break;
             case 'u':
-                node = &node->mParent->mNode;
+                // SuperSonic: the root group has no parent.
+                node = node->mParent ? &node->mParent->mNode : nullptr;
                 break;
             case 'p':
                 node = node->mPrev;
