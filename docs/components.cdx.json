@@ -18,7 +18,55 @@
           "type": "vcs",
           "url": "https://github.com/samaaron/supersonic"
         }
-      ]
+      ],
+      "pedigree": {
+        "ancestors": [
+          {
+            "type": "library",
+            "bom-ref": "supercollider",
+            "name": "SuperCollider",
+            "version": "9a749de",
+            "description": "SuperSonic's synthesis engine is a fork of SuperCollider's scsynth, which we maintain as our own code. The version is the last upstream commit we synced from.",
+            "licenses": [
+              {
+                "expression": "GPL-3.0-or-later"
+              }
+            ],
+            "externalReferences": [
+              {
+                "type": "vcs",
+                "url": "https://github.com/supercollider/supercollider"
+              }
+            ],
+            "properties": [
+              {
+                "name": "clockwork:path",
+                "value": "dsp/scsynth/synth"
+              },
+              {
+                "name": "clockwork:version_from",
+                "value": "upstream_commit"
+              },
+              {
+                "name": "clockwork:upstream_commit",
+                "value": "9a749de81005c626841f80da478b54b0fce4a7cc"
+              },
+              {
+                "name": "clockwork:commit_file",
+                "value": "docs/UPSTREAM_SYNC_GUIDE.md"
+              },
+              {
+                "name": "clockwork:commit_pattern",
+                "value": "\\*\\*Last Sync Commit\\*\\*: ([0-9a-f]+)"
+              },
+              {
+                "name": "clockwork:modified",
+                "value": "yes"
+              }
+            ]
+          }
+        ]
+      }
     },
     "properties": [
       {
@@ -36,54 +84,6 @@
     ]
   },
   "components": [
-    {
-      "type": "library",
-      "bom-ref": "supercollider",
-      "name": "SuperCollider",
-      "version": "9a749de",
-      "description": "The scsynth code SuperSonic's synth was forked from, at the last upstream commit SuperSonic took changes from.",
-      "licenses": [
-        {
-          "expression": "GPL-3.0-or-later"
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "vcs",
-          "url": "https://github.com/supercollider/supercollider"
-        }
-      ],
-      "properties": [
-        {
-          "name": "clockwork:path",
-          "value": "dsp/scsynth/synth"
-        },
-        {
-          "name": "clockwork:targets",
-          "value": "native,web"
-        },
-        {
-          "name": "clockwork:version_from",
-          "value": "upstream_commit"
-        },
-        {
-          "name": "clockwork:upstream_commit",
-          "value": "9a749de81005c626841f80da478b54b0fce4a7cc"
-        },
-        {
-          "name": "clockwork:commit_file",
-          "value": "docs/UPSTREAM_SYNC_GUIDE.md"
-        },
-        {
-          "name": "clockwork:commit_pattern",
-          "value": "\\*\\*Last Sync Commit\\*\\*: ([0-9a-f]+)"
-        },
-        {
-          "name": "clockwork:modified",
-          "value": "yes"
-        }
-      ]
-    },
     {
       "type": "library",
       "bom-ref": "nova-simd",
