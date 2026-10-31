@@ -176,3 +176,33 @@ TEST_CASE("Buffer commands: /b_setn and /b_fill on a buffer with no samples writ
     REQUIRE(fx.waitForReply("/b_info", r));
     CHECK(r.parsed().argInt(1) == 0);
 }
+
+// A /b_alloc that cannot get the memory leaves the buffer as it was: its
+// samples and the counts that describe them, so the commands after it read and
+// write the buffer that is still there.
+TEST_CASE("Buffer commands: a /b_alloc that fails leaves the buffer as it was",
+          "[buffer][bounds][security]") {
+    EngineFixture fx;
+    OscReply r;
+    REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 1024, 1)));
+
+    // The most samples bufAlloc accepts, more than the engine's memory holds.
+    fx.send(osc_test::message("/b_alloc", 0, 0x7FFFFFFF / 4, 1));
+    fx.clearReplies();
+    fx.send(osc_test::message("/sync", 1));
+    REQUIRE(fx.waitForReply("/synced", r));
+
+    osc_test::Builder gen;
+    gen.begin("/b_gen") << int32_t(0) << "sine2" << int32_t(7) << 1.0f << 1.0f;
+    REQUIRE(fx.sendAndExpectDone(gen.end()));
+
+    fx.clearReplies();
+    fx.send(osc_test::message("/b_query", 0));
+    REQUIRE(fx.waitForReply("/b_info", r));
+    CHECK(r.parsed().argInt(1) == 1024);
+    CHECK(r.parsed().argInt(2) == 1);
+    fx.clearReplies();
+    fx.send(osc_test::message("/b_get", 0, 256));
+    REQUIRE(fx.waitForReply("/b_set", r));
+    CHECK(r.parsed().argFloat(2) > 0.99f);
+}

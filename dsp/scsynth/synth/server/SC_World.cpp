@@ -1295,10 +1295,13 @@ SCErr bufAlloc(SndBuf* buf, int numChannels, int numFrames, double sampleRate) {
     int64 numSamples = (int64)numFrames * (int64)numChannels;
     if (numSamples > (int64)0x7FFFFFFF / (int64)sizeof(float))
         return kSCErr_Failed;
-    buf->data = (float*)zalloc((size_t)numSamples, sizeof(float));
-    if (!buf->data)
+    // A request that cannot be met leaves the buffer as it was, its samples and
+    // the counts that describe them together.
+    float* data = (float*)zalloc((size_t)numSamples, sizeof(float));
+    if (!data)
         return kSCErr_Failed;
 
+    buf->data = data;
     buf->channels = numChannels;
     buf->frames = numFrames;
     buf->samples = (int)numSamples;
