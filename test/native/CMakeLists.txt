@@ -109,6 +109,7 @@ add_executable(SuperSonicNativeTests
     test_osc_arrays.cpp
     test_sc_msg_iter.cpp
     test_osc_counts.cpp
+    test_osc_bundle_elements.cpp
     test_guest_alignment.cpp
     test_ugen_controls.cpp
     test_ugen_counts.cpp

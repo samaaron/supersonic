@@ -265,6 +265,12 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
                          msgCount, msgSize, (long)(dataEnd - data));
             break;
         }
+        // OSC sizes every element in a multiple of 4, so each starts on a
+        // 4-byte boundary and the handlers read its words in place.
+        if (msgSize % 4 != 0) {
+            scprintf("ERROR: Message %d size %d is not a multiple of 4", msgCount, msgSize);
+            break;
+        }
 
         // Check if this is a nested bundle (starts with "#bundle")
         if (msgSize >= 8 && strncmp(data, "#bundle", 7) == 0) {
