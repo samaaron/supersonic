@@ -316,8 +316,9 @@ Upstream code assumes a well-formed SynthDef. SuperSonic does not: any input can
 - A buffer number is looked up with `sc_unit_buffer` or `sc_unit_buffer_at` (`SC_UnitBuffer.h`), never by indexing `mSndBufs` or `mLocalSndBufs`.
 - A count a unit reads from its own inputs (a name length, a number of channels or stages) is checked with `ClearUnitIfInputsMissing` before anything is read or allocated; a count of the synth's controls with `ClearUnitIfMissing(..., "controls")`.
 - A unit's ports are read through `IN`, `OUT`, `INRATE`, `INBUFLENGTH` and `INWIRE` (`SC_Unit.h`), which are bounds-checked, not through `mInBuf`, `mOutBuf`, `mInput` or `mOutput`.
+- Every buffer a unit is handed starts on `kSCVectorAlign` (`SC_Wire.h`), a wire's single value included: `Wire` keeps `mScalarValue` first and its `alignas`, a synth's arrays start on it (`kSCGraphHeaderSize`, `GraphDef_SetAllocSizes`), and every block the pool hands out starts on 64 bytes, with the pool off too. `test_unit_buffer_alignment.cpp` holds it.
 
-Apply them by hand to code taken in. Then `test/native/test_ugen_ports.cpp` plays every unit type with no inputs and with extreme inputs, and the fuzz targets play SynthDefs and set controls: run them under UBSan to catch a conversion or a phase step that was missed. To find where a memory error happens, use a build configured with `-DDISABLE_MEMORY_POOLS` added to ASan and UBSan flags: every real-time allocation is then a `malloc`, so an overrun is reported at the unit that made it, not units later.
+Apply them by hand to code taken in. Then `test/native/test_ugen_ports.cpp` plays every unit type with no inputs, with extreme inputs and with control-rate inputs, and the fuzz targets play SynthDefs and set controls: run them under UBSan to catch a conversion or a phase step that was missed. To find where a memory error happens, use a build configured with `-DDISABLE_MEMORY_POOLS` added to ASan and UBSan flags: every real-time allocation is then a `malloc`, so an overrun is reported at the unit that made it, not units later.
 
 ### 6. Fixes to upstream code that upstream does not have
 
@@ -340,7 +341,10 @@ Keep these when merging; each is also a candidate to send upstream.
 - `Graph_Ctor`: a resample factor that is not a number divided by zero; a factor is at most 64 (`kMaxResampleFactor`).
 - `ReadName` / `ReadNodeDefName`: the error for a name too long read the name past the end of a truncated def.
 - `sc_loop` / `sc_gloop` (one copy, `SC_LoopPhase.h`, in place of four): a huge buffer phase lost its remainder to `in - hi * floor(in / hi)` and indexed outside the buffer; the remainder is now `fmod`'s.
-- `AllocPool::Alloc` with `DISABLE_MEMORY_POOLS`: a request larger than the fixed pool fails, as it does with the pool.
+- `AllocPool::Alloc` with `DISABLE_MEMORY_POOLS`: a request larger than the fixed pool fails, as it does with the pool, and a block starts on 64 bytes, as the pool's do.
+- `sc_msg_iter::gets4`: a name whose terminating word runs past the message or is not padded with zeros reads as empty. `Hash` and the name tables read a name a word at a time, up to a word whose last byte is zero, so such a name read past the message (`/b_gen`, `/s_new`, `/n_set` by name, `/u_cmd`, `/cmd`).
+- A wire's single value starts on `kSCVectorAlign`. An audio-rate unit given a single-value input loads it with an aligned SIMD load (`MulAdd` with a control-rate first input), and `mScalarValue` sat 8 bytes off that alignment in half of all synth layouts: undefined, and a crash on x86.
+- `GrainBuf`: a grain refused for its buffer or for a position that is not a number took a slot first and was removed only if the slot's old counter had run out. The slot held a stale grain or memory never written, so the refused grain stayed and played, with its output channel read from that memory. A grain now takes a slot only once it will play.
 
 ---
 

@@ -63,9 +63,10 @@ each target is replayed over its corpus, the seeds and every crasher ever
 found, deterministically, under AddressSanitizer and
 UndefinedBehaviorSanitizer, with the real-time memory pool replaced by
 `malloc` so the sanitizers see inside it. The native suite also plays every
-unit generator with no inputs and with extreme ones. Every night, each target
-runs under libFuzzer for two hours; a crasher is sealed to a key only the
-maintainer holds before it leaves the runner, and once fixed joins the corpus.
+unit generator with no inputs, with extreme ones and with control-rate ones.
+Every night, each target runs under libFuzzer for two hours; a crasher is
+sealed to a key only the maintainer holds before it leaves the runner, and
+once fixed joins the corpus.
 `.github/workflows/security.yml` is the whole of it. What is not fuzzed yet is
 listed in [docs/THREATS.md](docs/THREATS.md#known-gaps).
 
