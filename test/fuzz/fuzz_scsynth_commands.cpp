@@ -13,8 +13,8 @@
 // fuzzer must not run them; the bytes are matched anywhere in the packet, so
 // a bundle cannot carry one in either.
 //
-// After each input every node, timed bundle and buffer is freed, so inputs do
-// not build on each other.
+// After each input every node, timed bundle and buffer is freed and /dumpOSC is
+// turned off, so inputs do not build on each other.
 #include "engine_harness.h"
 
 #include <algorithm>
@@ -34,6 +34,7 @@ bool refused(const uint8_t* p, size_t n) {
 
 void reset() {
     fuzz::send(fuzz::Message("/clearSched"));
+    fuzz::send(fuzz::Message("/dumpOSC").i(0));
     fuzz::send(fuzz::Message("/g_freeAll").i(0));
     for (int32_t b = 0; b < 64; ++b) fuzz::send(fuzz::Message("/b_free").i(b));
     fuzz::run(4);
