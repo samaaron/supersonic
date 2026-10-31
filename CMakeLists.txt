@@ -12,7 +12,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(SuperSonic
-    VERSION 0.92.0
+    VERSION 0.93.0
     DESCRIPTION "A scsynth-compatible synth powered by clockwork"
     LANGUAGES C CXX)
 
