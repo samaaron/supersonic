@@ -3209,9 +3209,12 @@ static void normalize_samples(int size, float* data, float peak) {
     }
 }
 
+// SuperSonic: a wavetable is pairs of samples, so normalize_wsamples,
+// add_wpartial and add_wchebyshev step through whole pairs. In a buffer of odd
+// size the last sample is in no pair.
 static void normalize_wsamples(int size, float* data, float peak) {
     float maxamp = 0.f;
-    for (int i = 0; i < size; i += 2) {
+    for (int i = 0; i + 1 < size; i += 2) {
         float absamp = std::abs(data[i] + data[i + 1]);
         if (absamp > maxamp)
             maxamp = absamp;
@@ -3241,7 +3244,7 @@ static void add_wpartial(int size, float* data, double partial, double amp, doub
     double w = (partial * 2.0 * 3.1415926535897932384626433832795) / (double)size2;
     double cur = amp * sin(phase);
     phase += w;
-    for (int i = 0; i < size; i += 2) {
+    for (int i = 0; i + 1 < size; i += 2) {
         double next = amp * sin(phase);
         data[i] += 2 * cur - next;
         data[i + 1] += next - cur;
@@ -3271,7 +3274,7 @@ static void add_wchebyshev(int size, float* data, double partial, double amp) {
     double offset = -amp * cos(partial * pi2);
     double cur = amp * cos(partial * acos(phase)) + offset;
     phase += w;
-    for (int i = 0; i < size; i += 2) {
+    for (int i = 0; i + 1 < size; i += 2) {
         double next = amp * cos(partial * acos(phase)) + offset;
         data[i] += 2 * cur - next;
         data[i + 1] += next - cur;

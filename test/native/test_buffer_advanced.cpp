@@ -5,6 +5,8 @@
 #include "EngineFixture.h"
 #include <catch2/catch_approx.hpp>
 #include <cmath>
+#include <string>
+#include <vector>
 
 // =============================================================================
 // /b_set and /b_get
@@ -290,6 +292,62 @@ TEST_CASE("/b_gen copy transfers samples between buffers", "[buffer]") {
 
     fx.send(osc_test::message("/b_free", 0));
     fx.send(osc_test::message("/b_free", 1));
+}
+
+// A wavetable is pairs of samples. In a buffer of 9 samples the last is in no
+// pair: a wavetable fill leaves it alone, and the peak wnormalize scales to is
+// the pairs' alone.
+TEST_CASE("/b_gen wavetable fills of a buffer with an odd number of samples stay inside it", "[buffer]") {
+    EngineFixture fx;
+    auto samples = [&] {
+        fx.clearReplies();
+        fx.send(osc_test::message("/b_getn", 0, 0, 9));
+        OscReply r;
+        REQUIRE(fx.waitForReply("/b_setn", r));
+        const auto parsed = r.parsed();
+        REQUIRE(parsed.argCount() == 12);
+        std::vector<float> out;
+        for (int i = 3; i < 12; ++i) out.push_back(parsed.argFloat(i));
+        return out;
+    };
+    auto generate = [&](osc_test::Builder& b) {
+        fx.clearReplies();
+        fx.send(b.end());
+        OscReply generated;
+        REQUIRE(fx.waitForReply("/done", generated));
+    };
+
+    REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 9, 1)));
+
+    // Normalized, as a wavetable, cleared first: one partial at amplitude 1.
+    for (const std::string fill : {"sine1", "sine2", "sine3", "cheby"}) {
+        INFO(fill);
+        osc_test::Builder b;
+        auto& s = b.begin("/b_gen");
+        s << (int32_t)0 << fill.c_str() << (int32_t)7;
+        if (fill == "sine2") s << 1.0f;
+        s << 1.0f;
+        if (fill == "sine3") s << 0.0f;
+        generate(b);
+        CHECK(samples()[8] == 0.0f);
+    }
+
+    {
+        osc_test::Builder b;
+        b.begin("/b_setn") << (int32_t)0 << (int32_t)0 << (int32_t)9 << 0.1f << 0.2f << 0.1f << 0.2f << 0.1f << 0.2f
+                           << 0.1f << 0.2f << 0.9f;
+        fx.send(b.end());
+    }
+    {
+        osc_test::Builder b;
+        b.begin("/b_gen") << (int32_t)0 << "wnormalize" << 1.0f;
+        generate(b);
+    }
+    const auto normalized = samples();
+    CHECK(normalized[0] == Catch::Approx(0.1f / 0.3f));
+    CHECK(normalized[8] == Catch::Approx(0.9f / 0.3f));
+
+    fx.send(osc_test::message("/b_free", 0));
 }
 
 // =============================================================================
