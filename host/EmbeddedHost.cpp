@@ -168,7 +168,7 @@ bool EmbeddedHost::loadDefinitions(const std::string& dir, std::string* why) {
 
 detail_shm_segment::shm_native_handle EmbeddedHost::dupSegmentHandle() const {
     if (!mRunning.load()) return detail_shm_segment::shm_invalid_handle;
-    const auto h = mImpl->engine.shmNativeHandle();
+    const auto h = mImpl->engine.shmReaderHandle();
     if (!detail_shm_segment::shm_handle_valid(h)) return detail_shm_segment::shm_invalid_handle;
     return detail_shm_segment::shm_dup_handle(h);
 }

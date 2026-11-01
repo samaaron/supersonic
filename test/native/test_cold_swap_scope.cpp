@@ -55,7 +55,7 @@ TEST_CASE("ColdSwap: scope data resumes after a cold swap and re-spawn",
     spawnScope(1000);
     REQUIRE(fix.waitForReply("/n_go", reply, 3000));
     {
-        shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmNativeHandle()));
+        shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmReaderHandle()));
         auto reader = client.get_tap_stream_reader((unsigned)kSlot);
         REQUIRE(fix.waitForBlocks(20, 3000));
         REQUIRE(reader.valid());
@@ -81,7 +81,7 @@ TEST_CASE("ColdSwap: scope data resumes after a cold swap and re-spawn",
     // slot to be live and advancing again. THIS is the scopes-work-after-swap
     // property; if it fails, the scope panel stays dead after a device change.
     {
-        shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmNativeHandle()));
+        shm_segment_client client(detail_shm_segment::shm_dup_handle(fix.engine().shmReaderHandle()));
         auto reader = client.get_tap_stream_reader((unsigned)kSlot);
         REQUIRE(fix.waitForBlocks(20, 3000));
         CHECK(reader.valid());

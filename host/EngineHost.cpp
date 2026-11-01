@@ -454,12 +454,17 @@ bool serveSegment(shm_attach::server& server, ClockworkEngine& engine, const Opt
                   const std::function<void(const std::string&)>& log) {
     if (!o.cfg.shmSegment) return false;
     std::string err;
-    if (!detail_shm_segment::shm_handle_valid(engine.shmNativeHandle())) {
+    if (!detail_shm_segment::shm_handle_valid(engine.shmReaderHandle())) {
         log("no shared-memory segment; attach endpoint not started");
         return false;
     }
-    if (server.start(o.shmEndpoint, engine.shmNativeHandle(), engine.shmSegmentSize(), o.secret.get(), &err)) {
-        log("shared memory served at " + o.shmEndpoint);
+    // The published segment, read-only, to every reader; the command segment
+    // to one peer at a time, where --shm-commands made one (docs/SEGMENTS.md
+    // in clockwork).
+    if (server.start(o.shmEndpoint, engine.shmReaderHandle(), engine.shmSegmentSize(),
+                     engine.shmCommandHandle(), engine.shmCommandSize(), o.secret.get(), &err)) {
+        log("shared memory served at " + o.shmEndpoint
+            + (detail_shm_segment::shm_handle_valid(engine.shmCommandHandle()) ? " (readers, and one command peer)" : " (readers)"));
         return true;
     }
     log("ERROR: shared-memory attach endpoint: " + err);

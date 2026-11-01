@@ -48,7 +48,7 @@ TEST_CASE("node tree: a client finds the window's identity in the arena table",
     REQUIRE(fx.waitForReply("/synced", r));
 
     // Open the public segment as a separate client, the way a GUI does.
-    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmNativeHandle()));
+    shm_segment_client client(detail_shm_segment::shm_dup_handle(fx.engine().shmReaderHandle()));
     const ClockworkArenaHeader* h = arenaHeader(client.get_base());
     REQUIRE(h != nullptr);
     const ClockworkArenaEntry* w = clockwork_arena_find(h, CLOCKWORK_ARENA_GUEST_WINDOW);

@@ -80,8 +80,9 @@ One engine per process: clockwork is a process singleton.
 
 With `cfg.udpPort > 0` the engine publishes its shared-memory segment —
 metrics, the scope streams, the audio taps, the guest's node-tree window —
-exactly as the server does for a GUI in another process. In-process the
-reader needs no attach socket:
+exactly as the server does for a GUI in another process, and read-only: the
+handle is the published segment's reader handle (clockwork's
+docs/SEGMENTS.md). In-process the reader needs no attach socket:
 
 ```cpp
 shm_segment_client reader(host.dupSegmentHandle());   // owns the duplicate

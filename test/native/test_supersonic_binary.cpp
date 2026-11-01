@@ -17,7 +17,9 @@
 #include "OscTestUtils.h"
 #include "clockwork_client.h"
 #include "clockwork_audio_file.h"
+#include "shm_attach.hpp"
 #include "shm_audio_buffer.hpp"
+#include "shm_segment.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -252,9 +254,21 @@ TEST_CASE("the SuperSonic binary: its own main opens the socket, fronts the engi
         if (!shm) std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     REQUIRE(shm != nullptr);
+    // A reader has no lane (clockwork's docs/SEGMENTS.md): the lanes are the
+    // engine's own memory here, there being no --shm-commands, and the arena's
+    // table says so, with the size the flag asked for.
     ClockworkRegion assets {};
-    REQUIRE(clockwork_client_region(shm, CLOCKWORK_REGION_ASSETS, &assets) == CLOCKWORK_OK);
-    CHECK(assets.bytes == 32u * 1024u * 1024u);
+    CHECK(clockwork_client_region(shm, CLOCKWORK_REGION_ASSETS, &assets) == CLOCKWORK_E_PERM);
+    {
+        std::string err;
+        const auto h = shm_attach::receive(endpoint, secretBytes().data(), &err);
+        REQUIRE(detail_shm_segment::shm_handle_valid(h));
+        shm_segment_client reader(h);
+        const auto* lane = clockwork_arena_area(arenaHeader(reader.get_base()), CLOCKWORK_AREA_ASSETS);
+        REQUIRE(lane != nullptr);
+        CHECK(lane->space == CLOCKWORK_SPACE_PROCESS);
+        CHECK(lane->bytes_lo == 32u * 1024u * 1024u);
+    }
 
     // A session recording through the process: the front holds the guest's
     // tap, the guest feeds it, the file is written here — with a synth

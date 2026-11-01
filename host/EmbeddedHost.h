@@ -100,8 +100,9 @@ public:
     // the engine does not answer.
     bool loadDefinitions(const std::string& dir, std::string* why);
 
-    // The segment's handle, duplicated for a reader in this process
-    // (shm_segment_client takes ownership); invalid when there is no segment.
+    // The published segment's read-only handle, duplicated for a reader in
+    // this process (shm_segment_client takes ownership); invalid when there
+    // is no segment.
     detail_shm_segment::shm_native_handle dupSegmentHandle() const;
 
     // The engine and the front, for what this surface does not say: the

@@ -180,23 +180,29 @@ name, the server does not start.
 
 ### Shared memory
 
-With `-u` > 0 the engine's memory — its rings, audio taps, scope and
-metrics — is a shared-memory segment, served to processes of the same user at
-an attach endpoint:
+With `-u` > 0 the engine publishes its memory — the clock, the audio taps,
+the scope and the metrics — as a shared-memory segment, served READ-ONLY to
+any number of processes of the same user at an attach endpoint (clockwork's
+`docs/SEGMENTS.md`):
 
 | Platform | Endpoint |
 |---|---|
 | Linux, macOS | `clockwork-shm-<port>.sock` in `$XDG_RUNTIME_DIR`, else in `$TMPDIR`, else `/tmp/clockwork-shm-<uid>-<port>.sock` |
 | Windows | `\\.\pipe\clockwork-shm-<port>` |
 
-`--shm-endpoint` serves it elsewhere. A client attaches with clockwork's
-client library (`clockwork_client_open_shm` in
-`clockwork/src/clockwork_client.h`). If the segment cannot be served the
+`--shm-endpoint` serves it elsewhere. A client presents the secret and a
+role, and attaches with clockwork's client library
+(`clockwork_client_open_shm` for a reader, `clockwork_client_open_shm_peer`
+for the peer, in `clockwork/src/clockwork_client.h`). A reader cannot write
+the segment: the kernel refuses it. If the segment cannot be served the
 server keeps running and says so in the log.
 
-With `--shm-commands` the segment's peer command plane is the command
-transport: one trusted peer on the same machine writes straight into the
-engine's command ring, the fastest path there is. It talks to the engine
+With `--shm-commands` there is a second, command segment — the peer command
+plane and the assets and returns areas — and it is the command transport:
+one trusted peer on the same machine, handed the segment read-write and one
+at a time (its attach connection is the lease), writes straight into the
+engine's command ring, the fastest path there is. Without the flag there is
+no command segment, and a peer asking for one is told so. It talks to the engine
 itself, not through the server, so nothing the server answers on the engine's
 behalf is answered there: the file commands (`/b_allocRead`, `/d_load`, ...)
 are refused with what to do instead, and `/clockwork/record/*`,
