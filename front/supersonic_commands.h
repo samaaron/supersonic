@@ -47,6 +47,7 @@
 
 #include "OscFront.h"
 #include "Recorder.h"
+#include "clockwork_client.h"
 
 #include <condition_variable>
 #include <cstdint>
@@ -54,11 +55,14 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
+#include <utility>
 #include <string>
 #include <thread>
 #include <vector>
 
-class ClockworkEngine;
+struct ClockworkClient;
+struct PerformanceMetrics;
 class IOscTransport;
 struct ClockworkAssetPool;
 
@@ -73,10 +77,19 @@ public:
     // clockwork's control plane calls controlPass() (Config::hostDrivesControl).
     enum class Work { Own, Host };
 
+    // `client` is the handle the front is built on (clockwork_client.h): a
+    // host's own over the engine in its process (ClockworkEngine::newClient),
+    // or a peer's over the command plane (clockwork_client_open_shm_peer).
+    // The front owns it from here and closes it last. It is what the front
+    // sends through, where it finds the lanes, and whose metrics pace a load.
+    //
     // `replies` is where the front's own answers go: the transport the
     // engine's replies also leave by, so a /done from here and a /b_info
-    // from the engine reach the same socket in order.
-    Commands(ClockworkEngine& engine, IOscTransport* replies, Work work = Work::Own);
+    // from the engine reach the same socket in order. Null for a front that
+    // is polled instead (poll(), a peer): its answers come out of the poll,
+    // and what it waits for is matched by verb and buffer, the handle's
+    // replies all carrying one token.
+    Commands(ClockworkClient* client, IOscTransport* replies, Work work = Work::Own);
     ~Commands() override;
 
     // Work::Host: every file job queued so far, in arrival order, then what a
@@ -104,8 +117,19 @@ public:
     // /done comes.
     bool loadDefinitions(const std::string& dir, std::string* why);
 
+    // A client's command, through the front: a verb of the front's is taken and
+    // answered here (true); anything else goes to the engine through the
+    // handle (false). What a peer sends everything through.
+    bool        send(const uint8_t* data, uint32_t size, uint32_t token);
+
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
     bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
+
+    // For a front made with no `replies`: the handle's replies, polled
+    // (clockwork_client_poll), with the ones that answer the front's own sends
+    // kept and acted on, then the front's answers to the asker in the order
+    // they were made. The bytes are the front's until the next poll.
+    uint32_t    poll(ClockworkClientMessage* out, uint32_t max);
     const char* describe() const override {
         return "the file verbs (/b_allocRead, /b_read, /b_write, /d_load...) answered here, through the lanes";
     }
@@ -190,6 +214,13 @@ private:
     bool ensurePools();           // under mMut
     bool takePending(Pending::What what, uint32_t token, int32_t bufnum, Pending* out);  // under mMut
     void reply(uint32_t token, const uint8_t* data, uint32_t size);
+    // Through the handle; a refusal for want of an instance is said back to
+    // the front as the engine would say it, so the asker hears the same.
+    void sendOn(const uint8_t* data, uint32_t size, uint32_t token);
+    // The lanes and the metrics, as the handle finds them.
+    uint8_t*                  assetsLane();
+    const uint8_t*            returnsLane();
+    const PerformanceMetrics* metrics();
     void sendDone(uint32_t token, const char* cmd, int32_t bufnum);
     void sendFail(uint32_t token, const char* cmd, const std::string& why, int32_t bufnum);
     void sendDoneCmd(uint32_t token, const char* cmd);
@@ -197,8 +228,24 @@ private:
     bool recordVerb(const uint8_t* data, uint32_t size, uint32_t token);   // true: it was one, and answered
     void finish(uint32_t token, const char* cmd, int32_t bufnum, const std::vector<uint8_t>& completion);
 
-    ClockworkEngine& mEngine;
+    ClockworkClient* const mClient;
+    // Closes the handle last of all: the recorder below reads through it as
+    // it stops.
+    std::unique_ptr<ClockworkClient, void (*)(ClockworkClient*)> mOwner;
     IOscTransport*   mReplies;
+    // The handle's replies carry one token (a polled front's): what the front
+    // waits for is matched by verb and buffer, and answered to the token the
+    // asker used.
+    const bool       mTokenless;
+    // A polled front's answers, until its next poll hands them out; and the
+    // frames that poll handed out, kept until the next.
+    struct Polled { std::vector<uint8_t> bytes; uint32_t origin, route, sequence; };
+    std::mutex                                            mAnswersMut;
+    std::deque<std::pair<uint32_t, std::vector<uint8_t>>> mAnswers;
+    std::vector<Polled>                                   mPolled;
+    // The front's own /b_free of what a buffer held, when the handle cannot
+    // tell its token from an asker's: so many /done "/b_free" are the front's.
+    std::multiset<int32_t>                                mOwnFrees;
     const Work       mWork;
     Recorder         mRecorder;
     std::string      mSummary;

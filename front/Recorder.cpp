@@ -5,7 +5,6 @@
 
 #include "AudioFormats.h"
 #include "AudioThreadWitness.h"
-#include "ClockworkEngine.h"
 #include "clockwork_audio_file.h"
 #include "clockwork_client.h"
 #include "shm_audio_buffer.hpp"
@@ -13,8 +12,8 @@
 #include <chrono>
 #include <vector>
 
-Recorder::Recorder(ClockworkEngine& engine, bool ownThread)
-    : mEngine(engine), mOwnThread(ownThread), mBuf(4096 * SCOPE_CHANNELS) {}
+Recorder::Recorder(ClockworkClient* client, bool ownThread)
+    : mClient(client), mOwnThread(ownThread), mBuf(4096 * SCOPE_CHANNELS) {}
 
 Recorder::~Recorder() {
     std::string path, err;
@@ -22,7 +21,7 @@ Recorder::~Recorder() {
 }
 
 shm_audio_buffer* Recorder::masterSlot() {
-    ClockworkClient* c = mEngine.egressClient();
+    ClockworkClient* c = mClient;
     if (!c) return nullptr;
     ClockworkRegion taps {};
     if (clockwork_client_region(c, CLOCKWORK_REGION_SCOPE, &taps) != CLOCKWORK_OK || !taps.base) return nullptr;
@@ -39,7 +38,12 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
     // the frames'. Live from boot when the device has outputs at all.
     const bool live = slot->enabled.load(std::memory_order_acquire) != 0;
     uint32_t rate = live ? slot->sample_rate : 0;
-    if (rate == 0) rate = static_cast<uint32_t>(mEngine.currentDevice().activeSampleRate + 0.5);
+    if (rate == 0) {
+        // The engine's rate, as the handle reports it.
+        ClockworkClientInfo info {};
+        info.struct_bytes = sizeof info;
+        if (clockwork_client_info(mClient, &info) == CLOCKWORK_OK) rate = static_cast<uint32_t>(info.sample_rate + 0.5);
+    }
     if (rate == 0) rate = 48000;
     mChannels = live && slot->channels > 0 && slot->channels <= SCOPE_CHANNELS ? slot->channels : SCOPE_CHANNELS;
 

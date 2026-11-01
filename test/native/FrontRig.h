@@ -89,12 +89,15 @@ struct FrontRig {
     FrontedTransport fronted;
     const Work       work;
 private:
-    // Made over the engine before it boots, as the server makes them: the
-    // transport the engine's replies leave by has to be in place by then.
+    // The transport the engine's replies leave by is in place before it
+    // boots, as the server's is; the front is made after, over the handle the
+    // booted engine hands out, as the server makes it.
     std::unique_ptr<CallbackTransport>    mSocket;   // what passes the front: the fixture's own callbacks
-    std::unique_ptr<supersonic::Commands> mFront;
 public:
     EngineFixture         fx;
+private:
+    std::unique_ptr<supersonic::Commands> mFront;
+public:
     supersonic::Commands& front;
 
     // Host work when the test is the host; the front's own threads otherwise.
@@ -106,11 +109,12 @@ public:
         : work(w),
           fx(cfg, [this](ClockworkEngine& engine) {
               mSocket = std::make_unique<CallbackTransport>(&engine.onReply, &engine.onReplyRouted);
-              mFront  = std::make_unique<supersonic::Commands>(engine, &sink, work);
-              fronted.attach(mSocket.get(), mFront.get());
+              fronted.attach(mSocket.get(), nullptr);
               engine.setTransport(&fronted);
           }),
+          mFront(std::make_unique<supersonic::Commands>(fx.engine().newClient(), &sink, work)),
           front(*mFront) {
+        fronted.attach(mSocket.get(), mFront.get());
         // What passes the front reaches the socket, as the front's own answers do.
         fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
             sink.send(origin, d, n, false);

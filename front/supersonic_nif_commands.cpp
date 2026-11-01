@@ -7,6 +7,6 @@
 #include "clockwork_nif_front.h"
 #include "supersonic_commands.h"
 
-std::unique_ptr<OscFront> clockwork_nif_make_front(ClockworkEngine& engine, IOscTransport& replies) {
-    return std::make_unique<supersonic::Commands>(engine, &replies);
+std::unique_ptr<OscFront> clockwork_nif_make_front(ClockworkClient* client, IOscTransport& replies) {
+    return std::make_unique<supersonic::Commands>(client, &replies);
 }

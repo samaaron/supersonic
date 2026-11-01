@@ -158,6 +158,7 @@ target_link_libraries(SuperSonic PRIVATE
 add_library(supersonic_embed STATIC
     host/EmbeddedHost.cpp
     front/supersonic_commands.cpp
+    front/supersonic_commands_api.cpp
     front/Recorder.cpp)
 add_dependencies(supersonic_embed scsynth)
 target_compile_definitions(supersonic_embed PUBLIC

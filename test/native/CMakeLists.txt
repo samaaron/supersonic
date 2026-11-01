@@ -72,7 +72,9 @@ add_executable(SuperSonicNativeTests
     test_engine_host.cpp
     test_supersonic_binary.cpp
     test_front_recording.cpp
+    test_commands_peer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../front/supersonic_commands.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../front/supersonic_commands_api.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../front/Recorder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../host/EngineHost.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../host/EmbeddedHost.cpp

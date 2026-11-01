@@ -26,14 +26,16 @@
 #include <thread>
 #include <vector>
 
-class ClockworkEngine;
+struct ClockworkClient;
 struct ClockworkAudioWriter;
 
 class Recorder {
 public:
     // `ownThread`: a recording pulls on a thread started for it. Without, the
     // host pulls (pull()), and stop() pulls what is left on the thread that calls it.
-    Recorder(ClockworkEngine& engine, bool ownThread);
+    // `client`: a handle over the engine (clockwork_client.h), the caller's, and
+    // where the master tap is read from; it must outlive the recorder.
+    Recorder(ClockworkClient* client, bool ownThread);
     ~Recorder();
 
     // Opens `path` for `header` ("wav", "flac", …) at `bits` (16, 24, or 32
@@ -56,7 +58,7 @@ private:
     void drain();
     shm_audio_buffer* masterSlot();
 
-    ClockworkEngine&      mEngine;
+    ClockworkClient*      mClient;
     const bool            mOwnThread;
     std::mutex            mMut;
     std::thread           mThread;

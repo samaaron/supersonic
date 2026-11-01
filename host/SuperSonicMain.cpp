@@ -112,11 +112,11 @@ int main(int argc, char* argv[]) {
     // subscriber registry (the notify audiences are the transport's); the
     // replies themselves are pulled by this process's pump, below.
     const Identity identity { CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_BANNER, SUPERSONIC_VERSION_STRING };
-    supersonic::Commands theFront(engine, transport);
-    theFront.setSummary(bannerSummary(identity));
-    theFront.setQuit([] { requestShutdown(); });   // scsynth's /quit ends the server
-    front = &theFront;
-    fronted.attach(transport, front);
+    // The front is built on a client handle, which there is once the engine
+    // has an arena: made after init, below. Until then replies pass straight
+    // through the fronted transport, and nothing is heard from a client.
+    std::unique_ptr<supersonic::Commands> theFront;
+    fronted.attach(transport, nullptr);
     engine.setTransport(&fronted);
     o.cfg.hostDrainsEgress = true;
     // The debug channel, to the log. A summary's leading \x01 is for a GUI
@@ -124,7 +124,6 @@ int main(int argc, char* argv[]) {
     EgressPump pump(engine, fronted, [&log](const std::string& s) {
         log(!s.empty() && s[0] == '\x01' ? s.substr(1) : s);
     });
-    log(std::string("commands: ") + theFront.describe());
 
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
     // Reserve the tracks' lanes before the engine boots: they are laid out
@@ -143,6 +142,13 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    theFront = std::make_unique<supersonic::Commands>(engine.newClient(), transport);
+    theFront->setSummary(bannerSummary(identity));
+    theFront->setQuit([] { requestShutdown(); });   // scsynth's /quit ends the server
+    front = theFront.get();
+    fronted.attach(transport, front);
+    log(std::string("commands: ") + theFront->describe());
+
     // The engine's replies flow from here, before any client is heard: the -D
     // load below waits on them, and nothing goes to a client the transport has
     // not yet met.
@@ -154,7 +160,7 @@ int main(int argc, char* argv[]) {
     if (o.loadDefinitionsAtBoot) {
         for (const std::string& dir : scsynth_synthdef_directories()) {
             std::string why;
-            if (theFront.loadDefinitions(dir, &why)) log("synthdefs: loaded " + dir);
+            if (theFront->loadDefinitions(dir, &why)) log("synthdefs: loaded " + dir);
             else                                     log("synthdefs: none from " + dir + " (" + why + ")");
         }
     }

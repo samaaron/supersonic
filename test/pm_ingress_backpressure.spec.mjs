@@ -43,14 +43,17 @@ test.describe("PM-mode ingress backpressure", () => {
       const SENT = 150;
       for (let i = 0; i < SENT; i++) sonic.sendOSC(msg);
 
-      // Wait for the burst to resolve and a metrics snapshot reflecting it.
-      const deadline = Date.now() + 5000;
+      // Wait until every flooded message has been accounted for, sent or
+      // dropped: a message still in the postMessage queue is neither yet, and
+      // a snapshot taken at the first drop would miss the ones behind it.
+      const accounted = (m) =>
+        m.oscOutMessagesSent - before.oscOutMessagesSent
+        + m.engineMessagesDropped - before.engineMessagesDropped;
+      const deadline = Date.now() + 10000;
       let after = sonic.getMetrics();
-      while (Date.now() < deadline) {
+      while (Date.now() < deadline && accounted(after) < SENT) {
+        await new Promise((r) => setTimeout(r, 50));
         after = sonic.getMetrics();
-        if (after.engineMessagesDropped - before.engineMessagesDropped > 0)
-          break;
-        await new Promise((r) => setTimeout(r, 100));
       }
 
       return {

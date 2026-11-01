@@ -100,11 +100,9 @@ bool EmbeddedHost::boot(const ClockworkEngine::Config& cfg, Callbacks callbacks,
     };
 
     // The front answers through the transport the engine's replies leave by,
-    // and sees those replies first.
-    I.front = std::make_unique<Commands>(I.engine, &I.transport);
-    I.summary = std::string(CLOCKWORK_PRODUCT_NAME) + " " + SUPERSONIC_VERSION_STRING + " (embedded)";
-    I.front->setSummary(I.summary);
-    I.fronted.attach(&I.transport, I.front.get());
+    // and sees those replies first. It is made after init, over the handle
+    // the booted engine hands out.
+    I.fronted.attach(&I.transport, nullptr);
     I.engine.setTransport(&I.fronted);
 
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
@@ -133,6 +131,10 @@ bool EmbeddedHost::boot(const ClockworkEngine::Config& cfg, Callbacks callbacks,
         I.engine.shutdown();
         return fail(why);
     }
+    I.front = std::make_unique<Commands>(I.engine.newClient(), &I.transport);
+    I.summary = std::string(CLOCKWORK_PRODUCT_NAME) + " " + SUPERSONIC_VERSION_STRING + " (embedded)";
+    I.front->setSummary(I.summary);
+    I.fronted.attach(&I.transport, I.front.get());
     mRunning = true;
     return true;
 }

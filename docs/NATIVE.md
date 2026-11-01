@@ -202,13 +202,11 @@ plane and the assets and returns areas — and it is the command transport:
 one trusted peer on the same machine, handed the segment read-write and one
 at a time (its attach connection is the lease), writes straight into the
 engine's command ring, the fastest path there is. Without the flag there is
-no command segment, and a peer asking for one is told so. It talks to the engine
-itself, not through the server, so nothing the server answers on the engine's
-behalf is answered there: the file commands (`/b_allocRead`, `/d_load`, ...)
-are refused with what to do instead, and `/clockwork/record/*`,
-`/clockwork/summary` and `/quit` are not available. A peer loads definitions
-with `/d_recv` and samples through the assets area (`/clockwork/asset/commit`), as the
-web client does.
+no command segment, and a peer asking for one is told so. The peer sends
+through `supersonic::Commands` over its handle (docs/COMMANDS.md), so the
+file commands, `/clockwork/record/*`, `/clockwork/summary` and `/quit` are
+answered in the peer's process exactly as the server answers them for a
+socket: every path to the engine has the same verbs.
 
 ### Files
 
