@@ -51,7 +51,7 @@ static ClockworkEngine::Config accuracyConfig(int maxNodes) {
 // time the next block is heard at, from the blocks rendered so far.
 static double engineNow(EngineFixture& fx, uint32_t sampleRate) {
     if (testDevice()) return wallClockNTP();
-    const uint32_t blocks = fx.engine().processor().processCount.load(std::memory_order_acquire);
+    const uint32_t blocks = fx.engine().processor().processCount.value.load(std::memory_order_acquire);
     return kOriginNtp + double(blocks) * 128.0 / double(sampleRate);
 }
 

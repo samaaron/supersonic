@@ -33,7 +33,7 @@ ClockworkEngine::Config config() {
 
 // The time the next block is heard at, on the engine's freewheel clock.
 double engineNow(EngineFixture& fx) {
-    const uint32_t blocks = fx.engine().processor().processCount.load(std::memory_order_acquire);
+    const uint32_t blocks = fx.engine().processor().processCount.value.load(std::memory_order_acquire);
     return kOriginNtp + double(blocks) * get_audio_buffer_samples() / kRate;
 }
 

@@ -462,7 +462,8 @@ bool serveSegment(shm_attach::server& server, ClockworkEngine& engine, const Opt
     // to one peer at a time, where --shm-commands made one (docs/SEGMENTS.md
     // in clockwork).
     if (server.start(o.shmEndpoint, engine.shmReaderHandle(), engine.shmSegmentSize(),
-                     engine.shmCommandHandle(), engine.shmCommandSize(), o.secret.get(), &err)) {
+                     engine.shmCommandHandle(), engine.shmCommandSize(), engine.shmCommandWakeEvent(),
+                     o.secret.get(), &err)) {
         log("shared memory served at " + o.shmEndpoint
             + (detail_shm_segment::shm_handle_valid(engine.shmCommandHandle()) ? " (readers, and one command peer)" : " (readers)"));
         return true;

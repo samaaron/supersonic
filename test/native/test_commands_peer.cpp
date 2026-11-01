@@ -36,7 +36,8 @@ ClockworkClient* openPeer(ClockworkEngine& engine) {
     ClockworkStatus st = CLOCKWORK_E_NOT_FOUND;
     ClockworkClient* peer = clockwork_client_open_shm_peer_handles(
         detail_shm_segment::shm_handle_to_intptr(detail_shm_segment::shm_dup_handle(engine.shmReaderHandle())),
-        detail_shm_segment::shm_handle_to_intptr(detail_shm_segment::shm_dup_handle(engine.shmCommandHandle())), &st);
+        detail_shm_segment::shm_handle_to_intptr(detail_shm_segment::shm_dup_handle(engine.shmCommandHandle())),
+        0 /* no wake event: the case pumps the blocks that drain the plane */, &st);
     REQUIRE(peer != nullptr);
     REQUIRE(st == CLOCKWORK_OK);
     return peer;

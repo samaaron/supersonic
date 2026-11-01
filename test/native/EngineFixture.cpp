@@ -280,16 +280,16 @@ uint32_t EngineFixture::blocksOfAudio(int ms) const {
 
 bool EngineFixture::waitForBlocks(uint32_t n, int timeoutMs) {
     const uint32_t start =
-        mEngine.processor().processCount.load(std::memory_order_acquire);
+        mEngine.processor().processCount.value.load(std::memory_order_acquire);
     // Unsigned wrap is fine: (now - start) is the number of blocks rendered
     // since the snapshot regardless of counter wraparound.
     // Pumped: the blocks are rendered here, now, however busy the machine is.
     if (testPumps()) {
         pumpBlock(n);
-        return mEngine.processor().processCount.load(std::memory_order_acquire) - start >= n;
+        return mEngine.processor().processCount.value.load(std::memory_order_acquire) - start >= n;
     }
     return pollUntil([&] {
-        return mEngine.processor().processCount.load(
+        return mEngine.processor().processCount.value.load(
                    std::memory_order_acquire) - start >= n;
     }, timeoutMs);
 }
