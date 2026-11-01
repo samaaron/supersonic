@@ -108,6 +108,9 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           node clockwork/scripts/sbom.mjs --root . target all build/sbom "$VERSION"
+          # The Debian package is built with -DCLOCKWORK_PLUGINS=OFF (packaging/debian/rules):
+          # its own document, beside the default linux-x64 one.
+          node clockwork/scripts/sbom.mjs --root . target linux-x64 build/sbom "$VERSION" --option CLOCKWORK_PLUGINS=OFF --variant deb
           for dir in . packages/supersonic-scsynth-core; do
             mkdir -p "$dir/sbom"
             cp build/sbom/supersonic-web.cdx.json build/sbom/clockwork-web.cdx.json "$dir/sbom/"

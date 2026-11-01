@@ -67,7 +67,9 @@ jobs:
       - name: Everything carried is listed
         run: node clockwork/scripts/sbom.mjs --root . check
       - name: One SBOM per target, with Clockwork's from the pin
-        run: node clockwork/scripts/sbom.mjs --root . target all build/sbom "$(git rev-parse --short HEAD)"
+        run: |
+          node clockwork/scripts/sbom.mjs --root . target all build/sbom "$(git rev-parse --short HEAD)"
+          node clockwork/scripts/sbom.mjs --root . target linux-x64 build/sbom "$(git rev-parse --short HEAD)" --option CLOCKWORK_PLUGINS=OFF --variant deb
       - uses: actions/upload-artifact@v4
         with:
           name: supersonic-sboms
