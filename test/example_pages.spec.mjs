@@ -92,7 +92,21 @@ test("the blob arrives with the sound and the trail follows its path", async ({ 
     () => getComputedStyle(document.getElementById("init-button-container")).display === "none",
     null, { timeout: 30000 });
 
-  const r = await page.evaluate(async () => {
+  // startAll() boots the scheduler and waits for its replies, on the real
+  // clock. From then on the page's clock and frames are Playwright's: time
+  // moves only when the test moves it, a frame every 16 ms of it, so the
+  // blob's steps and the checks between them come the same way on every run,
+  // however busy the machine. The engine runs in workers, which keep the
+  // real clock.
+  const disabledAtPress = await page.evaluate(async () => {
+    await window.startAll();
+    return document.getElementById("play-toggle").classList.contains("disabled");
+  });
+  const clockAt = Date.now();
+  await page.clock.install({ time: clockAt });
+  await page.clock.pauseAt(clockAt + 1000);
+
+  await page.evaluate(async () => {
     const o = window.orchestrator;
     const ui = window.uiState;
     const get = (node, control) => new Promise((resolve, reject) => {
@@ -105,9 +119,7 @@ test("the blob arrives with the sound and the trail follows its path", async ({ 
       o.on("in", handler);
       o.send("/s_get", node, control);
     });
-    await window.startAll();
     const button = document.getElementById("play-toggle");
-    const disabledAtPress = button.classList.contains("disabled");
 
     const rect = document.getElementById("synth-pad").getBoundingClientRect();
     const target = { x: 60 / rect.width, y: 1 - 60 / rect.height }; // where Autoplay parks
@@ -152,8 +164,8 @@ test("the blob arrives with the sound and the trail follows its path", async ({ 
     };
     // The last cluster sits under a spacing (6 px) short of the blob, and
     // its glow reaches a few pixels past it, so this close to the blob the
-    // trail is lit. Tighter than a frame's travel at 120 Hz (23 px): a
-    // trail laid a frame behind the blob shows as a gap here.
+    // trail is lit. Tighter than a frame's travel: a trail laid a frame
+    // behind the blob shows as a gap here.
     const BEHIND_PX = 8;
 
     const t0 = performance.now();
@@ -161,33 +173,41 @@ test("the blob arrives with the sound and the trail follows its path", async ({ 
     const atOnce = { x: ui.padX, y: ui.padY };
     const cutoffAtOnce = await get(2000, "cutoff");
 
-    let arrivedAt = null;
-    const frames = [];
-    while (performance.now() - t0 < 1500) {
-      await new Promise((r) => requestAnimationFrame(r));
-      const img = ctx.getImageData(0, 0, c.width, c.height);
-      const at = along();
-      frames.push({ t: Math.round(performance.now() - t0), at: Math.round(at), ...longestGap(img, at - BEHIND_PX) });
-      if (Math.abs(ui.padX - target.x) < 0.005 && Math.abs(ui.padY - target.y) < 0.005) {
-        arrivedAt = performance.now() - t0;
-        break;
+    // Checked once a frame, after the pad's frame callback, which the press
+    // requested: the blob has stepped and its trail is laid. The frames come
+    // as the test runs the clock, below.
+    window.__autoplay = (async () => {
+      let arrivedAt = null;
+      const frames = [];
+      while (performance.now() - t0 < 1500) {
+        await new Promise((r) => requestAnimationFrame(r));
+        const img = ctx.getImageData(0, 0, c.width, c.height);
+        const at = along();
+        frames.push({ t: Math.round(performance.now() - t0), at: Math.round(at), ...longestGap(img, at - BEHIND_PX) });
+        if (Math.abs(ui.padX - target.x) < 0.005 && Math.abs(ui.padY - target.y) < 0.005) {
+          arrivedAt = performance.now() - t0;
+          break;
+        }
       }
-    }
-    const final = longestGap(ctx.getImageData(0, 0, c.width, c.height), pathPx - BEHIND_PX);
-    window.stopAll();
-    return { start, target, atOnce, cutoffAtOnce, expectedCutoff: 30 + target.y * 100, arrivedAt, pathPx, frames, final, disabledAtPress };
+      const final = longestGap(ctx.getImageData(0, 0, c.width, c.height), pathPx - BEHIND_PX);
+      window.stopAll();
+      return { start, target, atOnce, cutoffAtOnce, expectedCutoff: 30 + target.y * 100, arrivedAt, pathPx, frames, final };
+    })();
   });
+  // Past the loop's 1500 ms by a frame, so it ends either way.
+  await page.clock.runFor(1500 + 16);
+  const r = await page.evaluate(() => window.__autoplay);
 
   // A started page takes the press: the button is live once startAll() is.
-  expect(r.disabledAtPress, "Autoplay button still disabled after startAll()").toBe(false);
+  expect(disabledAtPress, "Autoplay button still disabled after startAll()").toBe(false);
   // The sound has its target the moment the button is pressed...
   expect(r.cutoffAtOnce).toBeCloseTo(r.expectedCutoff, 1);
   // ...and the blob has not jumped there: it travels.
   expect(Math.abs(r.atOnce.x - r.target.x) + Math.abs(r.atOnce.y - r.target.y)).toBeGreaterThan(0.05);
-  // It arrives on the slide's timescale — not a jump, not a second later.
+  // It arrives when the 100 ms slide is over, on the next frame.
   expect(r.arrivedAt, "the blob never arrived").not.toBeNull();
-  expect(r.arrivedAt).toBeGreaterThan(40);
-  expect(r.arrivedAt).toBeLessThan(400);
+  expect(r.arrivedAt).toBeGreaterThanOrEqual(100);
+  expect(r.arrivedAt).toBeLessThanOrEqual(100 + 16);
   // And the trail is a line along the way it came, not a few dots — laid
   // up to the blob in every frame, not a frame behind it.
   // Clusters are 6 px apart: a dark run longer than that is a gap.
@@ -215,33 +235,47 @@ test("a dragged blob trails the pointer by the slide time, not more", async ({ p
   // The pad is below the fold at the test viewport's height; a press that
   // lands on the page body activates nothing.
   await page.locator("#synth-pad").scrollIntoViewIfNeeded();
+
+  // From here the page's clock and frames are Playwright's: time moves only
+  // when the test moves it, a frame every 16 ms of it, so pointer events and
+  // frames interleave the same way on every run, however busy the machine.
+  // The engine runs in workers, which keep the real clock.
+  const t0 = Date.now();
+  await page.clock.install({ time: t0 });
+  await page.clock.pauseAt(t0 + 1000);
+
   const rect = await page.evaluate(() => {
     const r = document.getElementById("synth-pad").getBoundingClientRect();
-    window.__drag = { pointer: [], blob: [], on: true };
+    window.__drag = { pointer: [], blob: [] };
     document.addEventListener("mousemove", (e) =>
       window.__drag.pointer.push([performance.now(), (e.clientX - r.left) / r.width]));
-    const tick = () => {
-      window.__drag.blob.push([performance.now(), window.uiState.padX]);
-      if (window.__drag.on) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
     return { left: r.left, top: r.top, w: r.width, h: r.height };
   });
 
   // A press at the left edge, then a steady sweep to the right edge over
   // about a third of a second, then a pause with the button still held.
+  // Pointer events come every 4 ms, four to a frame.
   const y = rect.top + rect.h / 2;
   await page.mouse.move(rect.left + 4, y);
   await page.mouse.down();
-  const steps = 40;
+  // Sampled after the pad's own frame callback, which the press requested:
+  // where the blob is once each frame has stepped it.
+  await page.evaluate(() => {
+    const tick = (now) => {
+      window.__drag.blob.push([now, window.uiState.padX]);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  const steps = 80;
   for (let i = 1; i <= steps; i++) {
     await page.mouse.move(rect.left + 4 + (rect.w - 8) * (i / steps), y);
-    await page.waitForTimeout(8);
+    await page.clock.runFor(4);
   }
-  await page.waitForTimeout(300);
+  await page.clock.runFor(300);
   await page.mouse.up();
 
-  const d = await page.evaluate(() => { window.__drag.on = false; return window.__drag; });
+  const d = await page.evaluate(() => window.__drag);
   // For each blob position, how long ago was the pointer there? That is the
   // blob's lag behind the pointer at that moment.
   const finalPointer = d.pointer[d.pointer.length - 1][1];
@@ -256,12 +290,11 @@ test("a dragged blob trails the pointer by the slide time, not more", async ({ p
   }
 
   expect(d.pointer.length).toBeGreaterThan(20);
-  // The slide is 100 ms; a frame or two of rAF on top — on an idle machine.
-  // The blob moves on requestAnimationFrame, and a CI runner with the whole
-  // suite on every core stalls frames by a hundred milliseconds and more
-  // (249 ms was measured on the publish job). The bound is set to catch a
-  // blob that has stopped following, not one whose frames came late.
-  expect(maxLag, "the blob fell behind the pointer").toBeLessThan(400);
+  // The slide is 100 ms, and the blob steps once a frame: it trails by the
+  // slide and up to a frame more. A blob whose clock restarts on each
+  // pointer event moves for only a quarter of each frame here, and falls
+  // further behind.
+  expect(maxLag, "the blob fell behind the pointer").toBeLessThanOrEqual(100 + 16);
   expect(Math.abs(finalBlob - finalPointer), "the blob did not settle where the pointer stopped").toBeLessThan(0.01);
   expect(errors, "the page reported errors").toEqual([]);
 });
