@@ -124,23 +124,23 @@ jobs:
         run: cp build/README.npm.md README.md
 
       - name: Publish supersonic-scsynth
-        run: npm publish
+        run: scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-core
         working-directory: packages/supersonic-scsynth-core
-        run: npm publish
+        run: ../../scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-synthdefs
         working-directory: packages/supersonic-scsynth-synthdefs
-        run: npm publish
+        run: ../../scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-samples
         working-directory: packages/supersonic-scsynth-samples
-        run: npm publish
+        run: ../../scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-bundle
         working-directory: packages/supersonic-scsynth-bundle
-        run: npm publish
+        run: ../../scripts/npm-publish-once.sh
 
       - name: Replace symlinks with actual files for distribution
         run: |
