@@ -95,7 +95,7 @@ struct ScsynthDsp {
     World*    world = nullptr;
     // The timetag of the block currently rendering, so dsp_osc can place a
     // timestamped message at its exact sample within that block.
-    int64_t   block_time = 0;
+    ClockworkTimetag block_time{};
     // OSC 32.32 fixed-point units to samples: sample_rate / 2^32.
     double    osc_to_samples = 0.0;
     // The persistent notify table, or nullptr if the host offered no region —
@@ -157,9 +157,9 @@ namespace {
 // Place a timestamped message at its exact sample within the current block.
 // scsynth reads mSampleOffset when it creates a node, which is what makes a
 // bundle sample-accurate rather than merely block-accurate.
-void apply_offset(ScsynthDsp* d, int64_t when, int64_t block_time) {
+void apply_offset(ScsynthDsp* d, ClockworkTimetag when, ClockworkTimetag block_time) {
     World* w = d->world;
-    if (when == 0 || when == 1) {   // the OSC "immediately" sentinels
+    if (clockwork_timetag_is_immediate(when)) {
         w->mSampleOffset = 0;
         w->mSubsampleOffset = 0.0f;
         return;
@@ -169,7 +169,7 @@ void apply_offset(ScsynthDsp* d, int64_t when, int64_t block_time) {
     // before the block starts at its first frame and one due after it at its
     // last; the clamp is in float because a late bundle's offset can be far
     // outside int's range.
-    const float diff = (float)((double)(when - block_time) * d->osc_to_samples) + 0.5f;
+    const float diff = (float)((double)clockwork_timetag_offset(block_time, when) * d->osc_to_samples) + 0.5f;
     const float floored = std::floor(diff);
     const float last = (float)(w->mBufLength - 1);
     w->mSampleOffset = !(floored > 0.0f) ? 0 : floored >= last ? w->mBufLength - 1 : sc_float_to_int32(floored);
@@ -386,7 +386,7 @@ extern "C" void supersonic_scope_write(ScopeBufferHnd* hnd, const float* const* 
  * clock; who drives it is clockwork's business.
  */
 static const ClockworkClockState* g_session_clock = nullptr;
-static std::atomic<uint64_t>  g_block_osc_time{0};
+static std::atomic<uint64_t>  g_block_osc_time{0};   // ClockworkTimetag::ntp
 
 extern "C" const ClockworkClockState* supersonic_scsynth_session_clock() {
     return g_session_clock;
@@ -702,7 +702,7 @@ void dsp_process(struct Dsp* dsp,
                  const float* const* in, uint32_t n_in,
                  float* const* out, uint32_t n_out,
                  uint32_t frames,
-                 int64_t block_time) {
+                 ClockworkTimetag block_time) {
     auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
     if (!d || !d->world) {
         for (uint32_t c = 0; c < n_out; ++c)
@@ -711,7 +711,7 @@ void dsp_process(struct Dsp* dsp,
     }
     World* w = d->world;
     d->block_time = block_time;
-    g_block_osc_time.store(static_cast<uint64_t>(block_time), std::memory_order_relaxed);
+    g_block_osc_time.store(block_time.ntp, std::memory_order_relaxed);
     const uint32_t block = (uint32_t)w->mBufLength;
     const uint32_t n = frames < block ? frames : block;
 
@@ -755,7 +755,7 @@ void dsp_process(struct Dsp* dsp,
  * they are due — so `when` is not "later", it is "where in this block".
  */
 void dsp_osc(struct Dsp* dsp, const uint8_t* bytes, uint32_t len,
-             int64_t when, uint32_t origin, int64_t block_time) {
+             ClockworkTimetag when, uint32_t origin, ClockworkTimetag block_time) {
     auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
     if (!d || !d->world || !bytes || len == 0) return;
 
