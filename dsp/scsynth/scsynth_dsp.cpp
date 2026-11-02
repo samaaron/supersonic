@@ -386,7 +386,7 @@ extern "C" void supersonic_scope_write(ScopeBufferHnd* hnd, const float* const* 
  * clock; who drives it is clockwork's business.
  */
 static const ClockworkClockState* g_session_clock = nullptr;
-static std::atomic<int64_t>   g_block_osc_time{0};
+static std::atomic<uint64_t>  g_block_osc_time{0};
 
 extern "C" const ClockworkClockState* supersonic_scsynth_session_clock() {
     return g_session_clock;
@@ -425,9 +425,9 @@ extern "C" uint32_t       supersonic_assets_bytes(void) {
 }
 
 extern "C" double supersonic_scsynth_block_ntp() {
-    // OSC timetag -> NTP seconds. 2^32 is one second.
-    return static_cast<double>(g_block_osc_time.load(std::memory_order_relaxed))
-         / 4294967296.0;
+    // OSC timetag -> NTP seconds: whole seconds over a 32-bit fraction.
+    const uint64_t t = g_block_osc_time.load(std::memory_order_relaxed);
+    return static_cast<double>(t >> 32) + static_cast<double>(t & 0xFFFFFFFFu) / 4294967296.0;
 }
 
 /*
@@ -711,7 +711,7 @@ void dsp_process(struct Dsp* dsp,
     }
     World* w = d->world;
     d->block_time = block_time;
-    g_block_osc_time.store(block_time, std::memory_order_relaxed);
+    g_block_osc_time.store(static_cast<uint64_t>(block_time), std::memory_order_relaxed);
     const uint32_t block = (uint32_t)w->mBufLength;
     const uint32_t n = frames < block ? frames : block;
 
