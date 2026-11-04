@@ -58,9 +58,6 @@ static void NodeTree_UpdateDirect(Node* node) {
 // TAU MODIFICATION END
 // =============================================================================
 
-// returns number of bytes in an OSC string.
-int OSCstrlen(char* strin);
-
 Node* Msg_GetNode(World* inWorld, sc_msg_iter& msg) {
     Node* node;
     if (msg.nextTag('i') == 's') {

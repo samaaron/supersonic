@@ -31,6 +31,7 @@ int32_t bitsOf(float f) {
 // A message's argument part (type tags, then the data), written byte by byte.
 class Args {
 public:
+    Args() = default;   // no type tags: a name, or bytes on their own
     explicit Args(const char* tags) { str(tags); }
     Args& i(int32_t v) { for (int k = 3; k >= 0; --k) mBytes.push_back(char(uint32_t(v) >> (8 * k))); return *this; }
     Args& raw(const char* s, size_t n) { mBytes.insert(mBytes.end(), s, s + n); return *this; }
@@ -193,4 +194,38 @@ TEST_CASE("sc_msg_iter: a blob read as a number counts as one argument", "[sc_ms
     CHECK(msg.geti(-1) == -1);
     CHECK(msg.geti(-1) == 9);
     CHECK(msg.remain() == 0);
+}
+
+// A message's command name is read before any argument, by the dispatcher
+// rather than the iterator, from a client's bytes: it must end inside the
+// message, padded with zeros to the word, or there is no name at all.
+TEST_CASE("command name: a padded name inside the message has its padded length", "[sc_msg_iter]") {
+    const Args a = Args("/b_alloc").i(1);
+    auto bytes = a.exact();
+    CHECK(OSCstrlenWithin(bytes.get(), a.size()) == 12);
+}
+
+TEST_CASE("command name: a name with no end inside the message has no length", "[sc_msg_iter]") {
+    // "/b_f" fills the message exactly; no terminator anywhere in it.
+    const Args a = Args().raw("/b_f", 4);
+    auto bytes = a.exact();
+    CHECK(OSCstrlenWithin(bytes.get(), a.size()) == 0);
+}
+
+TEST_CASE("command name: a name whose last word runs past the message has no length", "[sc_msg_iter]") {
+    // "/b" and its terminator end the message one byte short of a whole word.
+    const Args a = Args().raw("/b\0", 3);
+    auto bytes = a.exact();
+    CHECK(OSCstrlenWithin(bytes.get(), a.size()) == 0);
+}
+
+TEST_CASE("command name: a name whose padding is not zero has no length", "[sc_msg_iter]") {
+    const Args a = Args().raw("/b\0X", 4);
+    auto bytes = a.exact();
+    CHECK(OSCstrlenWithin(bytes.get(), a.size()) == 0);
+}
+
+TEST_CASE("command name: an empty message has no name", "[sc_msg_iter]") {
+    char none = 0;
+    CHECK(OSCstrlenWithin(&none, 0) == 0);
 }

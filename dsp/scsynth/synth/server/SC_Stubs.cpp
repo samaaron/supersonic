@@ -79,10 +79,20 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
 
         pos += snprintf(buf + pos, sizeof(buf) - pos, "%s[ ", prefix);
         if (inData[0]) {
-            // String command
-            pos += snprintf(buf + pos, sizeof(buf) - pos, "\"%s\"", inData);
-            data = OSCstrskip(inData);
-            size = inSize - (data - inData);
+            // String command: its name read within the message, which is a
+            // client's bytes (PerformOSCMessage).
+            const int nameLen = OSCstrlenWithin(inData, inSize);
+            if (nameLen <= 0) {
+                // Without a name there is no telling where the arguments
+                // start, so none are shown.
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "<name without an end>");
+                data = inData + inSize;
+                size = 0;
+            } else {
+                pos += snprintf(buf + pos, sizeof(buf) - pos, "\"%s\"", inData);
+                data = inData + nameLen;
+                size = inSize - nameLen;
+            }
         } else {
             // Integer command
             pos += snprintf(buf + pos, sizeof(buf) - pos, "%d", OSCint(inData));
@@ -172,10 +182,13 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
         else
             cmdObj = gCmdArray[index];
     } else {
-        // String command (like "/status")
-        cmdNameLen = OSCstrlen(inData);
-        if (cmdNameLen <= 0 || cmdNameLen > inSize) {
-            scprintf("ERROR: Invalid command name length: %d (data size: %d)", cmdNameLen, inSize);
+        // String command (like "/status"): its name must end inside the
+        // message, padded to the word, before anything reads it a word at a
+        // time. The message is a client's bytes, and a completion message
+        // (/b_alloc, /b_read, ...) is bytes a client wrapped in a blob.
+        cmdNameLen = OSCstrlenWithin(inData, inSize);
+        if (cmdNameLen <= 0) {
+            scprintf("ERROR: Command name has no end inside the message (data size: %d)", inSize);
             return kSCErr_Failed;
         }
         cmdObj = gCmdLib->Get((int32*)inData);

@@ -39,6 +39,26 @@ inline const char* OSCstrskip(const char* str) {
 // returns the number of bytes (including padding) for an OSC string.
 inline size_t OSCstrlen(const char* strin) { return (size_t)(OSCstrskip(strin) - strin); }
 
+// The padded length of the OSC string at `str` when it ends inside `size`
+// bytes and the word holding its terminator is padded with zeros, which is
+// the shape Hash and the name tables read a word at a time; 0 for any other
+// bytes. For a string a client sent, the only read of its length that stays
+// inside the message: OSCstrlen walks until it finds a zero.
+inline int OSCstrlenWithin(const char* str, int size) {
+    if (size <= 0)
+        return 0;
+    const char* nul = static_cast<const char*>(memchr(str, 0, (size_t)size));
+    if (!nul)
+        return 0;
+    const int len = (int)((nul - str) / 4 + 1) * 4;
+    if (len > size)
+        return 0;
+    for (const char* p = nul; p < str + len; ++p)
+        if (*p)
+            return 0;
+    return len;
+}
+
 // returns a float, converting an int if necessary
 inline float32 OSCfloat(const char* inData) {
     elem32 elem;
@@ -112,19 +132,6 @@ private:
             return endpos;
         const char* next = str + ((nul - str) / 4 + 1) * 4;
         return next < endpos ? next : endpos;
-    }
-    // Whether the string at `str`, terminated at `nul`, can be read a word at a
-    // time (Hash and the name tables read up to the first word whose last byte
-    // is zero): the word holding the terminator lies inside the message and is
-    // padded with zeros.
-    bool wholeWords(const char* str, const char* nul) const {
-        const char* wordEnd = str + ((nul - str) / 4 + 1) * 4;
-        if (wordEnd > endpos)
-            return false;
-        for (const char* p = nul; p < wordEnd; ++p)
-            if (*p)
-                return false;
-        return true;
     }
     // The size of the blob at rdpos, or -1 when it does not fit what is left.
     int64 blobSize() const {
@@ -345,14 +352,10 @@ inline int32* sc_msg_iter::gets4(char* defaultValue) {
     if (tags ? count >= numTags : rdpos >= endpos)
         return 0; // no argument left
     if (!tags || tags[count] == 's') {
-        const char* nul = static_cast<const char*>(memchr(rdpos, 0, (size_t)(endpos - rdpos)));
-        if (!nul) {
-            rdpos = endpos;
-            value = const_cast<int32*>(kOSCEmptyName);
-        } else {
-            value = wholeWords(rdpos, nul) ? (int32*)rdpos : const_cast<int32*>(kOSCEmptyName);
-            rdpos = skipString(rdpos);
-        }
+        // A name is read a word at a time (Hash and the name tables): only
+        // one that ends inside the message, zero-padded to the word, is one.
+        value = OSCstrlenWithin(rdpos, (int)(endpos - rdpos)) ? (int32*)rdpos : const_cast<int32*>(kOSCEmptyName);
+        rdpos = skipString(rdpos);
     } else {
         value = (int32*)defaultValue;
     }
