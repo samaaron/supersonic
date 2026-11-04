@@ -7,10 +7,31 @@
 #include "AudioThreadWitness.h"
 #include "clockwork_audio_file.h"
 #include "clockwork_client.h"
+#include "clockwork_core.h"
 #include "shm_audio_buffer.hpp"
 
 #include <chrono>
 #include <vector>
+
+namespace {
+
+// The tap is the core's memory, read only under a hold: a close waits for
+// the hold, and refuses one once the core is closing (clockwork_core.h), so
+// nothing here reads an arena that is gone.
+class CoreHold {
+public:
+    explicit CoreHold(ClockworkClient* client)
+        : mCore(client ? clockwork_client_core(client) : nullptr), mHeld(mCore && clockwork_core_hold(mCore)) {}
+    ~CoreHold() { if (mHeld) clockwork_core_unhold(mCore); }
+    CoreHold(const CoreHold&) = delete;
+    CoreHold& operator=(const CoreHold&) = delete;
+    explicit operator bool() const { return mHeld; }
+private:
+    ClockworkCore* const mCore;
+    const bool mHeld;
+};
+
+} // namespace
 
 Recorder::Recorder(ClockworkClient* client, bool ownThread)
     : mClient(client), mOwnThread(ownThread) {}
@@ -38,13 +59,19 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
     std::lock_guard<std::mutex> lock(mMut);
     if (mRunning.load()) { if (err) *err = "already recording"; return false; }
     ClockworkScopeShape shape {};
-    shm_audio_buffer* slot = outSlot(shape);
-    if (!slot) { if (err) *err = "the engine publishes no audio taps"; return false; }
-
-    // The tap's own geometry, which is the device's: the file's rate must be
-    // the frames'. Live from boot when the device has outputs at all.
-    const bool live = slot->enabled.load(std::memory_order_acquire) != 0;
-    uint32_t rate = live ? slot->sample_rate : 0;
+    shm_audio_buffer* slot = nullptr;
+    uint32_t rate = 0;
+    {
+        const CoreHold held(mClient);
+        if (!held) { if (err) *err = "the engine is closing"; return false; }
+        slot = outSlot(shape);
+        if (!slot) { if (err) *err = "the engine publishes no audio taps"; return false; }
+        // The tap's own geometry, which is the device's: the file's rate must
+        // be the frames'. Live from boot when the device has outputs at all.
+        const bool live = slot->enabled.load(std::memory_order_acquire) != 0;
+        rate = live ? slot->sample_rate : 0;
+        mChannels = live && slot->channels > 0 && slot->channels <= shape.channels ? slot->channels : shape.channels;
+    }
     if (rate == 0) {
         // The engine's rate, as the handle reports it.
         ClockworkClientInfo info {};
@@ -52,7 +79,6 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
         if (clockwork_client_info(mClient, &info) == CLOCKWORK_OK) rate = static_cast<uint32_t>(info.sample_rate + 0.5);
     }
     if (rate == 0) rate = 48000;
-    mChannels = live && slot->channels > 0 && slot->channels <= shape.channels ? slot->channels : shape.channels;
 
     ClockworkAudioWriterConfig cfg {};
     cfg.struct_bytes = sizeof cfg;
@@ -120,12 +146,19 @@ void Recorder::drain() {
 // has been flowing since boot, so that cursor is "now"; the one thing that can
 // move it backwards is a device restart, which re-formats the slot.
 uint32_t Recorder::pullOnce() {
-    // The counter went backwards: the slot was re-formatted under us (a device
-    // restart). Everything since the reset is the recording's; start from the
-    // slot's first frame.
-    if (mSlot && mReader.writer_position() < mReader.last_read_position()) mReader.seek_to_start();
     uint64_t gap = 0;
-    const uint32_t n = mReader.pull(mBuf.data(), kPullFrames, &gap);
+    uint32_t n = 0;
+    {
+        // Once the core is closing the tap is gone, and the recording is what
+        // was pulled before: the host stops the front first to keep the tail.
+        const CoreHold held(mClient);
+        if (!held) return 0;
+        // The counter went backwards: the slot was re-formatted under us (a
+        // device restart). Everything since the reset is the recording's;
+        // start from the slot's first frame.
+        if (mSlot && mReader.writer_position() < mReader.last_read_position()) mReader.seek_to_start();
+        n = mReader.pull(mBuf.data(), kPullFrames, &gap);
+    }
     if (gap) mLost.fetch_add(gap);
     if (n) audio_thread_witness::fileWork();
     if (n && mWriter && clockwork_audio_writer_write(mWriter, mBuf.data(), n) == CLOCKWORK_OK)

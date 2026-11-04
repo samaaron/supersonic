@@ -124,9 +124,10 @@ public:
     ~FrontRig() {
         fx.setHostWork(nullptr);
         fx.setRoutedObserver(nullptr);   // under the fixture's lock: no call runs after this
-        // The engine stops calling into the front before the front goes; the
-        // fixture's own shutdown after this is a second, harmless one.
-        fx.engine().shutdown();
+        // The engine stops calling into the front, then the front goes, then
+        // the engine (the fixture's own shutdown): a client goes before its
+        // core, as EmbeddedHost::shutdown orders them, so a recording in
+        // progress drains its last frames from a core that is still there.
         fronted.detachFront();
         mFront.reset();
     }

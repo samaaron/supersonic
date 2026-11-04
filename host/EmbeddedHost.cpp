@@ -143,12 +143,15 @@ void EmbeddedHost::shutdown() {
     auto& I = *mImpl;
     if (!mRunning.exchange(false)) return;
     {
-        // the front stops being consulted before it goes; then the engine
+        // the front stops being consulted before it goes
         std::lock_guard<std::mutex> lk(mSendMutex);
         I.fronted.detachFront();
     }
-    I.engine.shutdown();
+    // The front before its engine: a client goes before its core. A
+    // recording in progress drains its last frames and closes its file while
+    // the core is still there; closing the core frees its memory.
     I.front.reset();
+    I.engine.shutdown();
 }
 
 bool EmbeddedHost::send(const uint8_t* data, uint32_t size) {

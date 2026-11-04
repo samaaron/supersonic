@@ -11,6 +11,8 @@
 #include "supersonic_commands.h"
 #include "OscTestUtils.h"
 #include "scsynth_options_text.h"
+#include "clockwork_audio_file.h"
+#include "TestPid.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -181,4 +183,37 @@ TEST_CASE("embedded host: a sample loaded before a rebuild is the new instance's
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     CHECK(host.front().laneFreeBytes() == host.front().laneBytes());
     host.shutdown();
+}
+
+// A recording still running when the host shuts down: the front goes before
+// the engine, so the recorder drains its last frames and closes the file
+// while the core, whose memory the tap is, is still there.
+TEST_CASE("embedded host: shutting down while recording finishes the file whole", "[embedded][recording]") {
+    supersonic::EmbeddedHost host;
+    Replies replies;
+    std::string err;
+    supersonic::EmbeddedHost::Callbacks cb;
+    cb.onMessage = [&](const uint8_t* d, uint32_t n) { replies.add(d, n); };
+    cb.onLog = [](const std::string&) {};
+    REQUIRE(host.boot(headless(), cb, &err));
+    INFO(err);
+    const std::string path = (std::filesystem::temp_directory_path()
+                              / ("embedded-record-teardown-" + std::to_string(testPid()) + ".flac")).string();
+    osc_test::Builder b;
+    b.begin("/clockwork/record/start") << path.c_str() << "flac" << int32_t{16};
+    const auto start = b.end();
+    REQUIRE(host.send(start.ptr(), start.size()));
+    REQUIRE(replies.waitFor("/clockwork/record/start.reply"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));   // frames flow into the tap
+
+    host.shutdown();   // no stop: the shutdown finishes the recording
+
+    ClockworkAudioInfo info {};
+    info.struct_bytes = sizeof info;
+    float* out = nullptr;
+    REQUIRE(clockwork_audio_decode_file(path.c_str(), &info, &out) == CLOCKWORK_OK);
+    CHECK(info.channels == 2);
+    CHECK(info.frames > 0);
+    clockwork_audio_free(out);
+    std::filesystem::remove(path);
 }
