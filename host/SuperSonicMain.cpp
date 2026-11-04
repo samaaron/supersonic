@@ -126,10 +126,10 @@ int main(int argc, char* argv[]) {
     });
 
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
-    // Reserve the tracks' lanes before the engine boots: they are laid out
-    // when memory is. The plugins live in the bridge process the engine
+    // The tracks' lanes, reserved by the engine as it boots: they are laid
+    // out when memory is. The plugins live in the bridge process the engine
     // spawns once it is up (TrackControl.h).
-    TrackControl::reserveLanes();
+    o.cfg.reservedLanes = TrackControl::kLanes;
 #endif
 
     try {

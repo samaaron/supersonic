@@ -17,6 +17,7 @@
  */
 #pragma once
 
+#include "clockwork_client.h"     // ClockworkScopeShape
 #include "shm_audio_buffer.hpp"   // the tap's slot: the engine's wire format, read in place
 
 #include <atomic>
@@ -56,7 +57,10 @@ private:
     void run();
     uint32_t pullOnce();
     void drain();
-    shm_audio_buffer* masterSlot();
+    shm_audio_buffer* outSlot(ClockworkScopeShape& shape);
+    // Frames pulled at a time, into mBuf, which holds them at the scope's
+    // widest.
+    static constexpr uint32_t kPullFrames = 4096;
 
     ClockworkClient*      mClient;
     const bool            mOwnThread;

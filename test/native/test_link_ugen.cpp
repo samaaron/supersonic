@@ -27,7 +27,7 @@
 
 namespace {
 
-// Config for the probes below. snapshotOutputBus() reads the shared output bus,
+// Config for the probes below. snapshotOutputBus(fx.engine().core()) reads the shared output bus,
 // so no audio thread may be writing it while we look: manualAudioPump starts no
 // audio source (see ClockworkEngine::startAudioSource), leaving the test thread
 // the only caller of process_audio. Under the HeadlessDriver this read raced the
@@ -48,8 +48,8 @@ ClockworkEngine::Config linkProbeConfig() {
     return cfg;
 }
 
-bool snapshotOutputBus(uint32_t blockSize, std::vector<float>& out) {
-    const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
+bool snapshotOutputBus(ClockworkCore* core, uint32_t blockSize, std::vector<float>& out) {
+    const auto* outBus = clockwork_audio_out(core);
     if (!outBus) return false;
     out.assign(outBus, outBus + blockSize);
     return true;
@@ -59,7 +59,7 @@ bool snapshotOutputBus(uint32_t blockSize, std::vector<float>& out) {
 // ordered on the same thread, so the snapshot is a whole, untorn block.
 bool pumpAndSnapshot(EngineFixture& fx, uint32_t blockSize, std::vector<float>& out) {
     fx.pumpBlock();
-    return snapshotOutputBus(blockSize, out);
+    return snapshotOutputBus(fx.engine().core(), blockSize, out);
 }
 
 float peakAbs(const std::vector<float>& samples) {

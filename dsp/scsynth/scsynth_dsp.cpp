@@ -255,6 +255,10 @@ const DspInfo kInfo = {
     // instance destroyed and built again (clockwork's docs/RESTARTS.md),
     // and dsp_reconfigure below is never asked.
     /* survives                */ 0,
+    // One to a process: scsynth keeps process-wide state (its plugin tables,
+    // its startup time), so clockwork refuses a second core's instance with
+    // the reason rather than let two share it (clockwork's dsp_api.h).
+    /* instances               */ 1,
 };
 
 } // namespace
@@ -469,15 +473,20 @@ extern "C" void supersonic_guest_release_buffer(int bufnum) {
         g_host.asset_release(g_host.ctx, (uint32_t)bufnum);
 }
 
-struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** err) {
-    if (!config) { if (err) *err = "no DspConfig"; return nullptr; }
+struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uint32_t err_bytes) {
+    // Why it refused, into the host's buffer, cut to fit (dsp_api.h).
+    const auto refuse = [err, err_bytes](const char* why) -> struct Dsp* {
+        if (err && err_bytes) std::snprintf(err, err_bytes, "%s", why);
+        return nullptr;
+    };
+    if (!config) return refuse("no DspConfig");
     // The host's doors first: the instance itself is made in the guest's
     // memory (guest_heap.h), reached through them. Nothing of an instance
     // is on the system allocator, so a web reload — where the old engine is
     // gone rather than torn down — leaves nothing of it behind.
     if (host) g_host = *host;
     void* mem = supersonic_guest_alloc_bytes(sizeof(ScsynthDsp));
-    if (!mem) { if (err) *err = "out of memory: the guest's bulk memory cannot hold the instance"; return nullptr; }
+    if (!mem) return refuse("out of memory: the guest's bulk memory cannot hold the instance");
     auto* d = new (mem) ScsynthDsp;
     d->config = *config;
     if (host) d->host = *host;
@@ -515,14 +524,13 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
      * is how every wrong-slot bug of the positional block survived.
      */
     ScsynthOptions so;
-    static char optionsErr[256];
+    char optionsErr[DSP_REFUSAL_BYTES];
     if (scsynth_options_parse(static_cast<const char*>(config->guest_config),
                               config->guest_config_bytes, &so,
                               optionsErr, sizeof(optionsErr)) != 0) {
         supersonic_guest_log(optionsErr, (uint32_t)std::strlen(optionsErr));
         d->~ScsynthDsp(); supersonic_guest_free_bytes(d);
-        if (err) *err = optionsErr;
-        return nullptr;
+        return refuse(optionsErr);
     }
     options.mNumBuffers            = so.numBuffers;
     options.mMaxNodes              = so.maxNodes;
@@ -587,8 +595,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, const char** e
     d->world = EngineCore_New(&options, &engineErr);
     if (!d->world) {
         d->~ScsynthDsp(); supersonic_guest_free_bytes(d);
-        if (err) *err = engineErr ? engineErr : "EngineCore_New failed";
-        return nullptr;
+        return refuse(engineErr ? engineErr : "EngineCore_New failed");
     }
 
     // THE ROOT GROUP HAS TO BE PUBLISHED BY HAND.

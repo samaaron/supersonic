@@ -13,25 +13,32 @@
 #include <vector>
 
 Recorder::Recorder(ClockworkClient* client, bool ownThread)
-    : mClient(client), mOwnThread(ownThread), mBuf(4096 * SCOPE_CHANNELS) {}
+    : mClient(client), mOwnThread(ownThread) {}
 
 Recorder::~Recorder() {
     std::string path, err;
     stop(&path, &err);
 }
 
-shm_audio_buffer* Recorder::masterSlot() {
+// The scope's out slot, where the engine's table puts it, and the ring's
+// shape: a core's profile chooses them (clockwork_client_scope_shape).
+shm_audio_buffer* Recorder::outSlot(ClockworkScopeShape& shape) {
     ClockworkClient* c = mClient;
     if (!c) return nullptr;
     ClockworkRegion taps {};
     if (clockwork_client_region(c, CLOCKWORK_REGION_SCOPE, &taps) != CLOCKWORK_OK || !taps.base) return nullptr;
-    return static_cast<shm_audio_buffer*>(taps.base) + SCOPE_MASTER_SLOT;
+    shape = ClockworkScopeShape{};
+    shape.struct_bytes = sizeof shape;
+    if (clockwork_client_scope_shape(c, &shape) != CLOCKWORK_OK || shape.channels == 0) return nullptr;
+    return reinterpret_cast<shm_audio_buffer*>(static_cast<uint8_t*>(taps.base)
+                                               + size_t(SCOPE_OUT_SLOT) * shape.slot_bytes);
 }
 
 bool Recorder::start(const std::string& path, const std::string& header, int bits, std::string* err) {
     std::lock_guard<std::mutex> lock(mMut);
     if (mRunning.load()) { if (err) *err = "already recording"; return false; }
-    shm_audio_buffer* slot = masterSlot();
+    ClockworkScopeShape shape {};
+    shm_audio_buffer* slot = outSlot(shape);
     if (!slot) { if (err) *err = "the engine publishes no audio taps"; return false; }
 
     // The tap's own geometry, which is the device's: the file's rate must be
@@ -45,7 +52,7 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
         if (clockwork_client_info(mClient, &info) == CLOCKWORK_OK) rate = static_cast<uint32_t>(info.sample_rate + 0.5);
     }
     if (rate == 0) rate = 48000;
-    mChannels = live && slot->channels > 0 && slot->channels <= SCOPE_CHANNELS ? slot->channels : SCOPE_CHANNELS;
+    mChannels = live && slot->channels > 0 && slot->channels <= shape.channels ? slot->channels : shape.channels;
 
     ClockworkAudioWriterConfig cfg {};
     cfg.struct_bytes = sizeof cfg;
@@ -73,7 +80,8 @@ bool Recorder::start(const std::string& path, const std::string& header, int bit
     // happens from the moment it was said to have started. Taken on the thread, a loaded machine — or a test
     // rendering faster than real time — had the take begin late, its head missing, or all of it.
     mSlot   = slot;
-    mReader = shm_audio_buffer_reader(slot);
+    mReader = shm_audio_buffer_reader(slot, shape.frames, shape.channels);
+    mBuf.assign(size_t(kPullFrames) * shape.channels, 0.0f);
     mReader.seek_to_live();
     if (mOwnThread) mThread = std::thread([this] { run(); });
     return true;
@@ -117,7 +125,7 @@ uint32_t Recorder::pullOnce() {
     // slot's first frame.
     if (mSlot && mReader.writer_position() < mReader.last_read_position()) mReader.seek_to_start();
     uint64_t gap = 0;
-    const uint32_t n = mReader.pull(mBuf.data(), 4096, &gap);
+    const uint32_t n = mReader.pull(mBuf.data(), kPullFrames, &gap);
     if (gap) mLost.fetch_add(gap);
     if (n) audio_thread_witness::fileWork();
     if (n && mWriter && clockwork_audio_writer_write(mWriter, mBuf.data(), n) == CLOCKWORK_OK)

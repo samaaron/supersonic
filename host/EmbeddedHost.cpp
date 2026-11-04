@@ -105,11 +105,11 @@ bool EmbeddedHost::boot(const ClockworkEngine::Config& cfg, Callbacks callbacks,
     I.fronted.attach(&I.transport, nullptr);
     I.engine.setTransport(&I.fronted);
 
+    // The tracks' lanes, laid out when memory is: reserved by the engine as
+    // it boots.
+    ClockworkEngine::Config booted = cfg;
 #if CLOCKWORK_HAS_PLUGIN_TRACKS
-    // The tracks' lanes are laid out when memory is: before the boot. Once
-    // per process; a second boot in the same process finds them reserved.
-    static std::once_flag lanes;
-    std::call_once(lanes, [] { TrackControl::reserveLanes(); });
+    booted.reservedLanes = TrackControl::kLanes;
 #endif
 
     auto fail = [&](const std::string& why) {
@@ -119,7 +119,7 @@ bool EmbeddedHost::boot(const ClockworkEngine::Config& cfg, Callbacks callbacks,
         return false;
     };
     try {
-        I.engine.init(cfg);
+        I.engine.init(booted);
     } catch (const std::exception& e) {
         return fail(e.what());
     } catch (...) {

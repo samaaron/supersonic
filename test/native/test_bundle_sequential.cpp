@@ -41,7 +41,7 @@
 #include <cmath>
 #include <cstring>
 
-#include "ClockworkProcessor.h"  // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"  // clockwork_audio_out and the block\'s geometry (lanes.h)
 #include "shared_memory.h"  // PerformanceMetrics, SCHEDULER_SLOT_COUNT
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -148,10 +148,10 @@ static void sendBundle(EngineFixture& fx, const BundleBytes& pkt) {
 // schedules the audio thread erratically.
 // ──────────────────────────────────────────────────────────────────────────
 
-static float capturePeak() {
-    auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+static float capturePeak(ClockworkCore* core) {
+    auto* bus = clockwork_audio_out(core);
     if (!bus) return 0.0f;
-    const int n = get_audio_buffer_samples() * 2; // stereo interleaved? scsynth
+    const int n = static_cast<int>(clockwork_block_size(core)) * 2; // stereo interleaved? scsynth
                                                   // layout is [L block][R block]
                                                   // — treat as a single span for
                                                   // peak-detection purposes.
@@ -168,7 +168,7 @@ static uint32_t blocksForMs(int ms) {
     return static_cast<uint32_t>(static_cast<int64_t>(ms) * 48000 / 1000 / 128);
 }
 
-// Config for every test that probes the output bus. capturePeak() reads the
+// Config for every test that probes the output bus. capturePeak(fx.engine().core()) reads the
 // shared bus directly, so no audio thread may be writing it while we look:
 // manualAudioPump starts no audio source at all (see
 // ClockworkEngine::startAudioSource), leaving this thread the only caller of
@@ -199,7 +199,7 @@ static float peakOverBlocks(EngineFixture& fx, uint32_t numBlocks) {
     float maxPeak = 0.0f;
     for (uint32_t i = 0; i < numBlocks; ++i) {
         fx.pumpBlock();
-        float p = capturePeak();
+        float p = capturePeak(fx.engine().core());
         if (p > maxPeak) maxPeak = p;
     }
     return maxPeak;
@@ -705,9 +705,9 @@ TEST_CASE("/s_new + long sustain: output is finite (no NaN / Inf from eager Ctor
     // thread is the only writer, so the scan below cannot race a fill.
     fx.pumpBlock(blocksForMs(200));
 
-    auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+    auto* bus = clockwork_audio_out(fx.engine().core());
     REQUIRE(bus != nullptr);
-    const int n = get_audio_buffer_samples() * 2;
+    const int n = static_cast<int>(clockwork_block_size(fx.engine().core())) * 2;
     bool allFinite = true;
     for (int i = 0; i < n; ++i) {
         if (!std::isfinite(bus[i])) { allFinite = false; break; }
@@ -743,10 +743,10 @@ TEST_CASE("Stress: 50 back-to-back bundles of /s_new + /n_set, all free cleanly"
     fx.waitForBlocks(blocksForMs(500), /*timeoutMs*/ 10000);
 
     // Output should still be finite.
-    auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+    auto* bus = clockwork_audio_out(fx.engine().core());
     REQUIRE(bus != nullptr);
     bool allFinite = true;
-    for (int i = 0; i < get_audio_buffer_samples() * 2; ++i) {
+    for (int i = 0; i < static_cast<int>(clockwork_block_size(fx.engine().core())) * 2; ++i) {
         if (!std::isfinite(bus[i])) { allFinite = false; break; }
     }
     CHECK(allFinite);

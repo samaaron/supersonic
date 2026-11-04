@@ -19,7 +19,7 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
-#include "ClockworkProcessor.h"   // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"   // clockwork_audio_out and the block\'s geometry (lanes.h)
 
 #include <chrono>
 #include <cstdint>
@@ -84,10 +84,10 @@ std::vector<uint8_t> bundle(uint64_t timeTag, const osc_test::Packet& m) {
     return out;
 }
 
-float blockPeak() {
-    auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+float blockPeak(ClockworkCore* core) {
+    auto* bus = clockwork_audio_out(core);
     if (!bus) return 0.0f;
-    const int n = get_audio_buffer_samples() * 2;
+    const int n = static_cast<int>(clockwork_block_size(core)) * 2;
     float peak = 0.0f;
     for (int i = 0; i < n; ++i) { float v = std::fabs(bus[i]); if (v > peak) peak = v; }
     return peak;
@@ -97,7 +97,7 @@ float blockPeak() {
 std::vector<float> pumpPeaks(EngineFixture& fx, int n) {
     std::vector<float> peaks;
     peaks.reserve(n);
-    for (int i = 0; i < n; ++i) { fx.pumpBlock(1); peaks.push_back(blockPeak()); }
+    for (int i = 0; i < n; ++i) { fx.pumpBlock(1); peaks.push_back(blockPeak(fx.engine().core())); }
     return peaks;
 }
 
@@ -141,7 +141,7 @@ std::vector<int> runTrain(EngineFixture& fx, int n, int stepSamples, int leadSam
         const auto seen = onsetBlocks(peaks);
         if ((int)seen.size() >= n && tail++ >= 4 * stepSamples / kBlock) break;
         fx.pumpBlock(1);
-        peaks.push_back(blockPeak());
+        peaks.push_back(blockPeak(fx.engine().core()));
     }
     return onsetBlocks(peaks);
 }

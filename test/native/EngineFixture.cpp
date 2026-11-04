@@ -275,7 +275,7 @@ bool EngineFixture::waitForDone(const std::string& cmd, int timeoutMs) {
 
 uint32_t EngineFixture::blocksOfAudio(int ms) const {
     const double frames = double(ms) * double(mSampleRate) / 1000.0;
-    return static_cast<uint32_t>(std::ceil(frames / double(get_audio_buffer_samples())));
+    return static_cast<uint32_t>(std::ceil(frames / double(clockwork_block_size(mEngine.core()))));
 }
 
 bool EngineFixture::waitForBlocks(uint32_t n, int timeoutMs) {

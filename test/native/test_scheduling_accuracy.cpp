@@ -11,15 +11,12 @@
 #include "EngineFixture.h"
 #include "clock/clock_math.h"   // wallClockNTP; WallClock.h was a shim for this
 #include "shared_memory.h"
+#include "core_state.h"   // the engine core's layout
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <vector>
 #include <numeric>
-
-extern "C" {
-    extern uint8_t arena_storage[];
-}
 
 // The engine the cases measure. Headless, the fixture's pumped engine on a
 // freewheel clock from a fixed origin: frame f is heard at kOriginNtp +
@@ -75,7 +72,8 @@ static int findOnsetFrame(const float* interleaved, uint32_t numFrames,
 // block more (pumped here, or waited for from a device). Returns interleaved
 // frames.
 static std::vector<float> captureTap(EngineFixture& fx, shm_audio_buffer* tap, uint32_t neededFrames) {
-    shm_audio_buffer_reader reader(tap);
+    const clockwork::Profile& scope = clockwork::layout_of(fx.engine().core()).profile;
+    shm_audio_buffer_reader reader(tap, scope.scope_frames, scope.scope_channels);
     reader.seek_to_live();
     const uint32_t channels = tap->channels;
     std::vector<float> out;
@@ -121,7 +119,8 @@ TEST_CASE("relative scheduling accuracy across multiple bundles",
     constexpr double FIRST_DELAY_SEC  = 0.200;   // first bundle at +200ms
     constexpr double RELEASE_SEC      = 0.020;    // 20ms release — silent well before next
 
-    auto* capture = reinterpret_cast<shm_audio_buffer*>(arena_storage + SCOPE_START) + CLOCKWORK_TAP_OUT;
+    auto* capture = clockwork::scopeSlot(static_cast<uint8_t*>(clockwork_lanes_base(fx.engine().core())),
+                                         clockwork::layout_of(fx.engine().core()), CLOCKWORK_TAP_OUT);
     REQUIRE(capture->enabled.load(std::memory_order_acquire) == 1);
     const uint32_t channels = capture->channels;
     uint32_t sampleRate = capture->sample_rate;
@@ -245,7 +244,8 @@ TEST_CASE("scheduling jitter distribution (mean/stddev/p50/p90/p99 over 100 bund
     constexpr double FIRST_DELAY_SEC = 0.200;
     constexpr double RELEASE_SEC     = 0.012;   // 12ms — silent ~38ms before next
 
-    auto* capture = reinterpret_cast<shm_audio_buffer*>(arena_storage + SCOPE_START) + CLOCKWORK_TAP_OUT;
+    auto* capture = clockwork::scopeSlot(static_cast<uint8_t*>(clockwork_lanes_base(fx.engine().core())),
+                                         clockwork::layout_of(fx.engine().core()), CLOCKWORK_TAP_OUT);
     REQUIRE(capture->enabled.load(std::memory_order_acquire) == 1);
     const uint32_t channels = capture->channels;
     uint32_t sampleRate = capture->sample_rate;
@@ -365,7 +365,8 @@ static int onsetOfBundle(bool late) {
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
     fx.clearReplies();
 
-    auto* capture = reinterpret_cast<shm_audio_buffer*>(arena_storage + SCOPE_START) + CLOCKWORK_TAP_OUT;
+    auto* capture = clockwork::scopeSlot(static_cast<uint8_t*>(clockwork_lanes_base(fx.engine().core())),
+                                         clockwork::layout_of(fx.engine().core()), CLOCKWORK_TAP_OUT);
     REQUIRE(capture->enabled.load(std::memory_order_acquire) == 1);
     const uint32_t channels   = capture->channels;
     const uint32_t sampleRate = capture->sample_rate;

@@ -33,18 +33,18 @@ inline std::string guestOption(const ClockworkEngine::Config& cfg, const char* n
     return clockwork::guest_config_text::get(cfg.guestConfig, name);
 }
 
-// Render one stereo block on the calling thread through the public tick
-// (clockwork_tick, lanes.h) on the caller's own timeline: `ntp` is the block's
+// Render one stereo block of `core` on the calling thread through the public
+// tick (clockwork_tick, lanes.h) on the caller's own timeline: `ntp` is the block's
 // wall-clock time and advances by one block, and the frame count advances
 // with it. For a test that stopped the driver and renders the blocks itself;
 // the engine must have no other renderer running.
-inline void tickBlock(double& ntp) {
+inline void tickBlock(ClockworkCore* core, double& ntp) {
     static uint64_t frames = 0;
     ClockworkBlockTime time {};
     time.struct_bytes = sizeof time;
     time.audio_frames = frames;
     time.wall_ntp     = ntp;
-    clockwork_tick(&time, 2, 0);
+    clockwork_tick(core, &time, 2, 0);
     frames += 128;
     ntp    += 128.0 / 48000.0;
 }

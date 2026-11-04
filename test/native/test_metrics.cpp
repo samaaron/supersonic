@@ -17,8 +17,6 @@
 #include <thread>
 #include <chrono>
 
-extern "C" uint8_t arena_storage[];
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 namespace {
@@ -36,7 +34,7 @@ TEST_CASE("metrics: getMetrics returns the shared struct after init",
     EngineFixture fx;
     const PerformanceMetrics& m = fx.engine().getMetrics();
     CHECK(&m == reinterpret_cast<PerformanceMetrics*>(
-                    arena_storage + METRICS_START));
+                    static_cast<uint8_t*>(clockwork_lanes_base(fx.engine().core())) + METRICS_START));
 }
 
 TEST_CASE("metrics: metricsPtr() matches getMetrics()", "[metrics][api]") {
@@ -48,11 +46,11 @@ TEST_CASE("metrics: metricsPtr() matches getMetrics()", "[metrics][api]") {
 // metrics open the block's published run, right after the header, and the
 // control block opens the transport run after it. Readers find both by id,
 // never by position — these pin the layout's shape, not a neighbour.
-TEST_CASE("metrics: METRICS_START opens clockwork-state, RING_CURSORS_START opens clockwork-transport",
+TEST_CASE("metrics: METRICS_START opens clockwork-state, the ring cursors open clockwork-transport",
           "[metrics][api]") {
     CHECK(METRICS_START == ARENA_HEADER_START + ARENA_HEADER_SIZE);
     CHECK(METRICS_START + METRICS_SIZE <= CLOCKWORK_STATE_END);
-    CHECK(RING_CURSORS_START == CLOCKWORK_TRANSPORT_START);
+    CHECK(clockwork::kDefaultLayout.ring_cursors_start == clockwork::kDefaultLayout.audio_end);
 }
 
 // ============================================================================
@@ -252,26 +250,26 @@ TEST_CASE("metrics: debug_bytes_received is readable",
 // Buffer usage [32-37]
 // ============================================================================
 
-TEST_CASE("metrics: in_buffer_used_bytes < IN_RING_SIZE",
+TEST_CASE("metrics: in_buffer_used_bytes is less than the in ring",
           "[metrics][buffer]") {
     EngineFixture fx;
     fx.send(osc_test::message("/status"));
-    CHECK(metrics(fx).in_buffer_used_bytes.load() < IN_RING_SIZE);
+    CHECK(metrics(fx).in_buffer_used_bytes.load() < clockwork::kDefaultLayout.profile.in_ring_bytes);
 }
 
-TEST_CASE("metrics: out_buffer_used_bytes < RT_OUT_RING_SIZE",
+TEST_CASE("metrics: out_buffer_used_bytes is less than the RT out ring",
           "[metrics][buffer]") {
     EngineFixture fx;
     fx.send(osc_test::message("/status"));
     OscReply r;
     REQUIRE(fx.waitForReply("/status.reply", r));
-    CHECK(metrics(fx).out_buffer_used_bytes.load() < RT_OUT_RING_SIZE);
+    CHECK(metrics(fx).out_buffer_used_bytes.load() < clockwork::kDefaultLayout.profile.rt_out_ring_bytes);
 }
 
-TEST_CASE("metrics: nrt_out_buffer_used_bytes < NRT_OUT_RING_SIZE",
+TEST_CASE("metrics: nrt_out_buffer_used_bytes is less than the NRT out ring",
           "[metrics][buffer]") {
     EngineFixture fx;
-    CHECK(metrics(fx).nrt_out_buffer_used_bytes.load() < NRT_OUT_RING_SIZE);
+    CHECK(metrics(fx).nrt_out_buffer_used_bytes.load() < clockwork::kDefaultLayout.profile.nrt_out_ring_bytes);
 }
 
 TEST_CASE("metrics: in_buffer_peak_bytes > 0 after activity",

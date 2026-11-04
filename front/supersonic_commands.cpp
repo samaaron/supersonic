@@ -167,7 +167,7 @@ bool Commands::ingress(const uint8_t* data, uint32_t size, uint32_t token) {
         // Down the debug channel, where a GUI that tails it shows it in its
         // info pane. The leading \x01 tells it to show the lines as they are,
         // with no timestamp, under a logo of its own.
-        clockwork_log("%s", ("\x01\n" + mSummary).c_str());
+        clockwork_log(clockwork_client_core(mClient), "%s", ("\x01\n" + mSummary).c_str());
         return true;
     }
     Job job;
@@ -862,7 +862,7 @@ bool Commands::recordVerb(const uint8_t* data, uint32_t size, uint32_t token) {
     p << osc::BeginMessage(start ? "/clockwork/record/start.reply" : "/clockwork/record/stop.reply")
       << static_cast<int32_t>(ok ? 1 : 0) << (ok ? path.c_str() : err.c_str()) << osc::EndMessage;
     reply(token, reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()));
-    if (ok) clockwork_log("[recording] %s: %s", start ? "started" : "stopped", path.c_str());
+    if (ok) clockwork_log(clockwork_client_core(mClient), "[recording] %s: %s", start ? "started" : "stopped", path.c_str());
     return true;
 }
 

@@ -11,7 +11,7 @@
 #include "SampleLane.h"
 #include "clockwork_audio_file.h"
 #include "piano_wavetable.h"
-#include "ClockworkProcessor.h"  // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"  // clockwork_audio_out and the block\'s geometry (lanes.h)
 #include <catch2/catch_approx.hpp>
 
 #include <cmath>
@@ -66,9 +66,9 @@ float peakOverBlocks(EngineFixture& fx, uint32_t blocks) {
     float peak = 0.0f;
     for (uint32_t b = 0; b < blocks; ++b) {
         fx.pumpBlock();
-        auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+        auto* bus = clockwork_audio_out(fx.engine().core());
         if (!bus) continue;
-        const int n = get_audio_buffer_samples() * 2;
+        const int n = static_cast<int>(clockwork_block_size(fx.engine().core())) * 2;
         for (int i = 0; i < n; ++i) peak = std::max(peak, std::fabs(bus[i]));
     }
     return peak;

@@ -100,20 +100,20 @@ struct BenchResult {
     int    numBlocks;
 };
 
-static BenchResult runBenchmark(const char* label, int numBlocks, int warmupBlocks = 500) {
+static BenchResult runBenchmark(ClockworkCore* core, const char* label, int numBlocks, int warmupBlocks = 500) {
     const double budgetNs = (128.0 / 48000.0) * 1e9;  // ~2,666,667 ns
 
     double fakeNTP = 4000000000.0;
 
     // Warmup — let caches settle and CPU frequency stabilise
-    for (int i = 0; i < warmupBlocks; i++) tickBlock(fakeNTP);
+    for (int i = 0; i < warmupBlocks; i++) tickBlock(core, fakeNTP);
 
     // Measure individual block times in nanoseconds
     std::vector<double> timings(numBlocks);
 
     for (int i = 0; i < numBlocks; i++) {
         int64_t t0 = nowNs();
-        tickBlock(fakeNTP);
+        tickBlock(core, fakeNTP);
         int64_t t1 = nowNs();
         timings[i] = (double)(t1 - t0);
     }
@@ -160,9 +160,9 @@ static void stopHeadlessDriver(EngineFixture& fx) {
 }
 
 // Manually tick the engine to process pending OSC messages
-static void tickBlocks(int n) {
+static void tickBlocks(ClockworkCore* core, int n) {
     double fakeNTP = 4500000000.0;
-    for (int i = 0; i < n; i++) tickBlock(fakeNTP);
+    for (int i = 0; i < n; i++) tickBlock(core, fakeNTP);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,13 +172,13 @@ static void tickBlocks(int n) {
 // (ReplyReader thread needs processCount notifications to drain replies).
 // ---------------------------------------------------------------------------
 
-static double measureBlockCostNs(int numBlocks = 200) {
+static double measureBlockCostNs(ClockworkCore* core, int numBlocks = 200) {
     double fakeNTP = 4600000000.0;
     // Small warmup
-    for (int i = 0; i < 50; i++) tickBlock(fakeNTP);
+    for (int i = 0; i < 50; i++) tickBlock(core, fakeNTP);
 
     int64_t t0 = nowNs();
-    for (int i = 0; i < numBlocks; i++) tickBlock(fakeNTP);
+    for (int i = 0; i < numBlocks; i++) tickBlock(core, fakeNTP);
     int64_t t1 = nowNs();
     return (double)(t1 - t0) / numBlocks;
 }
@@ -219,7 +219,7 @@ TEST_CASE("benchmark: idle engine", "[.][benchmark]") {
 
     stopHeadlessDriver(fx);
 
-    auto r = runBenchmark("idle engine (no synths)", 10000);
+    auto r = runBenchmark(fx.engine().core(), "idle engine (no synths)", 10000);
     CHECK(r.avgNs < r.budgetNs);  // Must be faster than real-time
 }
 
@@ -230,7 +230,7 @@ TEST_CASE("benchmark: beep synths", "[.][benchmark]") {
     fx.send(sNewSustained("sonic-pi-beep", 1000, 0, 1, "note", 60.0f));
     waitForSynths(fx, 1);
     stopHeadlessDriver(fx);
-    auto r1 = runBenchmark("1x sonic-pi-beep", 10000);
+    auto r1 = runBenchmark(fx.engine().core(), "1x sonic-pi-beep", 10000);
     // Verify synth is alive: block cost should be above idle (~80-400ns)
     CHECK(r1.avgNs > 200);  // 1 beep should cost measurably more than idle
     CHECK(r1.avgNs < r1.budgetNs);
@@ -244,7 +244,7 @@ TEST_CASE("benchmark: 10 beep synths", "[.][benchmark]") {
         fx.send(sNewSustained("sonic-pi-beep", 1000 + i, 0, 1, "note", 60.0f + i));
     waitForSynths(fx, 10);
     stopHeadlessDriver(fx);
-    auto r = runBenchmark("10x sonic-pi-beep", 10000);
+    auto r = runBenchmark(fx.engine().core(), "10x sonic-pi-beep", 10000);
     CHECK(r.avgNs < r.budgetNs);
 }
 
@@ -256,7 +256,7 @@ TEST_CASE("benchmark: 50 beep synths", "[.][benchmark]") {
         fx.send(sNewSustained("sonic-pi-beep", 1000 + i, 0, 1, "note", 60.0f + (i % 12)));
     waitForSynths(fx, 50);
     stopHeadlessDriver(fx);
-    auto r = runBenchmark("50x sonic-pi-beep", 5000);
+    auto r = runBenchmark(fx.engine().core(), "50x sonic-pi-beep", 5000);
     CHECK(r.avgNs < r.budgetNs);
 }
 
@@ -267,7 +267,7 @@ TEST_CASE("benchmark: prophet synths", "[.][benchmark]") {
     fx.send(sNewSustained("sonic-pi-prophet", 1000, 0, 1, "note", 60.0f));
     waitForSynths(fx, 1);
     stopHeadlessDriver(fx);
-    auto r = runBenchmark("1x sonic-pi-prophet", 10000);
+    auto r = runBenchmark(fx.engine().core(), "1x sonic-pi-prophet", 10000);
     CHECK(r.avgNs < r.budgetNs);
 }
 
@@ -279,7 +279,7 @@ TEST_CASE("benchmark: 10 prophet synths", "[.][benchmark]") {
         fx.send(sNewSustained("sonic-pi-prophet", 1000 + i, 0, 1, "note", 60.0f + i));
     waitForSynths(fx, 10);
     stopHeadlessDriver(fx);
-    auto r = runBenchmark("10x sonic-pi-prophet", 5000);
+    auto r = runBenchmark(fx.engine().core(), "10x sonic-pi-prophet", 5000);
     CHECK(r.avgNs < r.budgetNs);
 }
 
@@ -294,7 +294,7 @@ TEST_CASE("benchmark: mixed load", "[.][benchmark]") {
         fx.send(sNewSustained("sonic-pi-prophet", 3000 + i, 0, 1, "note", 48.0f + i * 7));
     waitForSynths(fx, 25);
     stopHeadlessDriver(fx);
-    auto r = runBenchmark("20x beep + 5x prophet", 5000);
+    auto r = runBenchmark(fx.engine().core(), "20x beep + 5x prophet", 5000);
     CHECK(r.avgNs < r.budgetNs);
 }
 
@@ -310,8 +310,8 @@ TEST_CASE("benchmark: reproducibility check", "[.][benchmark]") {
     stopHeadlessDriver(fx);
 
     fprintf(stderr, "\n  --- Reproducibility check (two runs, same config) ---\n");
-    auto r1 = runBenchmark("10x beep (run A)", 5000);
-    auto r2 = runBenchmark("10x beep (run B)", 5000);
+    auto r1 = runBenchmark(fx.engine().core(), "10x beep (run A)", 5000);
+    auto r2 = runBenchmark(fx.engine().core(), "10x beep (run B)", 5000);
 
     double diff = std::abs(r1.avgNs - r2.avgNs) / std::min(r1.avgNs, r2.avgNs) * 100.0;
     fprintf(stderr, "    delta: %.1f%%\n", diff);
@@ -330,19 +330,19 @@ TEST_CASE("benchmark: linearity check", "[.][benchmark]") {
     // The block's fixed cost with nothing playing: the ingress drain, the
     // clock update and the sample-clock publish run every block whatever
     // plays. The synths' cost is what each run adds above it.
-    auto idle = runBenchmark("idle (for linearity)", 2000);
+    auto idle = runBenchmark(fx.engine().core(), "idle (for linearity)", 2000);
 
     // 10 synths (sustained so they stay alive through warmup + measurement)
     for (int i = 0; i < 10; i++)
         fx.send(sNewSustained("sonic-pi-beep", 1000 + i, 0, 1, "note", 60.0f + i));
-    tickBlocks(200);
-    auto lo = runBenchmark("10x beep (for linearity)", 5000);
+    tickBlocks(fx.engine().core(), 200);
+    auto lo = runBenchmark(fx.engine().core(), "10x beep (for linearity)", 5000);
 
     // Verify synths were alive: cost should be well above idle
     CHECK(lo.avgNs > 2000);  // 10 beeps should cost measurably more than idle
 
     // Verify still alive: measure again, should be similar
-    double postCost10 = measureBlockCostNs();
+    double postCost10 = measureBlockCostNs(fx.engine().core());
     fprintf(stderr, "    post-benchmark block cost: %.0f ns (should be ~%.0f ns)\n",
             postCost10, lo.avgNs);
     CHECK(postCost10 > lo.avgNs * 0.5);  // within 2x of benchmark
@@ -350,13 +350,13 @@ TEST_CASE("benchmark: linearity check", "[.][benchmark]") {
     // Free them
     for (int i = 0; i < 10; i++)
         fx.send(osc_test::message("/n_free", 1000 + i));
-    tickBlocks(100);
+    tickBlocks(fx.engine().core(), 100);
 
     // 100 synths
     for (int i = 0; i < 100; i++)
         fx.send(sNewSustained("sonic-pi-beep", 2000 + i, 0, 1, "note", 60.0f + (i % 24)));
-    tickBlocks(200);
-    auto hi = runBenchmark("100x beep (for linearity)", 5000);
+    tickBlocks(fx.engine().core(), 200);
+    auto hi = runBenchmark(fx.engine().core(), "100x beep (for linearity)", 5000);
 
     // Verify synths were alive: cost should be well above 10x
     CHECK(hi.avgNs > lo.avgNs * 3);  // at least 3x more expensive
@@ -409,7 +409,7 @@ TEST_CASE("benchmark: callback jitter (simulated real-time)", "[.][benchmark]") 
         intervals[i] = (double)(now - prevNs) / 1000.0;  // store as microseconds
         prevNs = now;
 
-        tickBlock(fakeNTP);
+        tickBlock(fx.engine().core(), fakeNTP);
     }
 
     // Skip first few intervals (warmup)
@@ -457,7 +457,7 @@ TEST_CASE("benchmark: scaling test", "[.][benchmark]") {
 
         char label[64];
         snprintf(label, sizeof(label), "%dx sonic-pi-beep", count);
-        auto r = runBenchmark(label, 3000, 200);
+        auto r = runBenchmark(fx.engine().core(), label, 3000, 200);
 
         // Verify synths are alive: cost should scale with count
         if (count >= 10) {
@@ -467,7 +467,7 @@ TEST_CASE("benchmark: scaling test", "[.][benchmark]") {
         // Free all synths for next round
         for (int i = 0; i < count; i++)
             fx.send(osc_test::message("/n_free", 5000 + i));
-        tickBlocks(100);
+        tickBlocks(fx.engine().core(), 100);
     }
 
     freqKHz = readCpuFreqKHz();

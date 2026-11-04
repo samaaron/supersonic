@@ -203,8 +203,8 @@ int32_t subscribe(EngineFixture& fx, const char* peer, const char* channel) {
 // input channel N is bus mNumOutputs + N to a synth. The lanes widen the
 // outputs as well as the inputs, so mNumOutputs is the allocated count, not
 // the device's.
-float inBusFor(int32_t channel) {
-    return static_cast<float>(get_audio_num_output_buses() + channel);
+float inBusFor(ClockworkCore* core, int32_t channel) {
+    return static_cast<float>(static_cast<int>(clockwork_out_channels(core)) + channel);
 }
 
 // Six input channels, as a device might have. A stream never lands on them:
@@ -307,9 +307,9 @@ TEST_CASE("LinkAudio: /clock/reset clears active input subscriptions",
 }
 
 namespace {
-// The ports open in this process, every engine's: the registry is the process's.
-uint32_t openPorts() {
-    return clockwork_port_list(nullptr, 0);
+// The ports open in the engine's core: each core's are its own.
+uint32_t openPorts(EngineFixture& fx) {
+    return clockwork_port_list(clockwork_core_ports(fx.engine().core()), nullptr, 0);
 }
 }  // namespace
 
@@ -328,9 +328,9 @@ TEST_CASE("LinkAudio: an input the engine lets go of closes its port",
     fx.send(osc_test::message("/clockwork/clock/visibility", kThisMachineOnly));
     REQUIRE(waitForChannelVisible(fx, "FakeLive", "Main", std::chrono::seconds(30)));
 
-    const uint32_t before = openPorts();
+    const uint32_t before = openPorts(fx);
     REQUIRE(subscribe(fx, "FakeLive", "Main") >= 0);
-    REQUIRE(openPorts() == before + 1);
+    REQUIRE(openPorts(fx) == before + 1);
 
     int inputsLeft = 0;
     const char* letGo = "";
@@ -360,7 +360,7 @@ TEST_CASE("LinkAudio: an input the engine lets go of closes its port",
     }
     INFO(letGo << ": " << before << " ports were open before the subscription");
     REQUIRE(fx.pollUntil([&] { return countInputs(fx) == inputsLeft; }));
-    CHECK(openPorts() == before + static_cast<uint32_t>(inputsLeft));
+    CHECK(openPorts(fx) == before + static_cast<uint32_t>(inputsLeft));
 }
 
 // ── Where a subscription lands ─────────────────────────────────────────────
@@ -402,7 +402,7 @@ TEST_CASE("LinkAudio: each subscription gets a pair of the engine's Link Audio l
     EngineFixture fx{linkInputConfig()};
     joinMesh(fx, peerOpts);
 
-    const auto base = static_cast<int32_t>(clockwork_link_audio_lane_base());
+    const auto base = static_cast<int32_t>(clockwork_link_audio_lane_base(fx.engine().core()));
     REQUIRE(base >= static_cast<int32_t>(linkInputConfig().numInputChannels));
     CHECK(subscribe(fx, "FakeLive", "C0") == base);
     CHECK(subscribe(fx, "FakeLive", "C1") == base + 2);
@@ -443,7 +443,7 @@ TEST_CASE("LinkAudio: a subscription the lanes have no room for is refused",
     // Refused rather than accepted: a stream bound past the lanes would be
     // skipped by pull_port_sources and look exactly like a working
     // subscription that is silent for ever.
-    // The constant, not clockwork_link_audio_lanes(): that is 0 until an
+    // The constant, not clockwork_link_audio_lanes(core): that is 0 until an
     // engine has booted, and the peer has to exist first.
     const auto pairs = static_cast<int>(LinkAudioBridge::kLanes / 2);
     const auto peerOpts = peerWithChannels(pairs + 1);
@@ -451,7 +451,7 @@ TEST_CASE("LinkAudio: a subscription the lanes have no room for is refused",
     REQUIRE(peer.ready());
     EngineFixture fx{linkInputConfig()};
     joinMesh(fx, peerOpts);
-    REQUIRE(clockwork_link_audio_lanes() == LinkAudioBridge::kLanes);
+    REQUIRE(clockwork_link_audio_lanes(fx.engine().core()) == LinkAudioBridge::kLanes);
 
     for (int i = 0; i < pairs; ++i)
         REQUIRE(subscribe(fx, "FakeLive", ("C" + std::to_string(i)).c_str()) >= 0);
@@ -527,10 +527,10 @@ namespace {
 // (a source port bound through clockwork_port_bus.h), so this reads the input bus
 // clockwork does expose. No snapshot, so a torn-mid-write read is possible;
 // for amplitude and L!=R assertions the race does not change the outcome.
-bool snapshotBus(uint32_t chIdx, uint32_t blockSize, std::vector<float>& out) {
-    const auto* in = reinterpret_cast<const float*>(get_audio_input_bus());
+bool snapshotBus(ClockworkCore* core, uint32_t chIdx, uint32_t blockSize, std::vector<float>& out) {
+    const auto* in = clockwork_audio_in(core);
     if (!in) return false;
-    if (chIdx >= static_cast<uint32_t>(get_audio_num_input_buses())) return false;
+    if (chIdx >= static_cast<uint32_t>(static_cast<int>(clockwork_in_channels(core)))) return false;
     out.assign(in + chIdx * blockSize, in + (chIdx + 1) * blockSize);
     return true;
 }
@@ -585,7 +585,7 @@ bool waitForArriving(EngineFixture& fx,
 // audio (via In.ar) — bus contents alone would only prove
 // drainLinkAudioInputsToBuses wrote bytes somewhere.
 // Path: FakeLive → the subscription's input pair → stereo_passthrough
-// (In.ar(inBusFor(pair), 2) → Out.ar(0,_)) → engine output bus 0/1.
+// (In.ar(inBusFor(fx.engine().core(), pair), 2) → Out.ar(0,_)) → engine output bus 0/1.
 TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
           "[Link][LinkAudio][integration]") {
     FakeLinkPeerProcess::Options peerOpts;
@@ -617,7 +617,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
         auto& s = b.begin("/s_new");
         s << "stereo_passthrough" << static_cast<int32_t>(1000)
           << static_cast<int32_t>(0) << static_cast<int32_t>(1)
-          << "in_bus" << inBusFor(main) << "out" << 0.0f;
+          << "in_bus" << inBusFor(fx.engine().core(), main) << "out" << 0.0f;
         fx.send(b.end());
     }
     {
@@ -632,7 +632,7 @@ TEST_CASE("LinkAudio: scsynth In.ar consumes audio from a Link subscription",
     // non-zero In.ar input, (3) settle into a steady stream.
     // Rendered at a device's pace (renderUntil), the read after each block on
     // the thread that rendered it.
-    const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
+    const auto* outBus = clockwork_audio_out(fx.engine().core());
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
     float pL = 0.0f, pR = 0.0f, diff = 0.0f;
@@ -691,8 +691,8 @@ TEST_CASE("LinkAudio: concurrent subscriptions write to distinct bus pairs",
     // A bus not there yet is waited for (a check in the callback would be on
     // the device's thread, out of Catch's reach).
     renderUntil(fx, [&] {
-        if (!snapshotBus(static_cast<uint32_t>(chanA), kBlockSize, busA)
-            || !snapshotBus(static_cast<uint32_t>(chanB), kBlockSize, busB))
+        if (!snapshotBus(fx.engine().core(), static_cast<uint32_t>(chanA), kBlockSize, busA)
+            || !snapshotBus(fx.engine().core(), static_cast<uint32_t>(chanB), kBlockSize, busB))
             return false;
         peakA = peakAbs(busA);
         peakB = peakAbs(busB);
@@ -740,7 +740,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
         auto& s = b.begin("/s_new");
         s << "stereo_passthrough" << static_cast<int32_t>(1000)
           << static_cast<int32_t>(0) << static_cast<int32_t>(1)
-          << "in_bus" << inBusFor(main) << "out" << 0.0f;
+          << "in_bus" << inBusFor(fx.engine().core(), main) << "out" << 0.0f;
         fx.send(b.end());
     }
     OscReply r;
@@ -748,7 +748,7 @@ TEST_CASE("LinkAudio: receive-only mode delivers audio to synths",
     REQUIRE(fx.waitForReply("/synced", r));
 
     // Poll the output bus — same rationale as Test A.
-    const auto* outBus = reinterpret_cast<const float*>(get_audio_output_bus());
+    const auto* outBus = clockwork_audio_out(fx.engine().core());
     REQUIRE(outBus != nullptr);
     constexpr uint32_t kBlockSize = 128;
     float pL = 0.0f, pR = 0.0f, diff = 0.0f;
@@ -798,7 +798,7 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     constexpr uint32_t kBlockSize = 128;
     std::vector<float> busL;
     const bool arrived = renderUntil(fx, [&] {
-        return snapshotBus(static_cast<uint32_t>(main), kBlockSize, busL) && peakAbs(busL) > 0.01f;
+        return snapshotBus(fx.engine().core(), static_cast<uint32_t>(main), kBlockSize, busL) && peakAbs(busL) > 0.01f;
     }, std::chrono::milliseconds(5000));
     if (!arrived) explainInput(fx, "no audio on the bus before removal", snapshotInput(fx, "FakeLive", "Main"));
     REQUIRE(arrived);
@@ -821,9 +821,9 @@ TEST_CASE("LinkAudio: /clock/audio/input/remove silences the bus",
     // the comparison is exact and race-free.
     std::vector<float> snap1, snap2;
     fx.pumpBlock(4);
-    REQUIRE(snapshotBus(static_cast<uint32_t>(main), kBlockSize, snap1));
+    REQUIRE(snapshotBus(fx.engine().core(), static_cast<uint32_t>(main), kBlockSize, snap1));
     fx.pumpBlock(4);
-    REQUIRE(snapshotBus(static_cast<uint32_t>(main), kBlockSize, snap2));
+    REQUIRE(snapshotBus(fx.engine().core(), static_cast<uint32_t>(main), kBlockSize, snap2));
     INFO("post-remove drift=" << maxAbsDiff(snap1, snap2));
     CHECK(maxAbsDiff(snap1, snap2) < 1e-6f);
 }
@@ -1240,7 +1240,7 @@ Heard listen(EngineFixture& fx, uint32_t channel, int sampleRate, uint32_t block
         bool stalled = stall.by.count() == 0;
         EngineFixture::Device device{fx, sampleRate, deviceFrames, [&] {
             if (heard.load(std::memory_order_relaxed) >= want) return;   // enough: the rest is not kept
-            if (snapshotBus(channel, blockSize, block))
+            if (snapshotBus(fx.engine().core(), channel, blockSize, block))
                 stream.insert(stream.end(), block.begin(), block.end());
             heard.store(stream.size(), std::memory_order_release);
             if (!stalled && stream.size() >= stallAt)

@@ -23,10 +23,6 @@
 #include <cmath>
 #include <cstdint>
 
-extern "C" {
-    uintptr_t get_audio_output_bus();
-}
-
 namespace {
 
 constexpr int   kOutCh   = 4;
@@ -46,8 +42,8 @@ ClockworkEngine::Config quadConfig() {
     return cfg;
 }
 
-float channelMaxAbs(int ch) {
-    auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+float channelMaxAbs(ClockworkCore* core, int ch) {
+    auto* bus = clockwork_audio_out(core);
     REQUIRE(bus != nullptr);
     float m = 0.0f;
     for (int s = 0; s < kBlock; ++s)
@@ -105,10 +101,10 @@ TEST_CASE("sound_out: output is 1-indexed and the direct write lands only on its
     spawnFx(fix, "sonic-pi-fx_sound_out", 1001, /*output*/ 3.0f, /*amp*/ 0.0f, /*mix*/ 1.0f);
     syncAndRender(fix, 1);
 
-    CHECK(channelMaxAbs(0) < kSilent);
-    CHECK(channelMaxAbs(1) < kSilent);
-    CHECK(channelMaxAbs(2) > kAudible);   // output: 3 → bus index 2
-    CHECK(channelMaxAbs(3) < kSilent);
+    CHECK(channelMaxAbs(fix.engine().core(), 0) < kSilent);
+    CHECK(channelMaxAbs(fix.engine().core(), 1) < kSilent);
+    CHECK(channelMaxAbs(fix.engine().core(), 2) > kAudible);   // output: 3 → bus index 2
+    CHECK(channelMaxAbs(fix.engine().core(), 3) < kSilent);
 }
 
 TEST_CASE("sound_out: passthrough to out_bus is unaffected by mix",
@@ -123,15 +119,15 @@ TEST_CASE("sound_out: passthrough to out_bus is unaffected by mix",
 
     // mix: 0 does NOT bypass the FX chain output: the dry feed still
     // reaches channel 1, alongside the direct write on channel 3.
-    CHECK(channelMaxAbs(0) > kAudible);
-    CHECK(channelMaxAbs(2) > kAudible);
+    CHECK(channelMaxAbs(fix.engine().core(), 0) > kAudible);
+    CHECK(channelMaxAbs(fix.engine().core(), 2) > kAudible);
 
     setControl(fix, 1001, "mix", 1.0f);
     syncAndRender(fix, 2);
 
     // Identical routing at mix: 1 — wet == dry, so the crossfade is a no-op.
-    CHECK(channelMaxAbs(0) > kAudible);
-    CHECK(channelMaxAbs(2) > kAudible);
+    CHECK(channelMaxAbs(fix.engine().core(), 0) > kAudible);
+    CHECK(channelMaxAbs(fix.engine().core(), 2) > kAudible);
 }
 
 TEST_CASE("sound_out: amp 0 mutes the passthrough but not the direct write",
@@ -144,14 +140,14 @@ TEST_CASE("sound_out: amp 0 mutes the passthrough but not the direct write",
     spawnFx(fix, "sonic-pi-fx_sound_out", 1001, /*output*/ 3.0f, /*amp*/ 1.0f, /*mix*/ 1.0f);
     syncAndRender(fix, 1);
 
-    CHECK(channelMaxAbs(0) > kAudible);
-    CHECK(channelMaxAbs(2) > kAudible);
+    CHECK(channelMaxAbs(fix.engine().core(), 0) > kAudible);
+    CHECK(channelMaxAbs(fix.engine().core(), 2) > kAudible);
 
     setControl(fix, 1001, "amp", 0.0f);
     syncAndRender(fix, 2);
 
-    CHECK(channelMaxAbs(0) < kSilent);    // passthrough gone
-    CHECK(channelMaxAbs(2) > kAudible);   // direct write survives amp: 0
+    CHECK(channelMaxAbs(fix.engine().core(), 0) < kSilent);    // passthrough gone
+    CHECK(channelMaxAbs(fix.engine().core(), 2) > kAudible);   // direct write survives amp: 0
 }
 
 TEST_CASE("sound_out_stereo: writes left/right to consecutive 1-indexed channels",
@@ -166,8 +162,8 @@ TEST_CASE("sound_out_stereo: writes left/right to consecutive 1-indexed channels
     spawnFx(fix, "sonic-pi-fx_sound_out_stereo", 1002, /*output*/ 3.0f, /*amp*/ 0.0f, /*mix*/ 1.0f);
     syncAndRender(fix, 1);
 
-    CHECK(channelMaxAbs(0) < kSilent);
-    CHECK(channelMaxAbs(1) < kSilent);
-    CHECK(channelMaxAbs(2) > kAudible);   // left → output: 3 → bus index 2
-    CHECK(channelMaxAbs(3) > kAudible);   // right → next channel up
+    CHECK(channelMaxAbs(fix.engine().core(), 0) < kSilent);
+    CHECK(channelMaxAbs(fix.engine().core(), 1) < kSilent);
+    CHECK(channelMaxAbs(fix.engine().core(), 2) > kAudible);   // left → output: 3 → bus index 2
+    CHECK(channelMaxAbs(fix.engine().core(), 3) > kAudible);   // right → next channel up
 }

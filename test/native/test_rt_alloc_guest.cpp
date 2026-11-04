@@ -112,21 +112,21 @@ osc_test::Packet sNewSustained(const char* def, int32_t id,
 
 struct AllocSnapshot { int64_t allocs; int64_t frees; };
 
-AllocSnapshot runGuarded(int blocks, double startNTP = 4'000'000'000.0) {
+AllocSnapshot runGuarded(ClockworkCore* core, int blocks, double startNTP = 4'000'000'000.0) {
     double ntp = startNTP;
 
     rt_alloc::reset();
     {
         rt_alloc::Guard g;
-        for (int i = 0; i < blocks; ++i) tickBlock(ntp);
+        for (int i = 0; i < blocks; ++i) tickBlock(core, ntp);
     }
     return { rt_alloc::g_allocs.load(std::memory_order_relaxed),
              rt_alloc::g_frees.load(std::memory_order_relaxed) };
 }
 
-void warmup(int blocks = 200) {
+void warmup(ClockworkCore* core, int blocks = 200) {
     double ntp = 3'000'000'000.0;
-    for (int i = 0; i < blocks; ++i) tickBlock(ntp);
+    for (int i = 0; i < blocks; ++i) tickBlock(core, ntp);
 }
 
 } // namespace
@@ -171,9 +171,9 @@ TEST_CASE("RT-alloc: variety of synths in steady state", "[rt_alloc]") {
     }
 
     fx.stopHeadlessDriver();
-    warmup();
+    warmup(fx.engine().core());
 
-    auto snap = runGuarded(2000);
+    auto snap = runGuarded(fx.engine().core(), 2000);
     INFO("synths=" << std::size(kSynthDefs) << " allocs=" << snap.allocs << " frees=" << snap.frees);
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);
@@ -193,9 +193,9 @@ TEST_CASE("RT-alloc: variety of FX in steady state", "[rt_alloc]") {
     }
 
     fx.stopHeadlessDriver();
-    warmup();
+    warmup(fx.engine().core());
 
-    auto snap = runGuarded(2000);
+    auto snap = runGuarded(fx.engine().core(), 2000);
     INFO("fx=" << std::size(kFxDefs) << " allocs=" << snap.allocs << " frees=" << snap.frees);
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);
@@ -217,9 +217,9 @@ TEST_CASE("RT-alloc: many synths spanning multiple types", "[rt_alloc]") {
     }
 
     fx.stopHeadlessDriver();
-    warmup();
+    warmup(fx.engine().core());
 
-    auto snap = runGuarded(2000);
+    auto snap = runGuarded(fx.engine().core(), 2000);
     INFO("synths=" << N << " allocs=" << snap.allocs << " frees=" << snap.frees);
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);
@@ -237,7 +237,7 @@ TEST_CASE("RT-alloc: synth construction inside guarded callback", "[rt_alloc]") 
     for (auto def : kSynthDefs) REQUIRE(fx.loadSynthDef(def));
 
     fx.stopHeadlessDriver();
-    warmup();
+    warmup(fx.engine().core());
 
     // Queue all /s_new before entering the guard. process_audio under the
     // guard will drain them, constructing each synth there.
@@ -247,7 +247,7 @@ TEST_CASE("RT-alloc: synth construction inside guarded callback", "[rt_alloc]") 
     }
 
     // Need enough cycles to drain the IN ring buffer and run construction.
-    auto snap = runGuarded(200);
+    auto snap = runGuarded(fx.engine().core(), 200);
     INFO("synths=" << std::size(kSynthDefs) << " allocs=" << snap.allocs << " frees=" << snap.frees);
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);
@@ -264,14 +264,14 @@ TEST_CASE("RT-alloc: FX construction inside guarded callback", "[rt_alloc]") {
     for (auto def : kFxDefs) REQUIRE(fx.loadSynthDef(def));
 
     fx.stopHeadlessDriver();
-    warmup();
+    warmup(fx.engine().core());
 
     int32_t id = 1400;
     for (auto def : kFxDefs) {
         fx.send(sNewSustained(def, id++));
     }
 
-    auto snap = runGuarded(200);
+    auto snap = runGuarded(fx.engine().core(), 200);
     INFO("fx=" << std::size(kFxDefs) << " allocs=" << snap.allocs << " frees=" << snap.frees);
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);
@@ -293,14 +293,14 @@ TEST_CASE("RT-alloc: synth /n_free inside guarded callback", "[rt_alloc]") {
     }
 
     fx.stopHeadlessDriver();
-    warmup();
+    warmup(fx.engine().core());
 
     // Queue all /n_free before guard.
     for (int32_t i = 1500; i < (int32_t)(1500 + std::size(kSynthDefs)); ++i) {
         fx.send(osc_test::message("/n_free", i));
     }
 
-    auto snap = runGuarded(200);
+    auto snap = runGuarded(fx.engine().core(), 200);
     INFO("freed=" << std::size(kSynthDefs) << " allocs=" << snap.allocs << " frees=" << snap.frees);
     CHECK(snap.allocs == 0);
     CHECK(snap.frees == 0);

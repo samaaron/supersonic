@@ -13,7 +13,7 @@
  * test/synthdefs/compile_reblock_resample_synthdefs.scd).
  */
 #include "EngineFixture.h"
-#include "ClockworkProcessor.h"   // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"   // clockwork_audio_out and the block\'s geometry (lanes.h)
 
 #include <catch2/catch_approx.hpp>
 
@@ -97,13 +97,13 @@ Sound play(EngineFixture& fx, const std::string& name,
     for (const auto& [control, value] : controls) m << control.c_str() << value;
     fx.send(s.end());
 
-    const int frames = get_audio_buffer_samples();
+    const int frames = static_cast<int>(clockwork_block_size(fx.engine().core()));
     REQUIRE(frames > 0);
     fx.pumpBlock(2400 / frames + 1);
     std::vector<float> left;
     while (left.size() < 9600) {
         fx.pumpBlock();
-        const auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+        const auto* bus = clockwork_audio_out(fx.engine().core());
         REQUIRE(bus != nullptr);
         left.insert(left.end(), bus, bus + frames);   // [L block][R block]
     }

@@ -1,15 +1,13 @@
 /*
  * test_node_tree_mirror.cpp — Tests for NodeTreeHeader/NodeEntry in shared memory.
  *
- * Validates the node tree mirror written into arena_storage by scsynth,
+ * Validates the node tree mirror written into the guest's window by scsynth,
  * including root/default group presence, node lifecycle, version tracking,
  * and structural fields (parent_id, head_id, is_group, def_name).
  */
 #include "EngineFixture.h"
 #include "shared_memory.h"
 #include "node_tree.h"   // the record is SuperSonic's, not the host's
-
-extern "C" uint8_t arena_storage[];
 
 // ── Helper: find a node by ID in the mirror ─────────────────────────────────
 

@@ -13,11 +13,6 @@
 #include <algorithm>
 #include <cmath>
 
-extern "C" {
-    uintptr_t get_audio_output_bus();
-    uintptr_t get_audio_input_bus();
-}
-
 // ── Helper: boot engine with given channel config ────────────────────────────
 
 // The fixture's pumped config, at these widths.
@@ -109,7 +104,9 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
 
     REQUIRE(engine.isRunning());
 
-    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
+    // Writable here only to poison it: the engine's own bus, which a host
+    // only reads.
+    auto* outputBus = const_cast<float*>(clockwork_audio_out(engine.core()));
     REQUIRE(outputBus != nullptr);
 
     // Poison the entire channel-major output region with a sentinel. A
@@ -154,9 +151,11 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
 
     REQUIRE(engine.isRunning());
 
-    auto* inputBus = reinterpret_cast<float*>(get_audio_input_bus());
+    auto* inputBus = clockwork_audio_in(engine.core());
     REQUIRE(inputBus != nullptr);
-    auto* outputBus = reinterpret_cast<float*>(get_audio_output_bus());
+    // Writable here only to poison it: the engine's own bus, which a host
+    // only reads.
+    auto* outputBus = const_cast<float*>(clockwork_audio_out(engine.core()));
     REQUIRE(outputBus != nullptr);
 
     // Distinct per-channel pattern in the input region (simulating JUCE's

@@ -8,7 +8,7 @@
  * test/synthdefs/compile_randid_synthdefs.scd.
  */
 #include "EngineFixture.h"
-#include "ClockworkProcessor.h"   // get_audio_output_bus
+#include "ClockworkProcessor.h"   // clockwork_audio_out and the block\'s geometry (lanes.h)
 #include <algorithm>
 #include <cmath>
 
@@ -34,7 +34,7 @@ TEST_CASE("RandID: two in one SynthDef draw from two generators on every block",
     float differ = 0.0f, drawn = 0.0f;
     for (int i = 0; i < 8; ++i) {
         fx.pumpBlock();
-        const auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+        const auto* bus = clockwork_audio_out(fx.engine().core());
         REQUIRE(bus != nullptr);
         for (uint32_t k = 0; k < block; ++k) {
             differ = std::max(differ, std::fabs(bus[k]));          // channel 0: |x - y|

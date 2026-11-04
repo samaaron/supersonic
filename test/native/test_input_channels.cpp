@@ -13,7 +13,7 @@
 #include "EngineFixture.h"
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
-#include "ClockworkProcessor.h"   // get_audio_num_input_buses, get_audio_num_output_buses
+#include "ClockworkProcessor.h"   // clockwork_audio_out and the block\'s geometry (lanes.h)
 
 // ── Disable inputs (2 → 0) triggers cold swap ──────────────────────────────
 
@@ -221,8 +221,8 @@ TEST_CASE("InputChannels: callback World widths track cold-swap rebuilds",
           "[InputChannels]") {
     EngineFixture fix;
     auto& cb = fix.engine().processor();
-    auto worldIn  = [] { return get_audio_num_input_buses(); };
-    auto worldOut = [] { return get_audio_num_output_buses(); };
+    auto worldIn  = [&] { return static_cast<int>(clockwork_in_channels(fix.engine().core())); };
+    auto worldOut = [&] { return static_cast<int>(clockwork_out_channels(fix.engine().core())); };
 
     auto r0 = fix.engine().enableInputChannels(0);
     REQUIRE(r0.success);

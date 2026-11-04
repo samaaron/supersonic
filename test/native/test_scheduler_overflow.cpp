@@ -9,7 +9,7 @@
  * or dropped.
  */
 #include "EngineFixture.h"
-#include "ClockworkProcessor.h"   // get_audio_output_bus / get_audio_buffer_samples
+#include "ClockworkProcessor.h"   // clockwork_audio_out and the block\'s geometry (lanes.h)
 #include "shared_memory.h"        // PerformanceMetrics
 
 #include <cmath>
@@ -34,11 +34,11 @@ ClockworkEngine::Config config() {
 // The time the next block is heard at, on the engine's freewheel clock.
 double engineNow(EngineFixture& fx) {
     const uint32_t blocks = fx.engine().processor().processCount.value.load(std::memory_order_acquire);
-    return kOriginNtp + double(blocks) * get_audio_buffer_samples() / kRate;
+    return kOriginNtp + double(blocks) * static_cast<int>(clockwork_block_size(fx.engine().core())) / kRate;
 }
 
-uint32_t blocksFor(double seconds) {
-    return static_cast<uint32_t>(std::ceil(seconds * kRate / get_audio_buffer_samples()));
+uint32_t blocksFor(ClockworkCore* core, double seconds) {
+    return static_cast<uint32_t>(std::ceil(seconds * kRate / static_cast<int>(clockwork_block_size(core))));
 }
 
 // "#bundle", the timetag, then one element behind its size.
@@ -73,10 +73,10 @@ osc_test::Packet beep(int32_t node, int32_t note, size_t padBytes) {
 // bus after each block renders.
 float peakOver(EngineFixture& fx, uint32_t blocks) {
     float peak = 0;
-    const int frames = get_audio_buffer_samples();
+    const int frames = static_cast<int>(clockwork_block_size(fx.engine().core()));
     for (uint32_t i = 0; i < blocks; ++i) {
         fx.pumpBlock();
-        const auto* bus = reinterpret_cast<const float*>(get_audio_output_bus());
+        const auto* bus = clockwork_audio_out(fx.engine().core());
         for (int f = 0; f < frames; ++f) peak = std::max(peak, std::fabs(bus[f]));
     }
     return peak;
@@ -121,11 +121,11 @@ TEST_CASE("scheduler overflow: the surplus is dropped and counted, what fits pla
         b.begin("/s_new") << "sonic-pi-beep" << int32_t(99999) << int32_t(0) << int32_t(0)
                           << "amp" << 0.5f << "release" << 0.1f;
         fx.send(b.end());
-        CHECK(peakOver(fx, blocksFor(0.15)) > 0.01f);
+        CHECK(peakOver(fx, blocksFor(fx.engine().core(), 0.15)) > 0.01f);
     }
 
     // Silence until the bundles are due, then the ones that fit play.
-    fx.pumpBlock(blocksFor(due - engineNow(fx)) - 1);
-    CHECK(peakOver(fx, blocksFor(0.15)) > 0.001f);
+    fx.pumpBlock(blocksFor(fx.engine().core(), due - engineNow(fx)) - 1);
+    CHECK(peakOver(fx, blocksFor(fx.engine().core(), 0.15)) > 0.001f);
     CHECK(m.scheduler_queue_depth.load() == 0);
 }
