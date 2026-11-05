@@ -75,60 +75,67 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          # The verdict is each workflow's latest run on this commit (by creation
+          # time, then by run id, since a tag push and a branch push of the same
+          # commit start in the same second): a run an older push's concurrency
+          # cancelled is superseded by the one that cancelled it, and a tag's run
+          # supersedes the branch's. Within a
+          # run, a job GitHub cancelled before it ran a step is one no runner
+          # took (macOS capacity), not a verdict on the code: it is queued
+          # again, three times at most.
+          repo="repos/${GITHUB_REPOSITORY}"
           reruns=""
           for attempt in $(seq 1 240); do
-            if ! all_with_ids=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" --paginate \
-                         --jq '.check_runs[] | select(.name != "publish") | [.status, (.conclusion // "-"), .name, .id] | @tsv'); then
-              echo "check-runs API error; retrying"
+            if ! runs=$(gh api "${repo}/actions/runs?head_sha=${GITHUB_SHA}&per_page=100" --paginate \
+                          --jq '.workflow_runs[] | select(.name != "Publish to npm") | [.name, .id, .created_at, .status, (.conclusion // "-")] | @tsv'); then
+              echo "runs API error; retrying"
               sleep 30
               continue
             fi
-            all=$(printf '%s\n' "$all_with_ids" | cut -f1-3)
-            bad=$(printf '%s\n' "$all" | awk -F'\t' '$1=="completed" && $2!="success" && $2!="neutral" && $2!="skipped"')
-            pending=$(printf '%s\n' "$all" | awk -F'\t' '$1!="completed"')
-            # A job GitHub cancelled before it ran a step is one no runner
-            # took (macOS capacity), not a verdict on the code: queue it
-            # again, three times at most, and keep waiting for it.
+            latest=$(printf '%s\n' "$runs" | sort -t$'\t' -k1,1 -k3,3r -k2,2nr | awk -F'\t' '$1 != "" && !seen[$1]++')
             requeued=""
-            while IFS=$'\t' read -r status conclusion name id; do
-              [ "$conclusion" = "cancelled" ] || continue
-              steps=$(gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}" --jq '.steps | length' 2>/dev/null || echo "?")
-              [ "$steps" = "0" ] || continue
-              tries=$(printf '%s\n' $reruns | grep -c "^${id}$")
-              if [ "$tries" -ge 3 ]; then
-                echo "${name} was never given a runner, three times: giving up"
-                continue
-              fi
-              echo "${name} was never given a runner; queuing it again"
-              gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/rerun" >/dev/null 2>&1 || true
-              reruns="${reruns} ${id}"
-              requeued="${requeued}${name} "
-            done < <(printf '%s\n' "$all_with_ids" | awk -F'\t' '$1=="completed" && $2=="cancelled"')
+            while IFS=$'\t' read -r name id created status conclusion; do
+              [ -n "$id" ] || continue
+              [ "$status" = "completed" ] && [ "$conclusion" = "success" ] && continue
+              # A job of this run that was cancelled with no step run.
+              while IFS=$'\t' read -r job_id job_name steps; do
+                [ -n "$job_id" ] || continue
+                [ "$steps" = "0" ] || continue
+                tries=$(printf '%s\n' $reruns | grep -c "^${job_id}$")
+                if [ "$tries" -ge 3 ]; then
+                  echo "${name} / ${job_name} was never given a runner, three times: giving up"
+                  continue
+                fi
+                echo "${name} / ${job_name} was never given a runner; queuing it again"
+                gh api -X POST "${repo}/actions/jobs/${job_id}/rerun" >/dev/null 2>&1 || true
+                reruns="${reruns} ${job_id}"
+                requeued="${requeued}${job_name} "
+              done < <(gh api "${repo}/actions/runs/${id}/jobs?per_page=100" --paginate \
+                         --jq '.jobs[] | select(.conclusion == "cancelled") | [.id, .name, (.steps | length)] | @tsv' 2>/dev/null)
+            done <<< "$latest"
             if [ -n "$requeued" ]; then
               sleep 30
               continue
             fi
+            bad=$(printf '%s\n' "$latest" | awk -F'\t' '$4=="completed" && $5!="success" && $5!="neutral" && $5!="skipped"')
+            pending=$(printf '%s\n' "$latest" | awk -F'\t' '$4!="completed"')
             if [ -n "$bad" ]; then
-              echo "Not publishing — non-green check runs on ${GITHUB_SHA}:"
+              echo "Not publishing — the latest run of a workflow on ${GITHUB_SHA} is not green:"
               printf '%s\n' "$bad"
               exit 1
             fi
-            if [ -n "$all" ] && [ -z "$pending" ]; then
-              echo "All other check runs green:"
-              printf '%s\n' "$all"
+            if [ -n "$latest" ] && [ -z "$pending" ]; then
+              echo "Every workflow's latest run on this commit is green:"
+              printf '%s\n' "$latest"
               exit 0
             fi
             echo "Attempt ${attempt}/240 — still waiting on:"
-            printf '%s\n' "${pending:-<no check runs reported yet>}"
+            printf '%s\n' "${pending:-<no runs reported yet>}"
             sleep 30
           done
           echo "Timed out after 2h waiting for CI to complete"
           exit 1
 
-      # One CycloneDX SBOM per build target, with Clockwork's for the pinned
-      # commit beside each: SuperSonic's document refers to Clockwork's by BOM
-      # link and file name, so the two travel together. The npm packages that
-      # carry code and the zip get the web pair; the GitHub release gets all.
       - name: Write the SBOMs
         run: |
           VERSION=$(node -p "require('./package.json').version")
