@@ -166,7 +166,7 @@ This will:
    `emcmake` (`build/web`): clockwork's CMake builds its Rust subsystems for
    `wasm32-unknown-emscripten` with the pinned nightly, compiles clockwork and
    the scsynth guest with the module's flags, and links
-   `dist/wasm/scsynth-nrt.wasm` with the exports the worklet calls. The memory
+   `dist/wasm/clockwork-scsynth.wasm` with the exports the worklet calls. The memory
    sizes come from `clockwork/js/memory_layout.js` at configure time.
 2. Build clockwork's MIDI and gamepad modules (wasm-bindgen) into
    `clockwork/dist/`, and copy them under `dist/`.
@@ -234,7 +234,7 @@ dist/
 ├── osc_channel.js, osc_fast.js   # OSC channel for workers, fast OSC codec
 ├── metrics_component.js, metrics-*.css
 ├── wasm/
-│   └── scsynth-nrt.wasm          # The engine
+│   └── clockwork-scsynth.wasm          # The engine
 ├── workers/
 │   ├── clockwork_audio_worklet.js  # AudioWorklet processor
 │   ├── osc_in_worker.js            # OSC input handler
@@ -269,13 +269,13 @@ Open http://localhost:3000/demo.html
 **Rebuild just JavaScript:**
 
 ```bash
-npx esbuild js/supersonic.js --bundle --format=esm --outfile=dist/supersonic.js --external:./scsynth-nrt.wasm
+npx esbuild js/supersonic.js --bundle --format=esm --outfile=dist/supersonic.js --external:./clockwork-scsynth.wasm
 ```
 
 **Watch mode:**
 
 ```bash
-npx esbuild js/supersonic.js --bundle --format=esm --outfile=dist/supersonic.js --external:./scsynth-nrt.wasm --watch
+npx esbuild js/supersonic.js --bundle --format=esm --outfile=dist/supersonic.js --external:./clockwork-scsynth.wasm --watch
 ```
 
 **Updating clockwork:** clockwork is a submodule, so a newer clockwork is a

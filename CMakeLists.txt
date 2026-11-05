@@ -82,13 +82,13 @@ set(CLOCKWORK_DSP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dsp/scsynth" CACHE PATH "" FO
 # ─── The web module ──────────────────────────────────────────────────────────
 # `emcmake cmake -B build/web` (scripts/build-web.sh): the same clockwork and
 # the same guest, compiled for the AudioWorklet by clockwork's own CMake. What
-# is SuperSonic's is the module's name — scsynth-nrt.wasm, which the client and
+# is SuperSonic's is the module's name — clockwork-scsynth.wasm, which the client and
 # the suite expect — where it lands, and the scheduler's shape: 2048 pending
 # events with a 512 KB payload pool is ample and fits the gap before the guest
 # region, and an event that is late PLAYS rather than disappears, which is what
 # OSC says and every SuperCollider client assumes.
 if(EMSCRIPTEN)
-    set(CLOCKWORK_WEB_MODULE_NAME "scsynth-nrt" CACHE STRING "" FORCE)
+    set(CLOCKWORK_WEB_MODULE_NAME "clockwork-scsynth" CACHE STRING "" FORCE)
     set(CLOCKWORK_WEB_DIST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/dist/wasm" CACHE PATH "" FORCE)
     set(CLOCKWORK_SCHEDULER_SLOT_COUNT 2048 CACHE STRING "" FORCE)
     set(CLOCKWORK_SCHEDULER_DATA_POOL_SIZE 524288 CACHE STRING "" FORCE)

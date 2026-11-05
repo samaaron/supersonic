@@ -152,7 +152,7 @@ export class SuperSonic extends Clockwork {
       || (options.coreBaseURL ? `${options.coreBaseURL}wasm/` : null)
       || (options.baseURL ? `${options.baseURL}wasm/` : null);
     const wasmUrl = options.wasmUrl
-      || (wasmBase ? `${wasmBase}scsynth-nrt.wasm` : undefined);
+      || (wasmBase ? `${wasmBase}clockwork-scsynth.wasm` : undefined);
 
     const bufInit  = options.bufferPoolSize ?? BUFFERS_INIT;
     const bufMax   = options.maxBufferMemory ?? BUFFERS_MAX;

@@ -29,9 +29,9 @@ export const test = base.extend({
       workerBaseURL: "/dist/workers/",
       wasmBaseURL: "/dist/wasm/",
       // clockwork's default artifact name is guest-agnostic; SuperSonic's is
-      // scsynth-nrt.wasm, which is what its build emits and what upstream's
+      // clockwork-scsynth.wasm, which is what its build emits and what upstream's
       // client has always asked for.
-      wasmUrl: "/dist/wasm/scsynth-nrt.wasm",
+      wasmUrl: "/dist/wasm/clockwork-scsynth.wasm",
       sampleBaseURL: "/dist/samples/",
       synthdefBaseURL: "/dist/synthdefs/",
       snapshotIntervalMs: 25,  // Fast metrics updates for test reliability

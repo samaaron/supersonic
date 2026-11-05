@@ -6,7 +6,7 @@
 #
 #   native   build/native/SuperSonic, the process (and the Catch2 suite)
 #   nif      build/nif/clockwork.so, the BEAM NIF
-#   web      dist/wasm/scsynth-nrt.wasm and the JavaScript around it
+#   web      dist/wasm/clockwork-scsynth.wasm and the JavaScript around it
 #
 # All three are the same CMake tree: the native and NIF builds configure it
 # for this machine, the web build configures it under emcmake. The lists of

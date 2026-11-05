@@ -5,7 +5,7 @@
 # build-web.sh — SuperSonic compiled for the AudioWorklet.
 #
 # Clockwork plus the scsynth guest, the same two halves the native build
-# links, emitted as scsynth-nrt.wasm — which is the name the JS client and the
+# links, emitted as clockwork-scsynth.wasm — which is the name the JS client and the
 # Playwright suite both expect. The module is built by the same CMake tree as
 # the native process (`emcmake cmake -B build/web`); this script wraps that
 # and bundles the JavaScript around it.
@@ -82,9 +82,9 @@ emcmake cmake -B "$BUILD_DIR" -S "$ROOT" \
 cmake --build "$BUILD_DIR" --parallel
 
 # The linker's map, reduced to the symbols that name static memory, for the
-# dev tools (clockwork/scripts/static-map.mjs): scsynth-nrt.symbols.json
+# dev tools (clockwork/scripts/static-map.mjs): clockwork-scsynth.symbols.json
 # beside the wasm.
-[ -f "$OUT/scsynth-nrt.map" ] && node "$CLOCKWORK/scripts/static-map.mjs" "$OUT/scsynth-nrt.map"
+[ -f "$OUT/clockwork-scsynth.map" ] && node "$CLOCKWORK/scripts/static-map.mjs" "$OUT/clockwork-scsynth.map"
 
 # ── The main-thread subsystems (MIDI, gamepad) ───────────────────────────────
 # Rust cores compiled to wasm-bindgen modules for the browser. They are
@@ -120,7 +120,7 @@ echo "bundling the client and workers..."
 # dist/chunks/, fetched only by a page that enables them.
 rm -rf "$OUT/../chunks"
 "$ESBUILD" "$ROOT/js/supersonic.js" --bundle --format=esm --splitting --define:__DEV__=$JS_DEV $JS_MINIFY \
-    --outdir="$OUT/.." --chunk-names="chunks/[name]-[hash]" --external:./scsynth-nrt.wasm >/dev/null
+    --outdir="$OUT/.." --chunk-names="chunks/[name]-[hash]" --external:./clockwork-scsynth.wasm >/dev/null
 rm -f "$OUT/../clockwork.js"
 
 for entry in osc_channel.js lib/osc_fast.js lib/osc_in_pump.js lib/midi_event.js lib/metrics_component.js; do
@@ -181,4 +181,4 @@ if [ -f "$ROOT/docs/API.md" ]; then
 fi
 
 echo ""
-echo "built $OUT/scsynth-nrt.wasm ($(du -h "$OUT/scsynth-nrt.wasm" | cut -f1))"
+echo "built $OUT/clockwork-scsynth.wasm ($(du -h "$OUT/clockwork-scsynth.wasm" | cut -f1))"

@@ -45,7 +45,7 @@ Three things this recipe gets right that a shorter one does not:
   wasm; the engine lives in `supersonic-scsynth-core`.
 - **`wasmBaseURL`, up to 0.81.0.** Those releases derive the wasm URL from
   `baseURL` and ignore `coreBaseURL`, so without it a CDN boot fails at
-  `init()` with a 404 on `scsynth-nrt.wasm`. Later releases honour
+  `init()` with a 404 on `clockwork-scsynth.wasm`. Later releases honour
   `coreBaseURL`; passing `wasmBaseURL` as well is harmless there.
 
 Pin a version for anything you deploy; `@latest` moves.
@@ -241,7 +241,7 @@ Make sure `init()` is called after a user interaction (button click, tap, keypre
 ### WASM fails to load
 
 Check that:
-1. The network tab shows no 404 for `scsynth-nrt.wasm`. On a CDN, `coreBaseURL` must point at `supersonic-scsynth-core`.
+1. The network tab shows no 404 for `clockwork-scsynth.wasm`. On a CDN, `coreBaseURL` must point at `supersonic-scsynth-core`.
 2. CORS headers allow loading from your domain, if the files are on another one.
 
 The engine's wasm is fetched as bytes, so its `Content-Type` does not matter. The MIDI and gamepad modules load faster served as `application/wasm`, and fall back, with a console warning, when they are not.
