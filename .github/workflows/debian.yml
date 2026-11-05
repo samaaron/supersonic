@@ -20,11 +20,10 @@ name: Debian Package
 on:
   push:
     branches: [main]
-    tags: ['v*']
-  # PRs are path-filtered (each dist leg costs ~45-75 min); pushes to main and
-  # tags always run so coverage stays complete where it counts. Tag pushes are
-  # deliberately unfiltered — path filters behave unpredictably on tag events
-  # and a silently skipped release build would lose the release deb.
+  # PRs are path-filtered (each dist leg costs ~45-75 min); pushes to main
+  # always run so coverage stays complete where it counts, and the deb each
+  # push builds is kept: a tag runs nothing here, and publish.yml takes the
+  # deb from the tagged commit's run.
   pull_request:
     branches: [main]
     paths:
@@ -119,6 +118,7 @@ jobs:
           # (if: always()), where zero artifacts is expected and an error here
           # would bury the real failure.
           if-no-files-found: warn
+          retention-days: 90
           path: |
             build/debian/*.dsc
             build/debian/*.tar.xz
@@ -126,19 +126,3 @@ jobs:
             build/debian/build-area/*.changes
             build/debian/build-area/*.buildinfo
 
-      # Attach the stable-target deb to tagged releases alongside the raw
-      # binaries native.yml uploads. The dist guard keeps this trixie-only
-      # if sid is ever added back to the matrix.
-      # Provenance for the deb: `gh attestation verify <file> --repo
-      # samaaron/supersonic`.
-      - name: Attest the deb
-        if: startsWith(github.ref, 'refs/tags/') && matrix.dist == 'trixie'
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: build/debian/build-area/*.deb
-
-      - name: Attach deb to release
-        if: startsWith(github.ref, 'refs/tags/') && matrix.dist == 'trixie'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/debian/build-area/*.deb

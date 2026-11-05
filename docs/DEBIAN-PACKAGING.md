@@ -6,7 +6,9 @@ package, compiles it in a **network-disconnected** container on **trixie**
 (stable), runs the full native test suite against Debian-archive dependency
 versions during the build, then runs `lintian --fail-on error,warning`,
 `autopkgtest`, and an install-and-boot smoke test in a pristine container.
-It runs on pushes to `main`, on `v*` tags, on pull requests to `main` that
+It runs on pushes to `main` (the deb each push builds is kept, and a release
+takes it from the tagged commit's run: `.github/workflows/publish.yml`), on
+pull requests to `main` that
 change a path it lists (the sources, the native tests, the packaging and the
 man page among them), and by hand.
 

@@ -245,7 +245,8 @@ else
     echo "       git diff --cached"
     echo "       git commit -m \"Version - $NEW_VERSION\" && git tag v$NEW_VERSION"
 fi
-echo "  2. Push main, then the tag: git push && git push origin v$NEW_VERSION"
-echo "     The tag runs .github/workflows/publish.yml. Once every other check on the"
-echo "     commit is green, it publishes the npm packages and the GitHub release."
+echo "  2. Push main: git push. Its runs test the commit and build the binaries."
+echo "  3. When they are green, push the tag: git push origin v$NEW_VERSION"
+echo "     The tag runs .github/workflows/publish.yml, which takes the binaries from"
+echo "     those runs and publishes the npm packages and the GitHub release."
 echo ""

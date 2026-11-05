@@ -1,9 +1,12 @@
 name: Native Build & Test
 
+# A commit is tested once, on its push to main; a tag runs nothing here.
+# The binaries the release carries are built and kept here on every push to
+# main, and the publish workflow (publish.yml) takes them from this commit's
+# run once a tag names it.
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -230,9 +233,11 @@ jobs:
       # clockwork, scsynth and the Rust std made an 11 MB server 87 MB. So the
       # debug info is split off beside the binary and uploaded with it —
       # a .debug file with a debuglink on Linux, a dSYM on macOS, the PDB on
-      # Windows — and the binary itself is stripped.
+      # Windows — and the binary itself is stripped. Kept for every push to
+      # main: a release is one of these commits, tagged, and publish.yml
+      # takes the binaries from here rather than building them again.
       - name: Prepare release artifact
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
         shell: bash
         run: |
           src="${{ steps.binary.outputs.path }}"
@@ -257,11 +262,12 @@ jobs:
           ls -la release
 
       - name: Upload release artifact
-        if: startsWith(github.ref, 'refs/tags/')
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.binary.outputs.artifact }}
           path: release/
+          retention-days: 90
 
   # ── Native executable, 32-bit x86 ───────────────────────────────────────────
   # i686 is the one desktop target where the engine's lock-free assumptions can
@@ -556,33 +562,3 @@ jobs:
         # stuck past SIGTERM.
         run: timeout -k 30 900 ./build/native-sanitize/test/native/SuperSonicNativeTests "~[benchmark]"
 
-  # ── Attach artifacts to GitHub Release ──────────────────────────────────────
-  release:
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [native]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-      attestations: write
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: release-assets
-
-      - name: List assets
-        run: find release-assets -type f
-
-      # Provenance for each binary and its debug symbols: `gh attestation
-      # verify <file> --repo samaaron/supersonic`.
-      - name: Attest the binaries
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: release-assets/**/*
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-assets/**/*

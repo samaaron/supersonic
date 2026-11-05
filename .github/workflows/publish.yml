@@ -1,9 +1,21 @@
 name: Publish to npm
 
+# The release: a tag on a commit main has already tested. Nothing is tested
+# or built twice. The gate below asks that every workflow's run for the push
+# of this commit to main went green; the binaries and the deb come from
+# those runs; the npm packages and the dist zip are built here, the one
+# thing only a release makes. A dispatch with dry_run goes through all of
+# it, publishing nothing: the way to try a change to this file.
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Go through everything but publish nothing"
+        type: boolean
+        default: true
 
 jobs:
   publish:
@@ -70,34 +82,45 @@ jobs:
       # Build-Test-Deploy all attach to the same SHA. Our own check run is
       # excluded by its job name. Cancelled or failed runs block the publish;
       # re-run them to green (or re-push the tag) to release.
-      - name: Wait for all other CI on this commit to be green
+      # The tag names the version the tree says it is, or this is the wrong
+      # commit to release.
+      - name: The tag names the version in package.json
+        if: github.event_name == 'push'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [ "${GITHUB_REF_NAME}" = "v${version}" ] || {
+            echo "The tag is ${GITHUB_REF_NAME} but package.json says ${version}: the wrong commit is tagged"; exit 1; }
+
+      - name: Wait for this commit's runs on main to be green
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
-          # The verdict is each workflow's latest run on this commit (by creation
-          # time, then by run id, since a tag push and a branch push of the same
-          # commit start in the same second): a run an older push's concurrency
-          # cancelled is superseded by the one that cancelled it, and a tag's run
-          # supersedes the branch's. Within a
-          # run, a job GitHub cancelled before it ran a step is one no runner
-          # took (macOS capacity), not a verdict on the code: it is queued
-          # again, three times at most.
+          # A commit is tested once, by the workflows its push to main ran:
+          # every one of them must have completed green. A run cancelled
+          # because main moved on, or one that failed, stops the release
+          # with a reason; nothing is guessed about which run to believe,
+          # since there is one run per workflow. Within a run, a job GitHub
+          # cancelled before it ran a step is one no runner took (macOS
+          # capacity), not a verdict on the code: it is queued again, three
+          # times at most, and waited for.
           repo="repos/${GITHUB_REPOSITORY}"
+          required="Native Build & Test|Debian Package|Build-Test-Deploy|security"
           reruns=""
           for attempt in $(seq 1 240); do
-            if ! runs=$(gh api "${repo}/actions/runs?head_sha=${GITHUB_SHA}&per_page=100" --paginate \
-                          --jq '.workflow_runs[] | select(.name != "Publish to npm") | [.name, .id, .created_at, .status, (.conclusion // "-")] | @tsv'); then
+            if ! runs=$(gh api "${repo}/actions/runs?head_sha=${GITHUB_SHA}&event=push&branch=main&per_page=100" --paginate \
+                          --jq '.workflow_runs[] | [.name, .id, .status, (.conclusion // "-")] | @tsv'); then
               echo "runs API error; retrying"
               sleep 30
               continue
             fi
-            latest=$(printf '%s\n' "$runs" | sort -t$'\t' -k1,1 -k3,3r -k2,2nr | awk -F'\t' '$1 != "" && !seen[$1]++')
+            # One run per workflow: the newest when a run was done again.
+            runs=$(printf '%s\n' "$runs" | awk -F'\t' '$1 != "" && !seen[$1]++')
             requeued=""
-            while IFS=$'\t' read -r name id created status conclusion; do
+            while IFS=$'\t' read -r name id status conclusion; do
               [ -n "$id" ] || continue
               [ "$status" = "completed" ] && [ "$conclusion" = "success" ] && continue
-              # A job of this run that was cancelled with no step run.
               while IFS=$'\t' read -r job_id job_name steps; do
                 [ -n "$job_id" ] || continue
                 [ "$steps" = "0" ] || continue
@@ -112,29 +135,56 @@ jobs:
                 requeued="${requeued}${job_name} "
               done < <(gh api "${repo}/actions/runs/${id}/jobs?per_page=100" --paginate \
                          --jq '.jobs[] | select(.conclusion == "cancelled") | [.id, .name, (.steps | length)] | @tsv' 2>/dev/null)
-            done <<< "$latest"
+            done <<< "$runs"
             if [ -n "$requeued" ]; then
               sleep 30
               continue
             fi
-            bad=$(printf '%s\n' "$latest" | awk -F'\t' '$4=="completed" && $5!="success" && $5!="neutral" && $5!="skipped"')
-            pending=$(printf '%s\n' "$latest" | awk -F'\t' '$4!="completed"')
+            missing=""
+            for w in $(printf '%s' "$required" | tr '|' '\n' | tr ' ' '_'); do
+              w="${w//_/ }"
+              printf '%s\n' "$runs" | awk -F'\t' -v w="$w" '$1 == w' | grep -q . || missing="${missing}${w}; "
+            done
+            if [ -n "$missing" ]; then
+              echo "Attempt ${attempt}/240 — no run yet for: ${missing}"
+              sleep 30
+              continue
+            fi
+            bad=$(printf '%s\n' "$runs" | awk -F'\t' '$3=="completed" && $4!="success" && $4!="neutral" && $4!="skipped"')
+            pending=$(printf '%s\n' "$runs" | awk -F'\t' '$3!="completed"')
             if [ -n "$bad" ]; then
-              echo "Not publishing — the latest run of a workflow on ${GITHUB_SHA} is not green:"
+              echo "Not publishing — this commit's runs on main are not green:"
               printf '%s\n' "$bad"
+              echo "A cancelled run is one main moved on from: run it again (gh run rerun <id>) and then this."
               exit 1
             fi
-            if [ -n "$latest" ] && [ -z "$pending" ]; then
-              echo "Every workflow's latest run on this commit is green:"
-              printf '%s\n' "$latest"
+            if [ -z "$pending" ]; then
+              echo "This commit's runs on main are green:"
+              printf '%s\n' "$runs"
+              native=$(printf '%s\n' "$runs" | awk -F'\t' '$1=="Native Build & Test" {print $2}')
+              debian=$(printf '%s\n' "$runs" | awk -F'\t' '$1=="Debian Package" {print $2}')
+              echo "native_run=${native}" >> "$GITHUB_OUTPUT"
+              echo "debian_run=${debian}" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             echo "Attempt ${attempt}/240 — still waiting on:"
-            printf '%s\n' "${pending:-<no runs reported yet>}"
+            printf '%s\n' "$pending"
             sleep 30
           done
           echo "Timed out after 2h waiting for CI to complete"
           exit 1
+
+      # The binaries and the deb this commit's runs built and kept.
+      - name: Take the binaries from this commit's native run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ steps.gate.outputs.native_run }}" --dir release-assets --pattern 'supersonic-*'
+          gh run download "${{ steps.gate.outputs.debian_run }}" --dir debian-assets --name debian-trixie
+          # The deb sits at the path it was built at inside its artifact.
+          mkdir -p release-assets/debian
+          find debian-assets -name '*.deb' -exec cp {} release-assets/debian/ \;
+          find release-assets -type f
 
       - name: Write the SBOMs
         run: |
@@ -156,21 +206,26 @@ jobs:
         run: cp build/README.npm.md README.md
 
       - name: Publish supersonic-scsynth
+        if: github.event_name == 'push'
         run: scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-core
+        if: github.event_name == 'push'
         working-directory: packages/supersonic-scsynth-core
         run: ../../scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-synthdefs
+        if: github.event_name == 'push'
         working-directory: packages/supersonic-scsynth-synthdefs
         run: ../../scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-samples
+        if: github.event_name == 'push'
         working-directory: packages/supersonic-scsynth-samples
         run: ../../scripts/npm-publish-once.sh
 
       - name: Publish supersonic-scsynth-bundle
+        if: github.event_name == 'push'
         working-directory: packages/supersonic-scsynth-bundle
         run: ../../scripts/npm-publish-once.sh
 
@@ -212,17 +267,21 @@ jobs:
       # npm packages carry npm's own. supersonic.zip is the same bytes as the
       # versioned zip, so one attestation covers both.
       - name: Attest the release assets
+        if: github.event_name == 'push'
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             supersonic-${{ github.ref_name }}.zip
             build/sbom/*.cdx.json
+            release-assets/**/*
 
       - name: Create GitHub Release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             supersonic-${{ github.ref_name }}.zip
             supersonic.zip
             build/sbom/*.cdx.json
+            release-assets/**/*
           generate_release_notes: true
