@@ -20,9 +20,12 @@
 # path-shifted under link/ into debian/patches here so dpkg-source applies
 # them to the component tree.
 #
-# Versioning: releases (HEAD == tag v<version>) get <version>-1; anything else
-# gets <version>+git<date>.<sha>-1~ci1 so snapshot packages sort below the
-# eventual release.
+# Versioning: the release build is the commit that set package.json to
+# <version>, the one scripts/bump-version.sh makes and tags; it gets
+# <version>-1. Every other commit gets <version>+git<date>.<sha>-1~ci1 so
+# snapshot packages sort below the eventual release. CI builds the package
+# when the commit reaches main, before the tag exists, so the tag cannot be
+# what tells a release from a snapshot.
 #
 # Needs network (Link clone + crates.io) — run it in the *networked* phase;
 # the package build itself then proves it needs none. Archives HEAD, so
@@ -48,7 +51,14 @@ V="$(sed -n 's/^  "version": "\([0-9][0-9.]*\)",$/\1/p' package.json | head -1)"
 [ -n "$V" ] || { echo "ERROR: no version in package.json" >&2; exit 1; }
 SHA="$(git rev-parse --short HEAD)"
 
-if git describe --tags --exact-match HEAD 2>/dev/null | grep -qx "v$V"; then
+# HEAD is the version commit when its own change to package.json is the line
+# that names V. A clone cut off at HEAD shows that whole file as added, so
+# the parent must be there (fetch-depth 2 in CI) for the answer to mean anything.
+git rev-parse --verify -q HEAD^ >/dev/null || {
+    echo "ERROR: HEAD has no parent in this clone; fetch at least depth 2 to tell a release from a snapshot" >&2
+    exit 1
+}
+if git show --format= HEAD -- package.json | grep -xF "+  \"version\": \"$V\"," >/dev/null; then
     UV="$V"
     DEBV="$V-1"
     SNAPSHOT=""

@@ -186,6 +186,16 @@ jobs:
           find debian-assets -name '*.deb' -exec cp {} release-assets/debian/ \;
           find release-assets -type f
 
+      - name: The Debian package is the release build
+        if: github.event_name == 'push'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [ -f "release-assets/debian/supersonic_${version}-1_amd64.deb" ] || {
+            echo "This commit's Debian package is a snapshot, not supersonic_${version}-1:"
+            ls release-assets/debian
+            echo "Only the commit that bumped the version (the one scripts/bump-version.sh makes) builds the release package: tag that commit."
+            exit 1; }
+
       - name: Write the SBOMs
         run: |
           VERSION=$(node -p "require('./package.json').version")

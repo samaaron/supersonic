@@ -89,9 +89,11 @@ The four Link patches remain single-sourced in `clockwork/external/*.patch`;
 the assembly script path-shifts them under `link/` into `debian/patches/`, so
 they flow through the normal quilt machinery.
 
-`scripts/make-debian-source.sh` archives HEAD. When HEAD is tagged
-`v<v>` the package is `<v>-1`; anything else is a snapshot,
-`<v>+git<date>.<sha>-1~ci1`. `<v>` is the version in `package.json`, which
+`scripts/make-debian-source.sh` archives HEAD. When HEAD is the commit that
+set `package.json` to `<v>` (the one `scripts/bump-version.sh` makes and
+tags) the package is `<v>-1`; anything else is a snapshot,
+`<v>+git<date>.<sha>-1~ci1`. CI builds the package when the commit reaches
+main, before the tag exists, and the release takes that build. `<v>` is the version in `package.json`, which
 between releases is the last release's, and `+git` sorts after the end of a
 version in dpkg: a snapshot sorts above the `<v>-1` release it follows and
 below the next one. (`~git` would sort below `<v>-1`.) The snapshot's Debian
