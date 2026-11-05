@@ -46,12 +46,6 @@ Files: dsp/scsynth/synth/external_libraries/nova-simd/*
 Copyright: 2008-2012 Tim Blechmann
 License: GPL-2+
 
-Files: dsp/scsynth/synth/external_libraries/TLSF-2.4.6/*
-Copyright: 2005-2008 Miguel Masmano Tello
-License: GPL-2 or LGPL-2.1
-Comment: The TLSF real-time allocator is dual-licensed; this package uses it
- under the GPL-2 option, compatible with the engine's GPL licence.
-
 Files: dsp/scsynth/synth/common/fftlib.c
 Copyright: 1995-1996 John Green (Naval Undersea Warfare Center, USA)
 License: public-domain
@@ -184,22 +178,6 @@ License: GPL-2+
  .
  On Debian systems, the complete text of the GNU General Public License
  version 2 can be found in /usr/share/common-licenses/GPL-2.
-
-License: GPL-2
- This program is free software; you can redistribute it and/or modify it
- under the terms of the GNU General Public License version 2 as published by
- the Free Software Foundation.
- .
- On Debian systems, the complete text of the GNU General Public License
- version 2 can be found in /usr/share/common-licenses/GPL-2.
-
-License: LGPL-2.1
- This library is free software; you can redistribute it and/or modify it
- under the terms of the GNU Lesser General Public License version 2.1 as
- published by the Free Software Foundation.
- .
- On Debian systems, the complete text of the GNU Lesser General Public
- License version 2.1 can be found in /usr/share/common-licenses/LGPL-2.1.
 
 License: Expat
  Permission is hereby granted, free of charge, to any person obtaining a
