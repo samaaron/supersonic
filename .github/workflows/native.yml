@@ -349,16 +349,79 @@ jobs:
       - name: Configure as embedded subproject
         run: cmake -S test/embed -B build/embed-guard -DBUILD_TESTS=ON
 
+  # ── ThreadSanitizer, on the engines that render at once ──────────────────
+  # A plugin host renders its instances on several threads at the same time.
+  # The plural-engine cases (test_plural_engines.cpp) run three engines on
+  # three threads at once and hold each to its solo render; under TSan a
+  # race on anything the engines shared is a report, and halt_on_error makes
+  # the first one fatal. macOS as well as Linux: smoothie's Objective-C++ is
+  # on macOS, and CLOCKWORK_SANITIZE covers it where flags alone would not.
+  sanitize-tsan:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-x64
+          - os: macos-latest
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    name: sanitize-tsan-${{ matrix.name }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      # Only a nightly instruments Rust; the pin is the web build's.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-02
+          components: rust-src
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
+
+      - name: Configure
+        run: |
+          cmake -B build/native-tsan \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DBUILD_TESTS=ON \
+            -DCLOCKWORK_PLUGINS=OFF \
+            -DCLOCKWORK_SANITIZE=thread
+
+      - name: Build tests
+        run: cmake --build build/native-tsan --config RelWithDebInfo --parallel 2 --target SuperSonicNativeTests
+
+      - name: Run the plural-engine cases
+        env:
+          TSAN_OPTIONS: "halt_on_error=1:report_signal_unsafe=0:allocator_may_return_null=1"
+        run: ./build/native-tsan/test/native/SuperSonicNativeTests "[plural]"
+
   # ── scsynth's mutable statics, against the budget ────────────────────────
   # scsynth declares DSP_INSTANCES_ANY (any number of it in one process), which
   # clockwork holds to "no mutable static at all". scripts/guest-globals.budget
   # is 0, and this fails on the first mutable static that comes back.
   #
-  # Counted on macOS: a compiler names function-local statics its own way, so
-  # one platform's count is the budget. None is the same everywhere.
+  # Counted on macOS and Linux: none is the same everywhere, and a static in
+  # a source only one platform compiles shows on that platform.
   guest-globals:
-    runs-on: macos-latest
-    name: guest-globals-budget
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macos-arm64
+          - os: ubuntu-latest
+            name: linux-x64
+    runs-on: ${{ matrix.os }}
+    name: guest-globals-${{ matrix.name }}
     timeout-minutes: 20
 
     steps:
@@ -368,6 +431,13 @@ jobs:
           submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libudev-dev libjack-jackd2-dev libpipewire-0.3-dev
 
       # Unoptimised: an optimised build merges file statics into unnamed blocks.
       - name: Build scsynth unoptimised
@@ -431,9 +501,12 @@ jobs:
   # gcc before a single test runs. Upstream's sanitizer build made the same
   # exception.
   #
-  # TSan is not run here. The Rust subsystems are not TSan-instrumented in
-  # this build, and an uninstrumented staticlib turns every Rust-side
-  # happens-before edge into a false positive.
+  # TSan runs in the sanitize-tsan job below, on the plural-engine cases
+  # only: three engines rendering at once on three threads is the one
+  # concurrent render in this suite, and the whole suite under TSan would
+  # take hours. Rust is instrumented there too (CLOCKWORK_SANITIZE=thread
+  # with a nightly, as clockwork's own TSan job), so a Rust-side
+  # happens-before edge is seen rather than read as a race.
   sanitize:
     runs-on: ubuntu-latest
     name: sanitize-asan-ubsan

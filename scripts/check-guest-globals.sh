@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# scsynth is becoming a guest any number of which can run in one process
-# (clockwork's DspInfo::instances = DSP_INSTANCES_ANY): a guest that keeps
-# nothing process-wide, so no mutable variable with static storage anywhere
-# in its code. Clockwork's check (clockwork/scripts/check-guest-globals.sh)
-# allows none at all; this counts what scsynth still has against the budget
-# in scripts/guest-globals.budget and fails when the count rises, or when it
-# falls and the budget was not lowered with it, so every slice of the work
-# is recorded and nothing creeps back. At 0 the budget goes and scsynth
-# declares DSP_INSTANCES_ANY.
+# scsynth is a guest any number of which can run in one process (clockwork's
+# DspInfo::instances = DSP_INSTANCES_ANY): a guest that keeps nothing
+# process-wide, so no mutable variable with static storage anywhere in its
+# code. Clockwork's check (clockwork/scripts/check-guest-globals.sh) allows
+# none at all; this counts what scsynth has against the budget in
+# scripts/guest-globals.budget, which is 0, and fails when the count rises
+# (or falls below a budget that was not lowered with it).
 #
 # Reads the objects of an unoptimised build: an optimised one merges file
 # statics into unnamed blocks.

@@ -116,7 +116,10 @@ process at once: the fixture sends each case's program to all three, renders
 them in turn, and holds each to the first, block for block and reply for
 reply (`test/native/EngineFixture.h`, "Engines beside this one"). State one
 engine shares with another shows as a block or a reply that differs. CI runs
-the shuffled suite this way once, on macOS arm64.
+the shuffled suite this way once, on macOS arm64. The plural-engine cases
+also render three engines at once on three threads, and CI runs those under
+ThreadSanitizer (`-DCLOCKWORK_SANITIZE=thread`, which instruments the whole
+process, SuperSonic's own targets included) on Linux and macOS.
 
 Note that the Link tests join a real Link session on the machine's loopback:
 another Link-enabled app running at the same time (Sonic Pi, Ableton Live)

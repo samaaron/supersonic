@@ -110,6 +110,16 @@ if(CLOCKWORK_NIF)
     set(CLOCKWORK_NIF_FRONT ON CACHE BOOL "SuperSonic's NIF sends through supersonic::Commands" FORCE)
 endif()
 
+# A sanitizer build instruments the whole process. clockwork applies
+# CLOCKWORK_SANITIZE with directory-scoped options, which reach its own
+# targets and the guest's but not the targets declared in this file; the same
+# options here, above clockwork, reach everything. ThreadSanitizer judges
+# only what it instrumented, and reads an uninstrumented unit's
+# synchronisation as none at all.
+if(CLOCKWORK_SANITIZE)
+    add_compile_options(-fsanitize=${CLOCKWORK_SANITIZE} -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=${CLOCKWORK_SANITIZE})
+endif()
 add_subdirectory(clockwork)
 
 if(TARGET clockwork_nif)

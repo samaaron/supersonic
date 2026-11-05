@@ -1173,10 +1173,11 @@ to "no mutable variable with static storage" by clockwork's
 `scripts/check-guest-globals.sh` and SuperSonic's ratchet
 (`scripts/check-guest-globals.sh`, `scripts/guest-globals.budget` at 0, the
 `guest-globals` job in `native.yml`), and to rendering beside another engine
-exactly what it renders alone by `test/native/test_plural_engines.cpp` and by
-the whole pumped suite run with `SUPERSONIC_TEST_ENGINES=3` (docs/BUILDING.md,
-"Native tests"): three engines per case, each held to the first block for
-block and reply for reply. Upstream scsynth is one per process, so
+exactly what it renders alone by `test/native/test_plural_engines.cpp` (two
+in lockstep, three at once on three threads, the latter under ThreadSanitizer
+in CI) and by the whole pumped suite run with `SUPERSONIC_TEST_ENGINES=3`
+(docs/BUILDING.md, "Native tests"): three engines per case, each held to the
+first block for block and reply for reply. Upstream scsynth is one per process, so
 its statics had to go somewhere, and they went to three places. Every change
 in an upstream file carries the comment marker **`SuperSonic (plural guest)`**
 (`grep -rn "plural guest" dsp/scsynth/synth`), and a sync that brings in a new

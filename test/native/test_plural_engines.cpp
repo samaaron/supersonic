@@ -22,7 +22,9 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -278,4 +280,61 @@ TEST_CASE("plural engines: one program plays a chord on three engines, each told
     REQUIRE(clockwork_audio_writer_write(w, mix.data(), mix.size() / 2) == CLOCKWORK_OK);
     REQUIRE(clockwork_audio_writer_close(w, nullptr, nullptr) == CLOCKWORK_OK);
     CHECK(std::filesystem::file_size(wav) > mix.size() * sizeof(float));
+}
+
+// ── Three engines rendered at once, on three threads ─────────────────────────
+//
+// A plugin host renders its instances on several threads at the same time.
+// Three engines, each on a thread of its own, render their scripts with no
+// step between them, and each gives bit for bit what it gives alone. State
+// the engines shared would show as a difference, and a race on it to
+// ThreadSanitizer, which the sanitizer builds run this case under.
+TEST_CASE("plural engines: three engines rendering at once on three threads each render what they render alone",
+          "[plural][threads]") {
+    const std::string def = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-beep.scsyndef";
+    if (!std::filesystem::exists(def)) SKIP("sonic-pi-beep synthdef not available");
+
+    const Script scripts[3] = {
+        { { 0, play(1000, 60.0f) }, { 120, set(1000, "note", 67.0f) }, { 200, play(1001, 48.0f) } },
+        { { 0, play(1000, 72.0f) }, { 60, osc_test::message("/n_free", 1000) }, { 150, play(1002, 55.0f) } },
+        { { 10, play(1000, 64.0f) }, { 90, set(1000, "amp", 0.2f) }, { 240, play(1003, 76.0f) } },
+    };
+    std::vector<float> solo[3];
+    for (int i = 0; i < 3; ++i) {
+        solo[i] = alone(scripts[i]);
+        REQUIRE(peak(solo[i]) > 0.0f);
+    }
+
+    // Booted and loaded here, on the test thread (the fixture asserts as it
+    // boots); one engine each, whatever SUPERSONIC_TEST_ENGINES says.
+    std::unique_ptr<EngineFixture> engines[3];
+    for (auto& e : engines) {
+        e = std::make_unique<EngineFixture>(1);
+        REQUIRE(e->loadSynthDef("sonic-pi-beep"));
+    }
+    // Each thread sends and renders its own engine's script and keeps its
+    // output; nothing asserts off the test thread.
+    std::vector<float> out[3];
+    std::thread threads[3];
+    for (int i = 0; i < 3; ++i) {
+        threads[i] = std::thread([&, i] {
+            EngineFixture& fx = *engines[i];
+            ClockworkCore* core = fx.engine().core();
+            const size_t n = static_cast<size_t>(clockwork_block_size(core)) * 2;
+            for (uint32_t b = 0; b < kScriptBlocks; ++b) {
+                for (const Cue& c : scripts[i])
+                    if (c.block == b) fx.send(c.message);
+                fx.pumpBlock();
+                const float* bus = clockwork_audio_out(core);
+                out[i].insert(out[i].end(), bus, bus + n);
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    for (int i = 0; i < 3; ++i) {
+        const long diff = firstDifference(out[i], solo[i]);
+        INFO("engine " << i + 1 << " first differs from its solo run at sample " << diff);
+        CHECK(diff == -1);
+    }
 }
