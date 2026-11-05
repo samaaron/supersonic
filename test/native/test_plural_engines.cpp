@@ -17,12 +17,13 @@
 #include "ClockworkProcessor.h"   // clockwork_audio_out, clockwork_block_size
 #include "dsp_api.h"
 #include "OscTestUtils.h"
-
+#include "clockwork_audio_file.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -121,4 +122,160 @@ TEST_CASE("plural engines: scsynth beside another scsynth renders exactly what i
     INFO("engine B first differs from its solo run at sample " << diffB);
     CHECK(diffA == -1);
     CHECK(diffB == -1);
+}
+
+// ── Three engines, one program, each its own conversation ────────────────────
+//
+// One program holds three engines and talks to each over its own client. Each
+// engine is told a different note of a chord; one is then retuned and another
+// freed, and only the engine spoken to changes. Every reply comes back on the
+// connection that asked. The mix of the three is written to a WAV beside the
+// system's temporary files (supersonic-three-engines.wav), so the chord can be
+// heard as well as measured.
+namespace {
+
+double hz(double note) { return 440.0 * std::pow(2.0, (note - 69.0) / 12.0); }
+
+// The power of one frequency in the left channel of `stereo` over the frames
+// [from, to): a Goertzel pass, which is enough to tell three notes apart.
+double powerAt(const std::vector<float>& stereo, size_t from, size_t to, double freq, double rate) {
+    const double k = 2.0 * std::cos(6.283185307179586 * freq / rate);
+    double s0 = 0.0, s1 = 0.0, s2 = 0.0;
+    for (size_t i = from; i < to; ++i) {
+        s0 = stereo[2 * i] + k * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    return s1 * s1 + s2 * s2 - k * s1 * s2;
+}
+
+float peakOver(const std::vector<float>& stereo, size_t from, size_t to) {
+    float p = 0.0f;
+    for (size_t i = 2 * from; i < 2 * to; ++i) p = std::max(p, std::fabs(stereo[i]));
+    return p;
+}
+
+osc_test::Packet hold(int32_t node, float note) {
+    osc_test::Builder b;
+    auto& s = b.begin("/s_new");
+    s << "sonic-pi-beep" << node << int32_t{0} << int32_t{0}
+      << "note" << note << "amp" << 0.5f << "sustain" << 3.0f << "release" << 0.2f;
+    return b.end();
+}
+
+struct Engine {
+    EngineFixture fx;
+    std::vector<float> out;
+    Engine() {
+        REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
+        fx.send(osc_test::message("/notify", 1));   // node notifications, to this client
+        REQUIRE(fx.waitForDone("/notify"));
+        fx.clearReplies();
+    }
+    void block() {
+        fx.pumpBlock();
+        ClockworkCore* core = fx.engine().core();
+        const float* bus = clockwork_audio_out(core);
+        REQUIRE(bus != nullptr);
+        const size_t n = static_cast<size_t>(clockwork_block_size(core)) * 2;
+        out.insert(out.end(), bus, bus + n);
+    }
+    // How many replies to `address` carry `node` as their first argument.
+    int replies(const char* address, int32_t node) const {
+        int n = 0;
+        for (const OscReply& r : fx.allReplies())
+            if (r.address == address && r.parsed().argInt(0) == node) ++n;
+        return n;
+    }
+    int synths() const {
+        for (const OscReply& r : fx.allReplies())
+            if (r.address == "/status.reply") return r.parsed().argInt(2);
+        return -1;
+    }
+};
+
+} // namespace
+
+TEST_CASE("plural engines: one program plays a chord on three engines, each told and answered on its own", "[plural]") {
+    const std::string def = std::string(CLOCKWORK_SYNTHDEFS_DIR) + "/sonic-pi-beep.scsyndef";
+    if (!std::filesystem::exists(def)) SKIP("sonic-pi-beep synthdef not available");
+
+    const double rate = EngineFixture::defaultConfig().sampleRate;
+    const float notes[3] = { 60.0f, 64.0f, 67.0f };   // C4 E4 G4
+    const float retuned = 72.0f;                        // C5, engine 2 only
+    Engine e[3];
+    const uint32_t perSecond = e[0].fx.blocksOfAudio(1000);
+    const size_t frames = static_cast<size_t>(clockwork_block_size(e[0].fx.engine().core()));
+
+    // Second 0: a note each. Second 1: engine 2 retuned. Second 2: engine 3 freed.
+    for (uint32_t blk = 0; blk < 3 * perSecond; ++blk) {
+        if (blk == 0)
+            for (int i = 0; i < 3; ++i) e[i].fx.send(hold(1000, notes[i]));
+        if (blk == perSecond) e[1].fx.send(set(1000, "note", retuned));
+        if (blk == 2 * perSecond) e[2].fx.send(osc_test::message("/n_free", 1000));
+        for (Engine& x : e) x.block();
+    }
+    for (Engine& x : e) x.fx.send(osc_test::message("/status"));
+    for (uint32_t blk = 0; blk < 4; ++blk)
+        for (Engine& x : e) x.block();
+
+    // Each engine answered its own client, once: a node 1000 went on all three,
+    // ended on the third alone, and each reports its own count of synths.
+    for (int i = 0; i < 3; ++i) {
+        INFO("engine " << i + 1 << " replies:\n" << e[i].fx.repliesDump());
+        CHECK(e[i].replies("/n_go", 1000) == 1);
+        CHECK(e[i].replies("/n_end", 1000) == (i == 2 ? 1 : 0));
+        CHECK(e[i].synths() == (i == 2 ? 0 : 1));
+    }
+
+    // What each engine played, a window in each second, well inside the note.
+    const auto window = [&](uint32_t second) {
+        return std::pair<size_t, size_t>{ (second * perSecond + perSecond / 4) * frames,
+                                          (second * perSecond + perSecond - perSecond / 20) * frames };
+    };
+    const auto dominant = [&](const Engine& x, uint32_t second, float note) {
+        const auto [from, to] = window(second);
+        const double own = powerAt(x.out, from, to, hz(note), rate);
+        double other = 0.0;
+        for (float n : { notes[0], notes[1], notes[2], retuned })
+            if (n != note) other = std::max(other, powerAt(x.out, from, to, hz(n), rate));
+        INFO("second " << second << ": power at " << note << " is " << own << ", the loudest other note " << other);
+        return own > 20.0 * other && own > 0.0;
+    };
+    const auto silent = [&](const Engine& x, uint32_t second) {
+        const auto [from, to] = window(second);
+        return peakOver(x.out, from, to) < 1e-4f;
+    };
+
+    CHECK(dominant(e[0], 0, notes[0]));
+    CHECK(dominant(e[1], 0, notes[1]));
+    CHECK(dominant(e[2], 0, notes[2]));
+
+    CHECK(dominant(e[0], 1, notes[0]));
+    CHECK(dominant(e[1], 1, retuned));
+    CHECK(dominant(e[2], 1, notes[2]));
+
+    CHECK(dominant(e[0], 2, notes[0]));
+    CHECK(dominant(e[1], 2, retuned));
+    CHECK(silent(e[2], 2));
+
+    // The chord, mixed, as a file.
+    std::vector<float> mix(e[0].out.size(), 0.0f);
+    for (const Engine& x : e) {
+        REQUIRE(x.out.size() == mix.size());
+        for (size_t i = 0; i < mix.size(); ++i) mix[i] += x.out[i] / 3.0f;
+    }
+    const std::filesystem::path wav = std::filesystem::temp_directory_path() / "supersonic-three-engines.wav";
+    ClockworkAudioWriterConfig wc{};
+    wc.struct_bytes = sizeof wc;
+    wc.format = CLOCKWORK_AUDIO_FORMAT_WAV;
+    wc.encoding = CLOCKWORK_AUDIO_ENCODING_FLOAT32;
+    wc.channels = 2;
+    wc.sample_rate = static_cast<uint32_t>(rate);
+    ClockworkStatus st = CLOCKWORK_OK;
+    ClockworkAudioWriter* w = clockwork_audio_writer_open(wav.string().c_str(), &wc, &st);
+    REQUIRE(w != nullptr);
+    REQUIRE(clockwork_audio_writer_write(w, mix.data(), mix.size() / 2) == CLOCKWORK_OK);
+    REQUIRE(clockwork_audio_writer_close(w, nullptr, nullptr) == CLOCKWORK_OK);
+    CHECK(std::filesystem::file_size(wav) > mix.size() * sizeof(float));
 }

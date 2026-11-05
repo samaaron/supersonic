@@ -111,6 +111,13 @@ prints its seed first ("Randomness seeded to"); `--order rand --rng-seed <seed>`
 runs the same order again. The benchmarks are run with
 `SuperSonicNativeTests "[benchmark]"`.
 
+`SUPERSONIC_TEST_ENGINES=3` runs every pumped case on three engines in the
+process at once: the fixture sends each case's program to all three, renders
+them in turn, and holds each to the first, block for block and reply for
+reply (`test/native/EngineFixture.h`, "Engines beside this one"). State one
+engine shares with another shows as a block or a reply that differs. CI runs
+the shuffled suite this way once, on macOS arm64.
+
 Note that the Link tests join a real Link session on the machine's loopback:
 another Link-enabled app running at the same time (Sonic Pi, Ableton Live)
 will change the tempo they observe and fail them.

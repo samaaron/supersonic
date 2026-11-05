@@ -15,6 +15,8 @@
 #include "lanes/lanes.h"
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
+#include <memory>
+#include <optional>
 #include <vector>
 #include <mutex>
 #include <condition_variable>
@@ -73,9 +75,49 @@ public:
     EngineFixture();
     explicit EngineFixture(const ClockworkEngine::Config& cfg);
     // Given the engine before it boots, for what boot reads: the transport its
-    // replies leave by (a front's, wired as the server wires it).
+    // replies leave by (a front's, wired as the server wires it). A case that
+    // wires the engine has the one engine (engine() below).
     EngineFixture(const ClockworkEngine::Config& cfg, const std::function<void(ClockworkEngine&)>& beforeBoot);
     ~EngineFixture();
+
+    // ── Engines beside this one ────────────────────────────────────────
+    // SUPERSONIC_TEST_ENGINES=n (1 unless set) runs every pumped case on n
+    // engines in this process at once: each message to every engine, the
+    // blocks rendered in turn, and each engine held to the first. The engine
+    // a case reaches through engine() is the first; the others run the same
+    // program beside it, from the first's clock origin and random seed, and
+    // their replies are read with repliesOf(). A block
+    // one of them renders differently fails the case at that block
+    // (divergence()); a reply that differs fails it when the fixture goes:
+    // the same replies, each the same bytes, except the replies that carry an
+    // engine's own load or time (replyIsTheEngineOwn), and not in the same
+    // order, a device lane's reply landing when its thread does. A case that
+    // takes the engine itself
+    // (engine(), a boot hook, host work) has the one engine; so does a case
+    // with a driver or a device, nothing else rendering them.
+    static int enginesPerFixture();   // SUPERSONIC_TEST_ENGINES, or 1
+    explicit EngineFixture(int engines);
+    EngineFixture(const ClockworkEngine::Config& cfg, int engines);
+    int engines() const { return 1 + static_cast<int>(mCompanions.size()); }
+    // Every reply engine `i` has sent since it booted. Engine 0 is engine().
+    std::vector<OscReply> repliesOf(int engine) const;
+    // The first block an engine beside rendered differently from the first,
+    // if one has.
+    struct Divergence { uint64_t block; int engine; size_t sample; float got; float want; };
+    std::optional<Divergence> divergence() const;
+    // The first reply an engine beside answered differently, if one has, as a
+    // line naming the engine, the reply and what differed.
+    std::optional<std::string> replyDivergence() const;
+    // A case that tells the engines different things on purpose, the
+    // fixture's own, says so: a divergence is then held, not reported. It
+    // tells the first engine alone with sendToFirst (engine() would take
+    // the one engine).
+    void expectDivergence() { mExpectDivergence = true; }
+    void sendToFirst(const osc_test::Packet& pkt);
+    // Whether a reply's bytes may differ between engines running the same
+    // program: /status.reply carries this engine's own CPU load, and a clock
+    // reply (/clockwork/clock/...) a time on this engine's own clock.
+    static bool replyIsTheEngineOwn(const std::string& address);
 
     // ── OSC send (in-process, no UDP) ──────────────────────────────────
     void send(const osc_test::Packet& pkt);
@@ -179,7 +221,10 @@ public:
     uint64_t generation() const { return mGeneration; }
 
     // ── Engine access ──────────────────────────────────────────────────
-    ClockworkEngine& engine() { return mEngine; }
+    // The engine itself, to drive as the case sees fit. A case that takes it
+    // takes the one engine: what it does with it (a swap, an ingest with a
+    // token, a tick of its own) the engines beside would not see, so they go.
+    ClockworkEngine& engine() { closeCompanions(); return mEngine; }
 
     // The headless config the default constructor uses. Exposed so tests
     // can tweak one field (e.g. freewheelClock) and pass it to the
@@ -331,10 +376,37 @@ private:
         }
     }
 
-    void init(const ClockworkEngine::Config& cfg, const std::function<void(ClockworkEngine&)>& beforeBoot = {});
+    void init(const ClockworkEngine::Config& cfg, const std::function<void(ClockworkEngine&)>& beforeBoot = {},
+              int engines = enginesPerFixture());
     // The host's turn after a block or callback: the control pass, when the
     // test drives it, then the host work.
     void hostTurn();
+
+    // An engine running the same program beside the first: its replies, every
+    // one since it booted, and the engine last (as mEngine below: its
+    // callbacks hold the replies).
+    struct Companion {
+        mutable std::mutex    mutex;
+        std::vector<OscReply> replies;
+        ClockworkEngine       engine;
+    };
+    void bootCompanions(const ClockworkEngine::Config& cfg,
+                        const std::function<void(ClockworkEngine&)>& beforeBoot, int engines);
+    void closeCompanions();
+    // Every companion's device lane has run what was sent, and a control
+    // pass has handed its answers on. False when one did not within 30 s.
+    bool drainCompanionLanes();
+    // After every engine has rendered a block: the block each companion
+    // rendered against the first's. Any thread that renders.
+    void compareBlocks();
+    // On the test thread: a divergence recorded and not yet reported fails
+    // the case, once.
+    void reportDivergence();
+    std::vector<std::unique_ptr<Companion>> mCompanions;
+    mutable std::mutex         mDivergenceMutex;
+    std::optional<Divergence>  mDivergence;
+    bool                       mDivergenceReported = false;
+    bool                       mExpectDivergence = false;
     // The test thread renders: manual pump, and no Device rendering instead.
     bool testPumps() const { return mManualPump && !mDeviceRendering.load(std::memory_order_relaxed); }
     bool             mManualPump = false;  // cfg.manualAudioPump — wait prims pump
@@ -347,6 +419,7 @@ private:
     mutable std::mutex       mReplyMutex;
     std::condition_variable  mReplyCv;
     std::vector<OscReply>    mReplies;
+    std::vector<OscReply>    mLog;           // every reply since boot (repliesOf(0)); mReplies is what waits take from
     std::vector<RoutedReply> mRouted;       // under mReplyMutex
 
     std::mutex               mObserverMutex;

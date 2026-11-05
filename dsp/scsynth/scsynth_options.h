@@ -59,6 +59,7 @@
     X(numControlBusChannels, 'c', 16384, 1, 16777216, "Control bus channels") \
     X(realTimeMemorySize,    'm', 8192,  1, 4194304,  "Real-time memory pool, in KB") \
     X(numRGens,              'r', 64,    1, 65536,    "Random number generators") \
+    X(randomSeed,            0,   0,     0, 2147483647, "Seed for the random number generators; 0 seeds from the clock") \
     X(loadGraphDefs,         'D', 0,     0, 1,        "Load synth definitions from the synthdef directory at boot (1) or not (0)") \
     X(verbosity,             'V', 0,     0, 4,        "How much the engine prints; 0 is quiet")
 

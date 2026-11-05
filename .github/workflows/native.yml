@@ -179,6 +179,16 @@ jobs:
           fi
         shell: bash
 
+      # The same, with three engines in the process at once: every pumped
+      # case sends its program to three engines and holds each to the first,
+      # block for block and reply for reply (EngineFixture.h, "Engines beside
+      # this one"). State an engine shares with another shows here as a
+      # block or a reply that differs. One platform: the guest is the same
+      # code everywhere, and the run costs three engines' time.
+      - name: Run tests (three engines per case)
+        if: matrix.name == 'macos-arm64'
+        run: SUPERSONIC_TEST_ENGINES=3 ./build/native/test/native/SuperSonicNativeTests "~[benchmark]~[rt]~[Link]" --order rand --rng-seed "$GITHUB_RUN_NUMBER"
+
       # A case that crashes prints its backtrace as offsets into the test
       # binary, which Release builds with debug info. Keep the binary so the
       # offsets can be symbolised: llvm-symbolizer --obj=<binary> <offset>.
@@ -340,15 +350,12 @@ jobs:
         run: cmake -S test/embed -B build/embed-guard -DBUILD_TESTS=ON
 
   # ── scsynth's mutable statics, against the budget ────────────────────────
-  # scsynth is on its way to declaring DSP_INSTANCES_ANY (any number of it in
-  # one process), which clockwork holds to "no mutable static at all". Until
-  # the count reaches 0, scripts/guest-globals.budget says how many remain,
-  # and this fails when the count rises or a slice forgets to lower it.
+  # scsynth declares DSP_INSTANCES_ANY (any number of it in one process), which
+  # clockwork holds to "no mutable static at all". scripts/guest-globals.budget
+  # is 0, and this fails on the first mutable static that comes back.
   #
-  # On macOS, where the budget is counted: the platform half of SC_Filesystem
-  # differs per OS (three statics on macOS, six on Linux) and a compiler names
-  # function-local statics its own way, so one platform's count is the budget.
-  # The end state, none, is the same everywhere.
+  # Counted on macOS: a compiler names function-local statics its own way, so
+  # one platform's count is the budget. None is the same everywhere.
   guest-globals:
     runs-on: macos-latest
     name: guest-globals-budget

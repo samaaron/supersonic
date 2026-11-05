@@ -32,7 +32,7 @@
 // seeds World::mRGen at boot and backs InterfaceTable::fRanSeed, so two
 // otherwise identical renders of a graph containing any RNG ugen diverge. A
 // host that needs reproducible renders pins the seed
-// (DspConfig::deterministic_seed, WorldOptions::mDeterministicSeed): seeds are
+// (the randomSeed option, WorldOptions::mDeterministicSeed): seeds are
 // then handed out as base, base+1, base+2, … in call order, which is fixed
 // for a fixed boot + score. Zero, the default, seeds from the clock, mixed
 // with the count so two seeds asked within one tick differ.

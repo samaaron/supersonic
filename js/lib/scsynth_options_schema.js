@@ -14,6 +14,7 @@ export const scsynthOptionSchema = Object.freeze([
   { name: "numControlBusChannels", flag: "c", default: 16384, min: 1, max: 16777216, doc: "Control bus channels" },
   { name: "realTimeMemorySize", flag: "m", default: 8192, min: 1, max: 4194304, doc: "Real-time memory pool, in KB" },
   { name: "numRGens", flag: "r", default: 64, min: 1, max: 65536, doc: "Random number generators" },
+  { name: "randomSeed", flag: null, default: 0, min: 0, max: 2147483647, doc: "Seed for the random number generators; 0 seeds from the clock" },
   { name: "loadGraphDefs", flag: "D", default: 0, min: 0, max: 1, doc: "Load synth definitions from the synthdef directory at boot (1) or not (0)" },
   { name: "verbosity", flag: "V", default: 0, min: 0, max: 4, doc: "How much the engine prints; 0 is quiet" },
 ]);

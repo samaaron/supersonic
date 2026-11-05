@@ -622,7 +622,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
     options.mVerbosity             = static_cast<int>(so.verbosity);
 
     // A host that needs two renders of one score to agree pins the seeds.
-    options.mDeterministicSeed     = config->deterministic_seed;
+    options.mDeterministicSeed     = so.randomSeed;
 
     d->osc_to_samples = config->sample_rate / 4294967296.0;
 

@@ -157,6 +157,8 @@ export interface ScsynthOptions {
   realTimeMemorySize?: number;
   /** Random number generators. Default: 64. */
   numRGens?: number;
+  /** Seed for the random number generators; 0 seeds from the clock. Default: 0. */
+  randomSeed?: number;
   /** scsynth's real-time flag. Always false here: the AudioWorklet drives the engine. */
   realTime?: boolean;
   /** Memory locking — not applicable in browser. Default: false. */

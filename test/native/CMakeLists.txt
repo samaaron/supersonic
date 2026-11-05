@@ -70,6 +70,7 @@ add_executable(SuperSonicNativeTests
     test_piano_wavetable.cpp
     test_scsynth_tables.cpp
     test_plural_engines.cpp
+    test_fixture_engines.cpp
     test_supersonic_front.cpp
     test_engine_host.cpp
     test_supersonic_binary.cpp
