@@ -44,6 +44,11 @@ override_dh_auto_test:
 	# Full upstream Catch2 suite, benchmarks excluded, run the two ways
 	# upstream CI runs it: through ctest, each case in a process of its own
 	# (the discovery leaves the benchmarks out) with the guest boundary
-	# check, then the binary with every case in one process, shuffled.
-	ctest --test-dir $(BUILDDIR) --output-on-failure -j 2 --timeout 300
+	# check, then the binary with every case in one process, shuffled. The
+	# real-time cases (label rt: the ones that pace a device or join a Link
+	# session on the loopback) run one at a time with nothing beside them,
+	# as upstream runs them: two at once share the loopback and the CPU,
+	# and a Link peer then may not connect within the wait.
+	ctest --test-dir $(BUILDDIR) --output-on-failure -LE rt -j 2 --timeout 300
+	ctest --test-dir $(BUILDDIR) --output-on-failure -L rt -j 1 --timeout 300
 	$(BUILDDIR)/test/native/SuperSonicNativeTests "~[benchmark]" --order rand $(if $(GITHUB_RUN_NUMBER),--rng-seed $(GITHUB_RUN_NUMBER))
