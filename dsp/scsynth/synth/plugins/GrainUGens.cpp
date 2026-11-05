@@ -32,7 +32,7 @@
 
 #include "function_attributes.h"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 const int kMaxGrains = 64;
 
@@ -611,8 +611,8 @@ void GrainIn_Dtor(GrainIn* unit) { RTFree(unit->mWorld, unit->mGrains); }
 inline void GrainSin_next_play_active(GrainSin* unit, int inNumSamples) {
     const unsigned int numOutputs = unit->mNumOutputs;
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     for (int i = 0; i < unit->mNumActive;) {
         GrainSinG* grain = unit->mGrains + i;
@@ -680,8 +680,8 @@ template <bool full_rate> inline void GrainSin_next_start_new(GrainSin* unit, in
 
     const uint32 numOutputs = unit->mNumOutputs;
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     // begin add //
     float pan = grain_in_at<full_rate>(unit, 3, position);
@@ -768,8 +768,8 @@ inline void GrainFM_next_play_active(GrainFM* unit, int inNumSamples) {
     const uint32 numOutputs = unit->mNumOutputs;
     // end add
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     for (int i = 0; i < unit->mNumActive;) {
         GrainFMG* grain = unit->mGrains + i;
@@ -846,8 +846,8 @@ template <bool full_rate> inline void GrainFM_next_start_new(GrainFM* unit, int 
     GET_GRAIN_INIT_AMP
     const uint32 numOutputs = unit->mNumOutputs;
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     // begin add //
     float pan = GRAIN_IN_AT(unit, 5, position);
@@ -1450,7 +1450,6 @@ void Warp1_Ctor(Warp1* unit) {
 
 extern "C"
 PluginLoad(Grain) {
-    ft = inTable;
 
     DefineDtorCantAliasUnit(GrainIn);
     DefineDtorCantAliasUnit(GrainSin);

@@ -29,7 +29,7 @@
 #include "SC_PlugIn.hpp"
 #include "SC_Unit.h"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 namespace {
 
@@ -106,7 +106,6 @@ private:
 }  // namespace
 
 PluginLoad(SPLimiterUGen) {
-    ft = inTable;
-    registerUnit<SPLimiter>(ft, "SPLimiter", false);
-    registerUnit<SPLimiter2>(ft, "SPLimiter2", false);
+    registerUnit<SPLimiter>(inTable, "SPLimiter", false);
+    registerUnit<SPLimiter2>(inTable, "SPLimiter2", false);
 }

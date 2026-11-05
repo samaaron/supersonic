@@ -1,117 +1,45 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025-2026 Sam Aaron
 /*
-    SuperSonic - SuperCollider AudioWorklet WebAssembly port
-    Copyright (c) 2025 Sam Aaron
+    node_tree.h — the node-tree mirror scsynth publishes in its window.
 
-    Node Tree Management for SharedArrayBuffer
-    ==========================================
-
-    TAU-SPECIFIC FILE - Not part of upstream SuperCollider
+    SUPERSONIC-SPECIFIC FILE - Not part of upstream SuperCollider
     ============================================================
-
-    PURPOSE
-    -------
-    This module maintains a flat array representation of the scsynth node tree
-    in SharedArrayBuffer memory. This enables JavaScript to poll the synth/group
-    hierarchy at 60fps for visualization purposes without any OSC latency.
-
-    In standard SuperCollider, inspecting the node tree requires sending OSC
-    commands (/g_queryTree, /n_query) and waiting for replies. This round-trip
-    latency makes smooth real-time visualization difficult. The SAB approach
-    provides immediate, synchronous access to node state from JavaScript.
-
-
-    MEMORY LAYOUT
-    -------------
-    The node tree lives in SharedArrayBuffer at NODE_TREE_START offset:
+    A flat array of NodeEntry records, one per live node, that a client polls
+    without asking the engine anything. The window clockwork hands the guest
+    at dsp_new (DspConfig::shm_window) is laid out as a NodeTreeHeader
+    followed by as many entries as fit:
 
     +---------------------+
-    | NodeTreeHeader      |  16 bytes
-    | - node_count (4)    |  Number of active nodes in mirror
-    | - version (4)       |  Change counter (for dirty checking)
-    | - dropped_count (4) |  Nodes not mirrored due to overflow
+    | NodeTreeHeader      |  16 bytes: version, node_count, dropped_count
     +---------------------+
-    | NodeEntry[0]        |  NODE_TREE_ENTRY_SIZE bytes per entry
-    | NodeEntry[1]        |
+    | NodeEntry[0]        |  NODE_TREE_ENTRY_SIZE bytes each
     | ...                 |
-    | NodeEntry[N-1]      |  N = NODE_TREE_MIRROR_MAX_NODES, derived from the window
-    +---------------------+
+    | NodeEntry[N-1]      |  N = what the window holds (1024 at clockwork's
+    +---------------------+      default window; raise the window to raise it)
 
-    Total size: ~73KB (16 + 1024 * 72 bytes)
+    The array is sparse: a slot whose id is -1 is empty and reusable, and a
+    removed node's slot is emptied rather than the array compacted, so slot
+    indices stay stable. Siblings are a doubly linked chain (prev_id,
+    next_id); a group names its first child (head_id). A node the window has
+    no room for is counted in dropped_count and the engine's own tree carries
+    on.
 
+    Every write runs on the audio thread, from Node_StateMsg (SC_Node.cpp) on
+    kNode_Go, kNode_End and kNode_Move, and from /n_order's reorder
+    (SC_MiscCmds.cpp). None of them allocates: the free list of empty slots
+    and the open-addressed id -> slot hash that keep each O(1) are sized once,
+    in NodeTree_Bind, which dsp_new calls. The hash deletes by backward shift
+    (Knuth's Algorithm R), never with tombstones, so a long session cannot
+    fill it with graves.
 
-    NODE ENTRY STRUCTURE (72 bytes)
-    -------------------------------
-    Each NodeEntry contains:
-    - id (int32):        Node ID, or -1 for empty slots
-    - parent_id (int32): Parent group ID, or -1 for root group
-    - is_group (int32):  1 for groups, 0 for synths
-    - prev_id (int32):   Previous sibling ID, or -1 if first child
-    - next_id (int32):   Next sibling ID, or -1 if last child
-    - head_id (int32):   First child ID (groups only), or -1
-    - def_name (32B):    Synthdef name for synths, "group" for groups
-    - uuid_hi (uint64):  Upper 8 bytes of UUID (0 if created with int32 ID)
-    - uuid_lo (uint64):  Lower 8 bytes of UUID (0 if created with int32 ID)
-
-    The array is sparse - slots with id == -1 are empty and reusable.
-    When a node is removed, its slot is marked empty (id = -1) rather
-    than compacting the array, which keeps slot indices stable.
-
-
-    INTEGRATION WITH SCSYNTH
-    ------------------------
-    These functions are called from SC_Node.cpp (Node_StateMsg) whenever
-    the node tree changes:
-
-    - NodeTree_Add():    Called on kNode_Go (synth/group created)
-    - NodeTree_Remove(): Called on kNode_End (synth/group freed)
-    - NodeTree_Update(): Called on kNode_Move (node repositioned)
-
-    Each operation updates the relevant entries and bumps the version
-    counter, allowing JavaScript to detect changes efficiently:
-
-        let lastVersion = 0;
-        setInterval(() => {
-            const tree = sonic.getTree();
-            if (tree.version !== lastVersion) {
-                lastVersion = tree.version;
-                renderTree(tree.nodes);
-            }
-        }, 16);
-
-
-    SIBLING CHAIN MAINTENANCE
-    -------------------------
-    The node tree maintains doubly-linked sibling chains via prev_id/next_id.
-    When a node is added, removed, or moved, adjacent siblings are updated
-    to maintain chain integrity. For example, removing node B from A->B->C
-    requires updating A's next_id and C's prev_id to link A<->C directly.
-
-    Groups also track their first child via head_id, which is updated when
-    children are added/removed at the head position.
-
-
-    THREAD SAFETY
-    -------------
-    The header uses std::atomic for node_count and version to ensure safe
-    concurrent access between the audio thread (WASM) writing updates and
-    the main thread (JavaScript) reading state. Individual NodeEntry fields
-    are not atomic, but the version counter ensures readers can detect
-    mid-update states and re-read if needed.
-
-
-    LIMITATIONS
-    -----------
-    - supersonic_node_tree_capacity() nodes in the mirror: what the window
-      the host handed over holds at NODE_TREE_ENTRY_SIZE bytes each, after
-      the header (1024 at clockwork's default window). Raise the window to
-      raise it.
-    - If actual scsynth tree exceeds this, excess nodes are not mirrored
-      (dropped_count tracks how many; audio continues working)
-    - Synthdef names truncated to 31 characters
-    - No control/parameter values exposed (use OSC for that)
-
-    See node_tree.cpp for implementation details.
-    See test/node_tree.spec.mjs for comprehensive behavioral tests.
+    The header's words are atomics so a client on another thread reads a
+    whole count; a reader that sees the version change re-reads. A client
+    checks the window is this record, and which layout, from clockwork's
+    arena table (NODE_TREE_WINDOW_MAGIC / _VERSION, declared by dsp_describe).
+    The JavaScript reader is js/lib/node_tree_parser.js and carries the same
+    two numbers; bump the version whenever NodeTreeHeader or NodeEntry change
+    shape.
 */
 
 #ifndef CLOCKWORK_NODE_TREE_H
@@ -120,24 +48,6 @@
 #include <atomic>
 #include <cstdint>
 
-// ── The record SuperSonic publishes ─────────────────────────────────────────
-//
-// Ours, not the host's. Clockwork reserves DspConfig::shm_window, reads its
-// FIRST uint32 to know when the window is worth copying out, and reads
-// nothing else — so everything below is between this writer and the clients
-// that parse it (js/lib/node_tree_parser.js).
-//
-// VERSION IS FIRST because that word is the host's one convention. The rest
-// is ours to order.
-//
-// WHAT THE WINDOW IS, for a client that reads it by hand. The window's layout
-// is ours, so clockwork's arena table cannot describe its inside; it can say
-// whose it is. dsp_describe() declares these two words and clockwork copies
-// them into the table's window entry when the guest binds (clockwork_arena.h,
-// CLOCKWORK_GEOM_WINDOW_MAGIC / _VERSION). A client checks them before it
-// casts a pointer at the record below. Bump the version whenever
-// NodeTreeHeader or NodeEntry change shape; the parser in
-// js/lib/node_tree_parser.js carries the same two numbers.
 constexpr uint32_t NODE_TREE_WINDOW_MAGIC   = 0x53434E54u;   // 'SCNT': scsynth node tree
 constexpr uint32_t NODE_TREE_WINDOW_VERSION = 1u;
 constexpr uint32_t NODE_TREE_HEADER_SIZE   = 16;
@@ -173,107 +83,57 @@ static_assert(sizeof(NodeEntry) == NODE_TREE_ENTRY_SIZE,
 static_assert(sizeof(NodeTreeHeader) == NODE_TREE_HEADER_SIZE,
               "NodeTreeHeader must match the header size the readers use");
 
-// Where our tree lives: the window clockwork handed us in
-// DspConfig::shm_window, published once at dsp_new. NULL before the guest is
-// built, or when the host reserved no window.
-//
-// One accessor rather than three copies of `shared_memory + NODE_TREE_START`:
-// that offset is the HOST's layout, and reaching for it meant the guest had to
-// know where clockwork keeps things.
-NodeTreeHeader* supersonic_node_tree_header();
-NodeEntry*      supersonic_node_tree_entries();
-// Bind the window: every entry is reset to empty, the header zeroed, and the
-// free list and hash sized to what the window holds. Called from dsp_new,
-// which is the one place the guest may allocate.
-void            supersonic_node_tree_bind(void* window, uint32_t bytes);
-// Let go of the window and the indices. Called from dsp_free.
-void            supersonic_node_tree_unbind();
-// How many entries the bound window holds (0 when unbound).
-uint32_t        supersonic_node_tree_capacity();
+// One instance's mirror: its window and the two indices over it. Held by the
+// guest instance (scsynth_dsp.cpp), one per World; reached from the server
+// through supersonic_node_tree.
+struct NodeTreeHashEntry {
+    int32_t key;    // node id, or NodeTreeMirror::kHashEmpty
+    int32_t slot;   // index into the entries
+};
 
-// Forward declarations
+struct NodeTreeMirror {
+    static constexpr int32_t kHashEmpty = INT32_MIN;   // no node id is INT32_MIN
+
+    uint8_t* window       = nullptr;
+    uint32_t window_bytes = 0;
+    uint32_t capacity     = 0;   // entries the window holds
+
+    // Free list: free_next[i] is the next free slot after i (-1 = end). A
+    // slot in use holds an undefined value: it is not on the list.
+    int32_t* free_next = nullptr;
+    int32_t  free_head = -1;
+
+    // Open addressing with linear probing, sized to at most half full.
+    NodeTreeHashEntry* hash      = nullptr;
+    uint32_t           hash_mask = 0;
+
+    bool bound() const { return window != nullptr; }
+    NodeTreeHeader* header() const { return reinterpret_cast<NodeTreeHeader*>(window); }
+    NodeEntry* entries() const { return reinterpret_cast<NodeEntry*>(window + NODE_TREE_HEADER_SIZE); }
+};
+
+struct World;
 struct Node;
-struct Group;
 
-// =============================================================================
-// NODE TREE MANAGEMENT FUNCTIONS
-// =============================================================================
-// These update the SharedArrayBuffer node tree for JS polling.
-// Called from SC_Node.cpp (Node_StateMsg) on node lifecycle events.
+// The mirror of the World's instance while it is bound, else NULL: a World
+// whose host reserved no window publishes nothing. Implemented in
+// scsynth_dsp.cpp, where the instance is.
+NodeTreeMirror* supersonic_node_tree(World* world);
 
-/**
- * Add a node to the tree.
- * Called on kNode_Go when a synth or group is created.
- *
- * Updates:
- * - Finds an empty slot and populates it with node data
- * - Updates prev sibling's next_id to point to new node
- * - Updates next sibling's prev_id to point to new node
- * - Updates parent group's head_id if new node is at head
- * - Increments node_count and version
- *
- * @param node    The scsynth Node that was created
- * @param header  Pointer to NodeTreeHeader in SharedArrayBuffer
- * @param entries Pointer to NodeEntry array in SharedArrayBuffer
- */
-void NodeTree_Add(Node* node, NodeTreeHeader* header, NodeEntry* entries);
+// Bind the window: every entry reset to empty, the header zeroed, the free
+// list and hash sized to what the window holds, in the instance's own memory
+// through the World. Called from dsp_new, which is the one place the guest
+// may allocate; a window too small for one entry leaves the mirror unbound.
+void NodeTree_Bind(NodeTreeMirror* tree, World* world, void* window, uint32_t bytes);
+// Let go of the window and the indices. Called from dsp_free, while the
+// World is still there to free through.
+void NodeTree_Unbind(NodeTreeMirror* tree, World* world);
 
-/**
- * Remove a node from the tree.
- * Called on kNode_End when a synth or group is freed.
- *
- * Updates:
- * - Patches sibling chain (prev's next -> our next, next's prev -> our prev)
- * - Updates parent group's head_id if removed node was at head
- * - Marks slot as empty (id = -1)
- * - Decrements node_count and increments version
- *
- * @param nodeId  The ID of the node being removed
- * @param header  Pointer to NodeTreeHeader in SharedArrayBuffer
- * @param entries Pointer to NodeEntry array in SharedArrayBuffer
- */
-void NodeTree_Remove(int32_t nodeId, NodeTreeHeader* header, NodeEntry* entries);
-
-/**
- * Update a node's position in the tree.
- * Called on kNode_Move when a node is repositioned (n_before, n_after, g_head, g_tail).
- *
- * Updates:
- * - Patches old sibling chain to close the gap
- * - Updates old parent's head_id if node was at head
- * - Updates this node's parent_id, prev_id, next_id
- * - Patches new sibling chain to include this node
- * - Updates new parent's head_id if node is now at head
- * - Increments version
- *
- * @param node    The scsynth Node that was moved
- * @param header  Pointer to NodeTreeHeader in SharedArrayBuffer
- * @param entries Pointer to NodeEntry array in SharedArrayBuffer
- */
-void NodeTree_Update(Node* node, NodeTreeHeader* header, NodeEntry* entries);
-
-/**
- * Initialize free list and hash table indices.
- * Must be called once after node tree memory is zeroed (all entries id == -1).
- * Called from init_memory() in audio_processor.cpp.
- */
-void NodeTree_InitIndices();
-
-/**
- * Find the array index of a node by ID.
- *
- * @param nodeId  The node ID to search for
- * @param entries Pointer to NodeEntry array in SharedArrayBuffer
- * @return        Array index (0 to NODE_TREE_MIRROR_MAX_NODES-1), or -1 if not found
- */
-int32_t NodeTree_FindIndex(int32_t nodeId, NodeEntry* entries);
-
-/**
- * Find the first empty slot in the tree.
- *
- * @param entries Pointer to NodeEntry array in SharedArrayBuffer
- * @return        Array index of first empty slot (id == -1), or -1 if full
- */
-int32_t NodeTree_FindEmptySlot(NodeEntry* entries);
+// The lifecycle events, from Node_StateMsg: a node made (kNode_Go), freed
+// (kNode_End) or moved (kNode_Move). Each fixes up the siblings and the
+// parent's head and bumps the version.
+void NodeTree_Add(NodeTreeMirror* tree, Node* node);
+void NodeTree_Remove(NodeTreeMirror* tree, int32_t nodeId);
+void NodeTree_Update(NodeTreeMirror* tree, Node* node);
 
 #endif // CLOCKWORK_NODE_TREE_H

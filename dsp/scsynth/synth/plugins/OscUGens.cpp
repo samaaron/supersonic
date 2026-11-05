@@ -23,7 +23,7 @@
 #include <limits>
 #include <string.h>
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct BufUnit : public Unit {
     SndBuf* m_buf;
@@ -1194,8 +1194,8 @@ force_inline void Osc_ikk_perform(OscType* unit, const float* table0, const floa
 }
 
 void SinOsc_next_ikk(SinOsc* unit, int inNumSamples) {
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     Osc_ikk_perform<SinOsc, 0>(unit, table0, table1, inNumSamples);
 }
@@ -1278,8 +1278,8 @@ force_inline void Osc_iak_perform(OscType* unit, const float* table0, const floa
 }
 
 void SinOsc_next_iak(SinOsc* unit, int inNumSamples) {
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     Osc_iak_perform<SinOsc, 0>(unit, table0, table1, inNumSamples);
 }
@@ -1303,8 +1303,8 @@ force_inline void Osc_iai_perform(OscType* unit, const float* table0, const floa
 }
 
 void SinOsc_next_iai(SinOsc* unit, int inNumSamples) {
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
     Osc_iai_perform<SinOsc, 0>(unit, table0, table1, inNumSamples);
 }
 
@@ -1355,8 +1355,8 @@ void SinOscFB_next_kk(SinOscFB* unit, int inNumSamples) {
     float feedback = unit->m_feedback;
     float nextFeedback = ZIN0(1) * unit->m_radtoinc;
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
 
     int32 phase = unit->m_phase;
     int32 lomask = unit->m_lomask;
@@ -2137,7 +2137,7 @@ void Formant_next(Formant* unit, int inNumSamples) {
     int32 freq1 = sc_float_to_int32(cpstoinc * freq1in);
     int32 freq2 = sc_float_to_int32(cpstoinc * freq2in);
     int32 freq3 = sc_float_to_int32(cpstoinc * freq3in);
-    float* sine = ft->mSine;
+    const float* sine = ft->mSine;
     int32 formfreq = sc_max(freq1, freq3);
     LOOP1(
         inNumSamples,
@@ -2194,8 +2194,8 @@ void Blip_next(Blip* unit, int inNumSamples) {
 
     int32 phase = unit->m_phase;
 
-    float* numtbl = ft->mSine;
-    float* dentbl = ft->mCosecant;
+    const float* numtbl = ft->mSine;
+    const float* dentbl = ft->mCosecant;
 
     int32 freq, N, prevN;
     float scale, prevscale;
@@ -2346,8 +2346,8 @@ void Saw_next(Saw* unit, int inNumSamples) {
     int32 phase = unit->m_phase;
     float y1 = unit->m_y1;
 
-    float* numtbl = ft->mSine;
-    float* dentbl = ft->mCosecant;
+    const float* numtbl = ft->mSine;
+    const float* dentbl = ft->mCosecant;
 
     int32 freq, N, prevN;
     float scale, prevscale;
@@ -2493,8 +2493,8 @@ void Pulse_next(Pulse* unit, int inNumSamples) {
     int32 phase = unit->m_phase;
     float y1 = unit->m_y1;
 
-    float* numtbl = ft->mSine;
-    float* dentbl = ft->mCosecant;
+    const float* numtbl = ft->mSine;
+    const float* dentbl = ft->mCosecant;
 
     int32 freq, N, prevN;
     float scale, prevscale;
@@ -3522,7 +3522,6 @@ void CantorFill(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) {
 
 extern "C"
 PluginLoad(Osc) {
-    ft = inTable;
 
     DefineSimpleUnit(DegreeToKey);
     DefineSimpleUnit(Select);

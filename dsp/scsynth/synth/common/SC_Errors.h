@@ -24,7 +24,8 @@
 // Matches the SCErr definition in SC_Types.h (plain int — see the note there).
 typedef int SCErr;
 
-void SC_ErrorString(SCErr err, char returnString[]);
+// SuperSonic (plural guest): `missingNodeID` names the node the failed lookup was for (HiddenWorld::mMissingNodeID).
+void SC_ErrorString(SCErr err, char returnString[], int missingNodeID);
 
 enum {
     kSCErr_None,

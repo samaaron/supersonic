@@ -26,27 +26,26 @@
 // Runtime stubs ACTUALLY USED in NRT mode
 // ============================================================================
 
-// Deterministic-seed hook for offline renders.
+// SuperSonic (plural guest): the seed for a World's random generators.
 //
 // server_timeseed() is the only clock-dependent input to the DSP graph: it
 // seeds World::mRGen at boot and backs InterfaceTable::fRanSeed, so two
 // otherwise identical renders of a graph containing any RNG ugen diverge. A
-// host that needs reproducible renders (nrt/nrt_render.cpp — the golden-render
-// harness) sets this to a non-zero base before clockwork_init; seeds are then handed
-// out as base, base+1, base+2, … in call order, which is fixed for a fixed
-// boot + score. Zero (the default, and what every shipping host leaves it at)
-// keeps the historic clock seeding, so real-time behaviour is unchanged.
-extern "C" {
-int32_t g_ss_deterministic_seed = 0;
-}
-
-int32 server_timeseed() {
-    if (g_ss_deterministic_seed != 0) {
-        static int32 counter = 0;
-        return g_ss_deterministic_seed + counter++;
-    }
-    // This IS called - needs real implementation
-    return timeSeed();
+// host that needs reproducible renders pins the seed
+// (DspConfig::deterministic_seed, WorldOptions::mDeterministicSeed): seeds are
+// then handed out as base, base+1, base+2, … in call order, which is fixed
+// for a fixed boot + score. Zero, the default, seeds from the clock, mixed
+// with the count so two seeds asked within one tick differ.
+int32 server_timeseed(World* inWorld) {
+    HiddenWorld* hw = inWorld->hw;
+    const int32 n = hw->mSeedCounter++;
+    if (hw->mSeedBase != 0)
+        return hw->mSeedBase + n;
+    using namespace std::chrono;
+    const auto sinceEpoch = high_resolution_clock::now().time_since_epoch();
+    const seconds secs = duration_cast<seconds>(sinceEpoch);
+    const nanoseconds nsecs = sinceEpoch - secs;
+    return (int32)secs.count() ^ (int32)nsecs.count() ^ -n;
 }
 
 void initializeScheduler() {
@@ -62,14 +61,13 @@ int64 oscTimeNow() {
 // OSC processing - based on SC_CoreAudio.cpp reference implementation
 // ============================================================================
 
-// scsynth_dsp.cpp: the guest's one door to the host's log (DspHost::log).
-extern "C" void supersonic_guest_log(const char* text, uint32_t len);
+#include "guest_doors.h"   // supersonic_guest_log: the guest's one door to the host's log
 
 // ============================================================================
 // OSC dump for /dumpOSC command
 // ============================================================================
 
-static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefix = "dumpOSC: ") {
+static void dumpOSCtoDebug(World* inWorld, int mode, int inSize, char* inData, const char* prefix = "dumpOSC: ") {
     if (mode & 1) {
         // Mode 1: Parsed OSC message
         char buf[1024];
@@ -118,7 +116,7 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
             }
         }
         pos += snprintf(buf + pos, sizeof(buf) - pos, " ]\n");
-        supersonic_guest_log(buf, (uint32_t)pos);
+        supersonic_guest_log(inWorld, buf, (uint32_t)pos);
     }
 
     if (mode & 2) {
@@ -134,7 +132,7 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
             pos += snprintf(buf + pos, sizeof(buf) - pos, "...");
         }
         pos += snprintf(buf + pos, sizeof(buf) - pos, "\n");
-        supersonic_guest_log(buf, (uint32_t)pos);
+        supersonic_guest_log(inWorld, buf, (uint32_t)pos);
     }
 }
 
@@ -143,27 +141,27 @@ static void dumpOSCtoDebug(int mode, int inSize, char* inData, const char* prefi
 int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* inReply) {
     // Validate inputs
     if (!inWorld) {
-        scprintf("ERROR: PerformOSCMessage called with null World");
+        scprintf(inWorld, "ERROR: PerformOSCMessage called with null World");
         return kSCErr_Failed;
     }
     if (!inData) {
-        scprintf("ERROR: PerformOSCMessage called with null data");
+        scprintf(inWorld, "ERROR: PerformOSCMessage called with null data");
         return kSCErr_Failed;
     }
     if (inSize <= 0 || inSize > 65536) {
-        scprintf("ERROR: PerformOSCMessage invalid size: %d", inSize);
+        scprintf(inWorld, "ERROR: PerformOSCMessage invalid size: %d", inSize);
         return kSCErr_Failed;
     }
 
     // Safety check: ensure command library is initialized
-    if (!gCmdLib) {
-        scprintf("ERROR: gCmdLib not initialized");
+    if (!inWorld->hw->mCmdLib) {
+        scprintf(inWorld, "ERROR: command library not initialized");
         return kSCErr_Failed;
     }
 
     // Dump OSC message if enabled via /dumpOSC command
     if (inWorld->mDumpOSC) {
-        dumpOSCtoDebug(inWorld->mDumpOSC, inSize, inData);
+        dumpOSCtoDebug(inWorld, inWorld->mDumpOSC, inSize, inData);
     }
 
     SC_LibCmd* cmdObj;
@@ -173,14 +171,14 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
         // Integer command (first byte is 0)
         cmdNameLen = 4;
         if (inSize < 4) {
-            scprintf("ERROR: Integer command too short: %d bytes", inSize);
+            scprintf(inWorld, "ERROR: Integer command too short: %d bytes", inSize);
             return kSCErr_Failed;
         }
         uint32 index = inData[3];
         if (index >= NUMBER_OF_COMMANDS)
             cmdObj = nullptr;
         else
-            cmdObj = gCmdArray[index];
+            cmdObj = inWorld->hw->mCmdArray[index];
     } else {
         // String command (like "/status"): its name must end inside the
         // message, padded to the word, before anything reads it a word at a
@@ -188,14 +186,14 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
         // (/b_alloc, /b_read, ...) is bytes a client wrapped in a blob.
         cmdNameLen = OSCstrlenWithin(inData, inSize);
         if (cmdNameLen <= 0) {
-            scprintf("ERROR: Command name has no end inside the message (data size: %d)", inSize);
+            scprintf(inWorld, "ERROR: Command name has no end inside the message (data size: %d)", inSize);
             return kSCErr_Failed;
         }
-        cmdObj = gCmdLib->Get((int32*)inData);
+        cmdObj = inWorld->hw->mCmdLib->Get((int32*)inData);
     }
 
     if (!cmdObj) {
-        dumpOSCtoDebug(1, inSize, inData, "Command not found: ");
+        dumpOSCtoDebug(inWorld, 1, inSize, inData, "Command not found: ");
         SendFailure(inReply, inData, "Command not found");   // as scsynth: the sender hears it
         return kSCErr_NoSuchCommand;
     }
@@ -203,7 +201,7 @@ int PerformOSCMessage(World* inWorld, int inSize, char* inData, ReplyAddress* in
     // Validate arguments size
     int argSize = inSize - cmdNameLen;
     if (argSize < 0) {
-        scprintf("ERROR: Negative argument size: %d (cmd=%d, total=%d)", argSize, cmdNameLen, inSize);
+        scprintf(inWorld, "ERROR: Negative argument size: %d (cmd=%d, total=%d)", argSize, cmdNameLen, inSize);
         return kSCErr_Failed;
     }
 
@@ -221,26 +219,26 @@ static constexpr int MAX_BUNDLE_DEPTH = 8;
 static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int depth) {
     // Depth limit check - prevents stack overflow from deeply nested bundles
     if (depth > MAX_BUNDLE_DEPTH) {
-        scprintf("ERROR: Bundle nesting too deep (%d > %d), skipping",
+        scprintf(inWorld, "ERROR: Bundle nesting too deep (%d > %d), skipping",
                      depth, MAX_BUNDLE_DEPTH);
         return;
     }
 
     // Validate inputs
     if (!inWorld) {
-        scprintf("ERROR: PerformOSCBundle called with null World");
+        scprintf(inWorld, "ERROR: PerformOSCBundle called with null World");
         return;
     }
     if (!inPacket || !inPacket->mData) {
-        scprintf("ERROR: PerformOSCBundle called with null packet/data");
+        scprintf(inWorld, "ERROR: PerformOSCBundle called with null packet/data");
         return;
     }
     if (inPacket->mSize < 16) {
-        scprintf("ERROR: Bundle too small: %d bytes (min 16)", inPacket->mSize);
+        scprintf(inWorld, "ERROR: Bundle too small: %d bytes (min 16)", inPacket->mSize);
         return;
     }
     if (inPacket->mSize > 65536) {
-        scprintf("ERROR: Bundle too large: %d bytes", inPacket->mSize);
+        scprintf(inWorld, "ERROR: Bundle too large: %d bytes", inPacket->mSize);
         return;
     }
 
@@ -252,7 +250,7 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
     while (data < dataEnd && msgCount < maxMessages) {
         // Check we have at least 4 bytes for size
         if (data + 4 > dataEnd) {
-            scprintf("ERROR: Bundle truncated at message %d (need 4 bytes, have %ld)",
+            scprintf(inWorld, "ERROR: Bundle truncated at message %d (need 4 bytes, have %ld)",
                          msgCount, (long)(dataEnd - data));
             break;
         }
@@ -266,22 +264,22 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
 
         // Validate message size
         if (msgSize <= 0) {
-            scprintf("ERROR: Invalid message size %d at message %d", msgSize, msgCount);
+            scprintf(inWorld, "ERROR: Invalid message size %d at message %d", msgSize, msgCount);
             break;
         }
         if (msgSize > 65536) {
-            scprintf("ERROR: Message %d too large: %d bytes", msgCount, msgSize);
+            scprintf(inWorld, "ERROR: Message %d too large: %d bytes", msgCount, msgSize);
             break;
         }
         if (data + msgSize > dataEnd) {
-            scprintf("ERROR: Message %d overflows bundle (size=%d, avail=%ld)",
+            scprintf(inWorld, "ERROR: Message %d overflows bundle (size=%d, avail=%ld)",
                          msgCount, msgSize, (long)(dataEnd - data));
             break;
         }
         // OSC sizes every element in a multiple of 4, so each starts on a
         // 4-byte boundary and the handlers read its words in place.
         if (msgSize % 4 != 0) {
-            scprintf("ERROR: Message %d size %d is not a multiple of 4", msgCount, msgSize);
+            scprintf(inWorld, "ERROR: Message %d size %d is not a multiple of 4", msgCount, msgSize);
             break;
         }
 
@@ -303,7 +301,7 @@ static void PerformOSCBundleWithDepth(World* inWorld, OSC_Packet* inPacket, int 
     }
 
     if (msgCount >= maxMessages) {
-        scprintf("WARNING: Bundle hit message limit (%d)", maxMessages);
+        scprintf(inWorld, "WARNING: Bundle hit message limit (%d)", maxMessages);
     }
 
     // Reset error notification state for next command
@@ -320,17 +318,17 @@ void PerformOSCBundle(World* inWorld, OSC_Packet* inPacket) {
 // Based on SC_CoreAudio.cpp:179-198, but simplified for NRT (no FIFO/threading)
 bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     if (!inWorld || !inPacket || !inPacket->mData) {
-        scprintf("ERROR: ProcessOSCPacket called with null pointers");
+        scprintf(inWorld, "ERROR: ProcessOSCPacket called with null pointers");
         return false;
     }
 
     // Validate World structure
     if (!inWorld->hw) {
-        scprintf("ERROR: World->hw is null");
+        scprintf(inWorld, "ERROR: World->hw is null");
         return false;
     }
     if (!inWorld->hw->mAllocPool) {
-        scprintf("ERROR: World->hw->mAllocPool is null");
+        scprintf(inWorld, "ERROR: World->hw->mAllocPool is null");
         return false;
     }
 
@@ -339,7 +337,7 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     // if (cmdName[0] == '/') {
     //     char msg[128];
     //     snprintf(msg, sizeof(msg), "ProcessOSCPacket: %s (size=%d)", cmdName, inPacket->mSize);
-    //     scprintf(msg);
+    //     scprintf(inWorld, msg);
     // }
 
     // In NRT mode, directly call PerformOSCMessage (no FIFO/threading needed)
@@ -350,10 +348,10 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
     if (err != kSCErr_None) {
         char msg[128];
         snprintf(msg, sizeof(msg), "ProcessOSCPacket: Command returned error %d, continuing", err);
-        scprintf("%s", msg);
+        scprintf(inWorld, "%s", msg);
     }
 
-    // scprintf("ProcessOSCPacket: Returning true (continue processing)");
+    // scprintf(inWorld, "ProcessOSCPacket: Returning true (continue processing)");
 
     // IMPORTANT: Return true even on error - we've reported the error, now continue processing
     // Returning false would stop the audio processing loop
@@ -365,7 +363,7 @@ bool ProcessOSCPacket(World* inWorld, OSC_Packet* inPacket) {
 // In NRT mode we execute synchronously and return PacketPerformed
 PacketStatus PerformCompletionMsg(World* inWorld, const OSC_Packet& inPacket) {
     if (!inPacket.mData || inPacket.mSize <= 0) {
-        scprintf("PerformCompletionMsg: empty completion message");
+        scprintf(inWorld, "PerformCompletionMsg: empty completion message");
         return PacketPerformed;
     }
 
@@ -398,16 +396,17 @@ bool asioThreadStarted() { return false; }
 
 // scprintf — scsynth's own print, upstream's name for it, and the one route
 // the engine's diagnostics take on every target: formatted here, on whichever
-// thread asked, and handed to the host as finished text (DspHost::log, which
-// is lock-free on the audio thread and never blocks the tick).
-int scprintf(const char* fmt, ...) {
+// thread asked, and handed to the host of the World's instance as finished
+// text (DspHost::log, which is lock-free on the audio thread and never blocks
+// the tick). SuperSonic (plural guest): the World says which instance.
+int scprintf(World* inWorld, const char* fmt, ...) {
     char buf[1024];
     va_list args;
     va_start(args, fmt);
     const int n = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
     if (n <= 0) return n;
-    supersonic_guest_log(buf, (uint32_t)(n < (int)sizeof(buf) ? n : (int)sizeof(buf) - 1));
+    supersonic_guest_log(inWorld, buf, (uint32_t)(n < (int)sizeof(buf) ? n : (int)sizeof(buf) - 1));
     return n;
 }
 

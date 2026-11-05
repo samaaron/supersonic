@@ -280,13 +280,18 @@ When cherry-pick isn't feasible:
 
 SuperSonic has three build targets (WASM, native, NIF) with a shared engine. Use the [preprocessor conventions](#preprocessor-conventions-for-upstream-files) to mark adaptations clearly.
 
-### 1. Print Functions — keep upstream's `scprintf` / `Print`
+### 1. Print Functions — `scprintf` / `Print` take the World
 
-No change needed. `scprintf` is SuperSonic's own (`dsp/scsynth/synth/server/SC_Stubs.cpp`):
-it formats into a stack buffer and hands the line to the host's log through
-`supersonic_guest_log` (`dsp/scsynth/scsynth_dsp.cpp`), on every target. A
-plugin's `Print` reaches the same place. (The old `ss_log` substitution is
-gone.)
+A print names the World it is about: `scprintf(inWorld, fmt, ...)`. `scprintf`
+is SuperSonic's own (`dsp/scsynth/synth/server/SC_Stubs.cpp`): it formats
+into a stack buffer and hands the line to the log of that World's instance
+through `supersonic_guest_log` (`dsp/scsynth/guest_doors.h`), on every target.
+An upstream `scprintf(fmt, ...)` coming in gains the World in scope as its
+first argument (`inWorld`, `world`, `mWorld`, `inGraph->mNode.mWorld`, ...).
+A plugin's `Print(...)` needs no change where a `unit` is in scope: the macro
+passes `unit->mWorld`. Where there is none (a plugin command's stages, a buffer
+generator), call `(*ft->fPrint)(world, ...)` by hand. (The old `ss_log`
+substitution is gone.)
 
 ### 2. Platform-unavailable APIs — use `#ifndef __EMSCRIPTEN__`
 
@@ -822,7 +827,7 @@ apply here.
 
 **Already present (SuperSonic did it independently, its own way):**
 - `7a2d326a1` "add endian for wasm" — `SC_Endian.h` already has the `#elif defined(__EMSCRIPTEN__)` block.
-- `7e681d089` "remove ReplyAddress.mAddress for wasm" — SuperSonic uses `kWeb` protocol + `uint32_t mAddressPlaceholder[4]` under `__EMSCRIPTEN__` (upstream removes the member entirely; SuperSonic keeps a trivially-copyable placeholder).
+- `7e681d089` "remove ReplyAddress.mAddress for wasm" — SuperSonic uses the `kWeb` protocol and has no network address at all: the member is `World* mWorld`, the World the message came to, which names the instance whose host answers (`scsynth_dsp.cpp`: `reply_to_host`). Upstream removes the member entirely.
 - `c68cdbbd3` "fix excessive parameters on init-rate UGen constructors" — the param-drop (`void Foo_Ctor(Unit*)` instead of `(Unit*, int)`, which crashes on wasm via fn-pointer signature mismatch) is **already present** in `DelayUGens.cpp`. ⚠️ **Do NOT cherry-pick this commit**: it also reverts `RadiansPerSample_Ctor` back to `unit->mWorld->mFullRate.mRadiansPerSample`, which would regress the per-Graph reblock/resample lookup (`unit->mParent->mFullRate->mRadiansPerSample`) adopted in the 2026-04-25 sync. This is an ordering artifact — c68cdbbd3 was authored before the reblock PR but merged after it.
 
 **Not applicable (upstream's wasm port / build / dynamic loading):**
@@ -1151,16 +1156,94 @@ grep -rn "CLOCKWORK_GUEST" dsp/scsynth/synth/
 Current `CLOCKWORK_GUEST` sites in upstream files:
 
 - **SC_Constants.h**: `constexpr` constants (upstream uses runtime `const` with `std::acos` etc.)
-- **SC_World.cpp**: `InitializeSynthTables`/`InitializeFFTTables` declarations and calls in `World_New`; the guest's doors to the host (`supersonic_guest_*` in `scsynth_dsp.cpp`) and `sc_malloc`/`sc_free` on the guest's bulk memory
-- **SC_fftlib.cpp**: idempotency guard in `scfft_global_initialization`, `InitializeFFTTables` entry point
-- **Samp.cpp**: idempotency guard in `FillTables`, `InitializeSynthTables` entry point
-- **SC_InterfaceTable.h**: `DefineSimpleUnit` macro (without trailing semicolon)
+- **SC_World.cpp**: the guest's doors to the host (`guest_doors.h`, implemented in `scsynth_dsp.cpp`) and `sc_malloc`/`sc_free` on the instance's heap; the constant interface table (see the plural-guest section below)
+- **SC_fftlib.cpp**, **Samp.cpp**, **SC_Complex.h**: the lookup tables are constants (plural-guest section below); upstream's load-time filling stays in the `#else`/`#ifndef` branches
+- **SC_InterfaceTable.h**: `DefineSimpleUnit` macro (without trailing semicolon); the constant table's declaration
 - **SC_Lib.cpp**: direct `SendFailure` error reporting (upstream uses staged `CallSendFailureCommand`)
 - **SC_ReplyImpl.hpp**: `kWeb` protocol enum value
 - **SC_OSC_Commands.h**: `cmd_b_allocPtr` and `cmd_supersonic_piano_wavetable` command numbers
 - **LFUGens.cpp**: signed squared/cubed envelope warps (sonic-pi#169) + zero-safe exponential warp endpoints (sonic-pi#881) — `sc_signed_sqrt`/`sc_signed_square`/`sc_exp_safe` helpers, EnvGen segment init/next/fill, duplicated `GET_ENV_VAL` macro
 - **DemandUGens.cpp**: signed squared/cubed + zero-safe exponential envelope warps — helpers + demand-rate envelope init/next (sonic-pi#169, sonic-pi#881)
-- Empty `#ifdef CLOCKWORK_GUEST` blocks in SC_Graph.cpp, SC_Lib.cpp, SC_MiscCmds.cpp and SC_fftlib.cpp are where the old `ss_log` declarations were.
+- Empty `#ifdef CLOCKWORK_GUEST` blocks in SC_Graph.cpp, SC_Lib.cpp and SC_MiscCmds.cpp are where the old `ss_log` declarations were.
+
+### Plural guest — the World carries its instance (2026-11-05)
+
+scsynth is on its way to declaring `DSP_INSTANCES_ANY`: any number of it in
+one process, held to "no mutable variable with static storage" by clockwork's
+`scripts/check-guest-globals.sh` and SuperSonic's ratchet
+(`scripts/check-guest-globals.sh`, `scripts/guest-globals.budget`, the
+`guest-globals` job in `native.yml`). Upstream scsynth is one per process, so
+its statics had to go somewhere, and they went to three places. Every change
+in an upstream file carries the comment marker **`SuperSonic (plural guest)`**
+(`grep -rn "plural guest" dsp/scsynth/synth`), and a sync that brings in a new
+static of any of these kinds treats it the same way:
+
+1. **Per-World state → `HiddenWorld`** (`SC_HiddenWorld.h`). One block of
+   fields, all SuperSonic's: `mGuest` (the instance, `guest_doors.h`),
+   `mGuestMalloc`, the real-time pool's first area and arena area, the seeds
+   (`mSeedBase`, `mSeedCounter`), `mMissingNodeID`, the `Node_SendReply`
+   counters, `mDumpTabCount`, `mLastGraphDefError`, and the **registries**
+   upstream keeps process-wide: `mInterfaceTable` (this World's copy of the
+   table, naming the World), `mCmdLib`, `mCmdArray`, `mUnitDefLib`,
+   `mBufGenLib`, `mPlugInCmds`, `mGroupNodeDef`. `initialize_library(World*)`
+   builds them from the plugins' loads and `deinitialize_library(World*)`
+   frees them (`SC_Lib_Cintf.cpp`).
+2. **Constants** where upstream fills a table at load. The sine tables
+   (`Samp.hpp`), the polar LUTs (`SC_Complex.h`) and the FFT windows and
+   cosine tables (`SC_fftlib.h`) are `const` arrays generated by
+   `scripts/gen-scsynth-tables.sh` into `dsp/scsynth/scsynth_tables.cpp`
+   with upstream's own formulas; `test/native/test_scsynth_tables.cpp` holds
+   the data to the formulas. The interface table `gInterfaceTable` is a
+   `const` with a designated initializer in `SC_World.cpp`, the same entries
+   `InterfaceTable_Init` (kept in the `#else`) assigns. `kFSQRT2M1` /
+   `kDSQRT2M1` are literals. The Green FFT is the one backend on every
+   target (`SC_FFT_GREEN`), so no vDSP setups or scratch.
+3. **A leading `World*` (or `InterfaceTable*`) argument** on every function
+   that reached a static. The function keeps its upstream name and body;
+   only the first argument is new, so an upstream diff applies with a
+   one-line conflict at most:
+   - `World_New(options, SupersonicGuest*, char* outReason, size_t)` (the
+     reason replaces `World_NewError`), `EngineCore_New` likewise
+   - `zalloc(World*, n, size)`, `zfree(World*, ptr)`, `bufAlloc(World*, …)`
+     and `fBufAlloc`; `sc_malloc`/`sc_free`/`malloc_alig`/`free_alig` in
+     `SC_World.cpp`; `guest_heap.h`'s `guest_new`/`guest_delete`/… take the
+     World, `GuestAllocator` and `GuestMalloc` hold it
+   - `server_timeseed(World*)` and `fRanSeed(World*)`
+   - `scprintf(World*, fmt, ...)` and `fPrint(World*, fmt, ...)`; the `Print`
+     macro passes `unit->mWorld` (section "Print Functions" above)
+   - `SC_ErrorString(err, str, missingNodeID)`
+   - `GraphDef_Free(World*, def)`, `checkArrayCount`/`readArrayCount`/
+     `CheckInputSpecs`/`UnitSpec_Read` with `World*`
+   - `AllocPool(NewAreaFunc, FreeAreaFunc, void* areaCtx, …)`: the area
+     callbacks take the context (`SC_AllocPool.h`)
+   - `ReplyAddress::mWorld` (`SC_ReplyImpl.hpp`) in place of the address
+     placeholder: the World a message came to, whose instance answers
+   - `UnitDef_Create`, `UnitDef_AddCmd(Ex)`, `PlugIn_DefineCmd`,
+     `BufGen_Create`, `NewCommand`, `initMiscCommands`, `GroupNodeDef_Init`,
+     `Add/Remove/Get{UnitDef,BufGen,PlugInCmd}`: a `World*` or the
+     `InterfaceTable*` of the World
+   - the `Define*` macros in `SC_InterfaceTable.h` register through
+     `inTable` (PluginLoad's argument), and every plugin's `ft` is
+     `static const InterfaceTable* const ft = &gInterfaceTable;` with its
+     `ft = inTable;` line gone; a load function's table argument must be
+     named `inTable`
+   - the doors (`guest_doors.h`) all take the World:
+     `supersonic_guest_alloc_bytes(World*, …)`, `supersonic_assets_*`,
+     `supersonic_returns_*`, `supersonic_flush_schedule`,
+     `supersonic_scsynth_session_clock`/`block_ntp`,
+     `supersonic_scope_write`, the piano table, the node-tree mirror
+     (`supersonic_node_tree(World*)`, `node_tree.h`)
+
+Removed rather than adapted, because the engine cannot run them: engine-side
+synthdef file loading (`GraphDef_Load`/`LoadDir`/`LoadGlob`, `load_file`,
+`World_LoadGraphDefs`, `SC_Filesystem`, the `LoadSynthDef(Dir)Cmd` bodies
+under `CLOCKWORK_GUEST`), `SetPrintFunc`/`gPrint` under `CLOCKWORK_GUEST`,
+TLSF (nothing linked it). `host/scsynth_synthdef_dirs.cpp` is where `-D`
+looks now, in the host.
+
+What a sync does with a new upstream static: a table filled at load becomes
+a constant (add it to the generator and the test); state a World owns goes
+into `HiddenWorld`; a function that reaches either gains the `World*`.
 
 ### Boost-free conversions — global, unconditional divergence
 
@@ -1204,12 +1287,9 @@ grep -rn "__EMSCRIPTEN__" dsp/scsynth/
 
 Current `__EMSCRIPTEN__` sites in upstream files:
 
-- **SC_GraphDef.cpp/.h**: `load_file()`, `GraphDef_Load()`, `GraphDef_LoadDir()`, `GraphDef_LoadGlob()`
 - **SC_CoreAudio.h** (both copies): `SC_AUDIO_API_WEBAUDIO` selection
 - **SC_Endian.h**, **SC_Platform.h**: wasm endianness and `SCP_TARGET_WASM`
-- **SC_Filesystem_unix.cpp**: compiled for wasm as for Linux
 - **SC_OscUtils.hpp**: `kWeb` in the reply-address dump
-- **MdaUGens.cpp**: `EMSCRIPTEN_KEEPALIVE` export
 
 SuperSonic's own files use it too: **SC_Stubs.cpp** (native-only stubs) and **scsynth_dsp.cpp**.
 

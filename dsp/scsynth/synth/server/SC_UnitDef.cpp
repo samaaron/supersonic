@@ -32,14 +32,15 @@
 #include "SC_UnitDef.h"
 #include "SC_World.h"
 #include "sc_msg_iter.h"
+#include "SC_HiddenWorld.h"
 
-extern int gMissingNodeID;
-
-bool UnitDef_Create(const char* inName, size_t inAllocSize, UnitCtorFunc inCtor, UnitDtorFunc inDtor, uint32 inFlags) {
+bool UnitDef_Create(InterfaceTable* inTable, const char* inName, size_t inAllocSize, UnitCtorFunc inCtor,
+                    UnitDtorFunc inDtor, uint32 inFlags) {
     if (strlen(inName) >= kSCNameByteLen)
         return false;
 
-    UnitDef* unitDef = (UnitDef*)malloc(sizeof(UnitDef));
+    World* world = inTable->mWorld;
+    UnitDef* unitDef = guest_new<UnitDef>(world);
     if (!unitDef)
         return false;
 
@@ -56,29 +57,32 @@ bool UnitDef_Create(const char* inName, size_t inAllocSize, UnitCtorFunc inCtor,
     unitDef->mCmds = nullptr;
     unitDef->mFlags = inFlags;
 
-    if (!AddUnitDef(unitDef)) {
-        free(unitDef);
+    if (!AddUnitDef(world, unitDef)) {
+        guest_delete(world, unitDef);
         return false;
     }
     return true;
 }
 
 
-template <typename Func> static SCBool UnitDef_DoAddCmd(const char* inUnitDefName, const char* inCmdName, Func inFunc) {
+template <typename Func>
+static SCBool UnitDef_DoAddCmd(InterfaceTable* inTable, const char* inUnitDefName, const char* inCmdName,
+                               Func inFunc) {
     if (strlen(inUnitDefName) >= kSCNameByteLen || strlen(inCmdName) >= kSCNameByteLen)
         return false;
 
     int32 unitDefName[kSCNameLen];
     strncpy((char*)unitDefName, inUnitDefName, kSCNameByteLen);
 
-    UnitDef* unitDef = GetUnitDef(unitDefName);
+    World* world = inTable->mWorld;
+    UnitDef* unitDef = GetUnitDef(world, unitDefName);
     if (!unitDef)
         return false;
 
     if (!unitDef->mCmds)
-        unitDef->mCmds = new HashTable<UnitCmd, Malloc>(&gMalloc, 4, true);
+        unitDef->mCmds = guest_new<HashTable<UnitCmd, GuestMalloc>>(world, &world->hw->mGuestMalloc, 4, true);
 
-    UnitCmd* cmd = new UnitCmd();
+    UnitCmd* cmd = guest_new<UnitCmd>(world);
     strncpy((char*)cmd->mCmdName, inCmdName, kSCNameByteLen);
 
     if constexpr (std::is_same_v<Func, UnitCmdFuncEx>) {
@@ -94,25 +98,27 @@ template <typename Func> static SCBool UnitDef_DoAddCmd(const char* inUnitDefNam
     return true;
 }
 
-bool UnitDef_AddCmd(const char* inUnitDefName, const char* inCmdName, UnitCmdFunc inFunc) {
-    return UnitDef_DoAddCmd(inUnitDefName, inCmdName, inFunc);
+bool UnitDef_AddCmd(InterfaceTable* inTable, const char* inUnitDefName, const char* inCmdName, UnitCmdFunc inFunc) {
+    return UnitDef_DoAddCmd(inTable, inUnitDefName, inCmdName, inFunc);
 }
 
-SCBool UnitDef_AddCmdEx(const char* inUnitDefName, const char* inCmdName, UnitCmdFuncEx inFunc) {
-    return UnitDef_DoAddCmd(inUnitDefName, inCmdName, inFunc);
+SCBool UnitDef_AddCmdEx(InterfaceTable* inTable, const char* inUnitDefName, const char* inCmdName,
+                        UnitCmdFuncEx inFunc) {
+    return UnitDef_DoAddCmd(inTable, inUnitDefName, inCmdName, inFunc);
 }
 
-bool PlugIn_DefineCmd(const char* inCmdName, PlugInCmdFunc inFunc, void* inUserData) {
+bool PlugIn_DefineCmd(InterfaceTable* inTable, const char* inCmdName, PlugInCmdFunc inFunc, void* inUserData) {
     if (strlen(inCmdName) >= kSCNameByteLen)
         return false;
 
-    PlugInCmd* cmd = new PlugInCmd();
+    World* world = inTable->mWorld;
+    PlugInCmd* cmd = guest_new<PlugInCmd>(world);
     strncpy((char*)cmd->mCmdName, inCmdName, kSCNameByteLen);
 
     cmd->mFunc = inFunc;
     cmd->mHash = Hash(cmd->mCmdName);
     cmd->mUserData = inUserData;
-    AddPlugInCmd(cmd);
+    AddPlugInCmd(world, cmd);
 
     return true;
 }
@@ -124,7 +130,7 @@ void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData, const Re
 SCErr Unit_DoCmd(World* inWorld, int inSize, const char* inData, ReplyAddress* inReplyAddress) {
     sc_msg_iter msg(inSize, inData);
     int nodeID = msg.geti();
-    gMissingNodeID = nodeID;
+    inWorld->hw->mMissingNodeID = nodeID;
     Graph* graph = World_GetGraph(inWorld, nodeID);
     if (!graph)
         return kSCErr_NodeNotFound;
@@ -173,7 +179,7 @@ SCErr PlugIn_DoCmd(World* inWorld, int inSize, const char* inData, ReplyAddress*
     if (!cmdName)
         return kSCErr_Failed;
 
-    PlugInCmd* cmd = GetPlugInCmd(cmdName);
+    PlugInCmd* cmd = GetPlugInCmd(inWorld, cmdName);
     if (!cmd)
         throw std::runtime_error(std::string((char*)cmdName) + " not found");
 

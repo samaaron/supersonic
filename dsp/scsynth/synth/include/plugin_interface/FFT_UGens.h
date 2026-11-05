@@ -132,4 +132,4 @@ static inline void FFT_ClearUnitOutputs(Unit* unit, int wrongNumSamples) { ZOUT0
     } else if (numbins != unit->m_numbins)                                                                             \
         return;
 
-extern InterfaceTable* ft;
+extern const InterfaceTable* const ft;

@@ -25,6 +25,7 @@
 #include "SC_PlugIn.h"
 #include "SC_LoopPhase.h"
 #include "scsynth_scope.h"   // supersonic_scope_write: a block into a claimed slot
+#include "guest_doors.h"     // supersonic_scope_defence_tripped
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
@@ -32,7 +33,7 @@
 
 const int kMAXMEDIANSIZE = 32;
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct ScopeOut : public Unit {
     SndBuf* m_buf;
@@ -4490,14 +4491,6 @@ void ScopeOut_Dtor(ScopeOut* unit) { TAKEDOWN_IN }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Diagnostic counter: increments each time ScopeOut2_next's defensive
-// NULL-guards trip (either m_buffer.data or a channel_data(i) comes
-// back null mid-callback). Tests read this to tell whether a stress
-// scenario is actually firing the race, or whether the race window is
-// already closed by other ordering guarantees. Always on — the cost is
-// a single atomic increment on an already-broken path.
-std::atomic<int> gScopeOut2DefenseTripCount{0};
-
 struct ScopeOut2 : public Unit {
     // The slot claim travels through the ft scope-buffer interface, which
     // owner-guards release; each block is appended through the guest's scope
@@ -4511,12 +4504,13 @@ struct ScopeOut2 : public Unit {
 static constexpr int kScopeOut2MaxChannels = 16;
 
 void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
-    // internalData is nulled when the slot is released mid-life (cold-swap
-    // race); counted by [scope-diag]. Never-claimed units don't reach here —
-    // the ctor installs ClearUnitOutputs instead — so the counter stays a
-    // pure mid-life-release signal.
+    // SuperSonic (plural guest): internalData is nulled when the slot is released mid-life (cold-swap
+    // race); the instance counts the trips for the race test
+    // (supersonic_scope_defence_trips). Never-claimed units don't reach here —
+    // the ctor installs ClearUnitOutputs instead — so the count stays a pure
+    // mid-life-release signal.
     if (!unit->m_buffer.internalData) {
-        gScopeOut2DefenseTripCount.fetch_add(1, std::memory_order_relaxed);
+        supersonic_scope_defence_tripped(unit->mWorld);
         return;
     }
 
@@ -4531,7 +4525,7 @@ void ScopeOut2_next(ScopeOut2* unit, int inNumSamples) {
     for (int c = 0; c < n; ++c)
         channel_data[c] = IN(inputOffset + c);
 
-    supersonic_scope_write(&unit->m_buffer, channel_data, (uint32)n, (uint32)inNumSamples);
+    supersonic_scope_write(unit->mWorld, &unit->m_buffer, channel_data, (uint32)n, (uint32)inNumSamples);
 }
 
 void ScopeOut2_Ctor(ScopeOut2* unit) {
@@ -6849,9 +6843,8 @@ void DelTapRd_next4_a(DelTapRd* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(Delay) {
-    ft = inTable;
 
-#define DefineInfoUnit(name) (*ft->fDefineUnit)(#name, sizeof(Unit), (UnitCtorFunc)&name##_Ctor, 0, 0);
+#define DefineInfoUnit(name) (*inTable->fDefineUnit)(inTable, #name, sizeof(Unit), (UnitCtorFunc)&name##_Ctor, 0, 0);
 
     DefineInfoUnit(ControlRate);
     DefineInfoUnit(SampleRate);
@@ -6868,7 +6861,7 @@ PluginLoad(Delay) {
     DefineInfoUnit(NumRunningSynths);
     DefineInfoUnit(NodeID);
 
-#define DefineBufInfoUnit(name) (*ft->fDefineUnit)(#name, sizeof(BufInfoUnit), (UnitCtorFunc)&name##_Ctor, 0, 0);
+#define DefineBufInfoUnit(name) (*inTable->fDefineUnit)(inTable, #name, sizeof(BufInfoUnit), (UnitCtorFunc)&name##_Ctor, 0, 0);
 
     DefineBufInfoUnit(BufSampleRate);
     DefineBufInfoUnit(BufRateScale);
@@ -6897,7 +6890,7 @@ PluginLoad(Delay) {
     DefineSimpleUnit(BufAllpassC);
 
 #define DefineDelayUnit(name)                                                                                          \
-    (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, (UnitDtorFunc)&DelayUnit_Dtor, 0);
+    (*inTable->fDefineUnit)(inTable, #name, sizeof(name), (UnitCtorFunc)&name##_Ctor, (UnitDtorFunc)&DelayUnit_Dtor, 0);
 
     DefineDelayUnit(DelayN);
     DefineDelayUnit(DelayL);

@@ -22,7 +22,7 @@
 
 #include <algorithm>
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 // example of implementing a plugin command with async execution.
 // NOTE: the "pluginCmdDemo" command is used by the TestPluginCommand unit test!
@@ -40,7 +40,8 @@ struct MyCmdData // data for each command
     char* name;
 };
 
-MyPluginData gMyPlugin; // global
+// SuperSonic (plural guest): the plugin's one instance of its data: read by its command, never written.
+static const MyPluginData kMyPlugin { 1.2f, 3.4f };
 
 SCBool cmdStage2(World* world, void* inUserData, void* inReplyAddress) {
     // user data is the command.
@@ -49,14 +50,14 @@ SCBool cmdStage2(World* world, void* inUserData, void* inReplyAddress) {
     // just for demonstration purposes, let's assume that a string that says "fail" causes the command to fail.
     if (strcmp(myCmdData->name, "fail") != 0) {
         // "success" -> just print out the values
-        Print("cmdStage2 a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b,
+        (*ft->fPrint)(world, "cmdStage2 a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b,
               myCmdData->x, myCmdData->y, myCmdData->name);
 
         // return 'true' to continue with stage3.
         return true;
     } else {
         // "fail"
-        Print("cmdStage2 a %g  b %g  x %g  y %g  failed!\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b,
+        (*ft->fPrint)(world, "cmdStage2 a %g  b %g  x %g  y %g  failed!\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b,
               myCmdData->x, myCmdData->y);
 
         // return 'false' to cancel the command. scsynth will not continue with stage3 and instead go jump
@@ -71,7 +72,7 @@ SCBool cmdStage3(World* world, void* inUserData, void* inReplyAddress) {
     MyCmdData* myCmdData = (MyCmdData*)inUserData;
 
     // just print out the values
-    Print("cmdStage3 a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b, myCmdData->x,
+    (*ft->fPrint)(world, "cmdStage3 a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b, myCmdData->x,
           myCmdData->y, myCmdData->name);
 
     // if you return 'true' scsynth will perform the completion message (if any) and then continue with stage4.
@@ -83,7 +84,7 @@ SCBool cmdStage4(World* world, void* inUserData, void* inReplyAddress) {
     MyCmdData* myCmdData = (MyCmdData*)inUserData;
 
     // just print out the values
-    Print("cmdStage4 a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b, myCmdData->x,
+    (*ft->fPrint)(world, "cmdStage4 a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b, myCmdData->x,
           myCmdData->y, myCmdData->name);
 
     // return 'true' to send a /done message (if the command name is not NULL).
@@ -95,7 +96,7 @@ void cmdCleanup(World* world, void* inUserData) {
     // user data is the command.
     MyCmdData* myCmdData = (MyCmdData*)inUserData;
 
-    Print("cmdCleanup a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b, myCmdData->x,
+    (*ft->fPrint)(world, "cmdCleanup a %g  b %g  x %g  y %g  name %s\n", myCmdData->myPlugin->a, myCmdData->myPlugin->b, myCmdData->x,
           myCmdData->y, myCmdData->name);
 
     RTFree(world, myCmdData->name); // free the string
@@ -103,7 +104,7 @@ void cmdCleanup(World* world, void* inUserData) {
 }
 
 void cmdDemoFunc(World* inWorld, void* inUserData, struct sc_msg_iter* args, void* replyAddr) {
-    Print("->cmdDemoFunc %p\n", inUserData);
+    (*ft->fPrint)(inWorld, "->cmdDemoFunc %p\n", inUserData);
 
     // user data is the plug-in's user data.
     MyPluginData* thePlugInData = (MyPluginData*)inUserData;
@@ -111,7 +112,7 @@ void cmdDemoFunc(World* inWorld, void* inUserData, struct sc_msg_iter* args, voi
     // allocate command data, free it in cmdCleanup.
     MyCmdData* myCmdData = (MyCmdData*)RTAlloc(inWorld, sizeof(MyCmdData));
     if (!myCmdData) {
-        Print("cmdDemoFunc: memory allocation failed!\n");
+        (*ft->fPrint)(inWorld, "cmdDemoFunc: memory allocation failed!\n");
         return;
     }
     myCmdData->myPlugin = thePlugInData;
@@ -129,7 +130,7 @@ void cmdDemoFunc(World* inWorld, void* inUserData, struct sc_msg_iter* args, voi
     size_t nameSize = strlen(name) + 1;
     myCmdData->name = (char*)RTAlloc(inWorld, nameSize); // allocate space, free it in cmdCleanup.
     if (!myCmdData->name) {
-        Print("cmdDemoFunc: memory allocation failed!\n");
+        (*ft->fPrint)(inWorld, "cmdDemoFunc: memory allocation failed!\n");
         return;
     }
     memcpy(myCmdData->name, name, nameSize); // copy the string
@@ -143,7 +144,7 @@ void cmdDemoFunc(World* inWorld, void* inUserData, struct sc_msg_iter* args, voi
     DoAsynchronousCommandEx(inWorld, replyAddr, "pluginCmdDemo", myCmdData, cmdStage2, cmdStage3, cmdStage4, cmdCleanup,
                             msgSize, msgData);
 
-    Print("<-cmdDemoFunc\n");
+    (*ft->fPrint)(inWorld, "<-cmdDemoFunc\n");
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
@@ -267,7 +268,7 @@ void UnitCmdDemo_Dtor(UnitCmdDemo* unit) {
         msg.mWorld = unit->mWorld;
         msg.mData = unit->data;
         msg.mPerformFunc = [](FifoMsg* msg) {
-            Print("UnitCmdDemo: free data on NRT thread.\n");
+            (*ft->fPrint)(msg->mWorld, "UnitCmdDemo: free data on NRT thread.\n");
             free(msg->mData);
         };
         msg.mFreeFunc = nullptr;
@@ -276,13 +277,10 @@ void UnitCmdDemo_Dtor(UnitCmdDemo* unit) {
 }
 
 PluginLoad(DemoUGens) {
-    ft = inTable;
 
     // define a plugin command - example code
 
-    gMyPlugin.a = 1.2f;
-    gMyPlugin.b = 3.4f;
-    DefinePlugInCmd("pluginCmdDemo", cmdDemoFunc, (void*)&gMyPlugin);
+    DefinePlugInCmd("pluginCmdDemo", cmdDemoFunc, (void*)&kMyPlugin);
 
     // define a unit command - example code
 

@@ -8,6 +8,7 @@
  * with one it sounds; a buffer too short to be a table is refused.
  */
 #include "EngineFixture.h"
+#include "GuestWorld.h"           // supersonic_piano_wavetable: the instance's table
 #include "SampleLane.h"
 #include "clockwork_audio_file.h"
 #include "piano_wavetable.h"
@@ -80,6 +81,13 @@ ClockworkEngine::Config probeConfig() {
     return cfg;
 }
 
+// Frames in the table the engine's instance plays from; 0 while it has none.
+size_t tableFrames(EngineFixture& fx) {
+    size_t frames = 0;
+    supersonic_piano_wavetable(guestWorld(fx), &frames);
+    return frames;
+}
+
 } // namespace
 
 TEST_CASE("/supersonic/piano/wavetable: a buffer becomes the plugin's table", "[piano]") {
@@ -88,17 +96,17 @@ TEST_CASE("/supersonic/piano/wavetable: a buffer becomes the plugin's table", "[
     EngineFixture fx;
     REQUIRE(allocRead(fx, 30, path));
     REQUIRE(setTable(fx, 30));
-    CHECK(supersonic_piano_wavetable_frames() == frames);
+    CHECK(tableFrames(fx) == frames);
 
     // The plugin keeps its own copy: the buffer can go.
     fx.clearReplies();
     fx.send(osc_test::message("/b_free", 30));
     OscReply freed;
     REQUIRE(fx.waitForReply("/done", freed));
-    CHECK(supersonic_piano_wavetable_frames() == frames);
+    CHECK(tableFrames(fx) == frames);
 
     REQUIRE(setTable(fx, -1));
-    CHECK(supersonic_piano_wavetable_frames() == 0);
+    CHECK(tableFrames(fx) == 0);
     std::remove(path.c_str());
 }
 
@@ -107,12 +115,12 @@ TEST_CASE("/supersonic/piano/wavetable: a short buffer is refused, the table unt
     fx.send(osc_test::message("/b_alloc", 31, (int32_t)1000, (int32_t)1));
     OscReply done;
     REQUIRE(fx.waitForReply("/done", done));
-    const size_t before = supersonic_piano_wavetable_frames();
+    const size_t before = tableFrames(fx);
     fx.clearReplies();
     fx.send(osc_test::message(kVerb, 31));
     OscReply fail;
     REQUIRE(fx.waitForReply("/fail", fail));
-    CHECK(supersonic_piano_wavetable_frames() == before);
+    CHECK(tableFrames(fx) == before);
 
     fx.clearReplies();
     fx.send(osc_test::message(kVerb, 999));   // never allocated

@@ -396,13 +396,13 @@ void PreparePartConv(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) 
 
     float* inputbuf = (float*)RTAlloc(world, fftsize * sizeof(float));
     if (inputbuf == nullptr) {
-        Print("PreparePartConv: memory allocation failed.\n");
+        (*ft->fPrint)(world, "PreparePartConv: memory allocation failed.\n");
         return;
     }
     float* spectrum = (float*)RTAlloc(world, fftsize * sizeof(float));
     if (spectrum == nullptr) {
         RTFree(world, inputbuf);
-        Print("PreparePartConv: memory allocation failed.\n");
+        (*ft->fPrint)(world, "PreparePartConv: memory allocation failed.\n");
         return;
     }
     SCWorld_Allocator alloc(ft, world);
@@ -410,7 +410,7 @@ void PreparePartConv(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) 
     if (m_scfft == nullptr) {
         RTFree(world, inputbuf);
         RTFree(world, spectrum);
-        Print("PreparePartConv: memory allocation failed.\n");
+        (*ft->fPrint)(world, "PreparePartConv: memory allocation failed.\n");
         return;
     }
 
@@ -446,7 +446,6 @@ void PreparePartConv(World* world, struct SndBuf* buf, struct sc_msg_iter* msg) 
 }
 
 void initPartConv(InterfaceTable* inTable) {
-    ft = inTable;
     DefineDtorCantAliasUnit(PartConv);
     DefineBufGen("PreparePartConv", PreparePartConv);
 }

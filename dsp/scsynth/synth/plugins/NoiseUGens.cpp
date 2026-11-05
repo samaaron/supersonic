@@ -21,7 +21,7 @@
 
 #include "SC_PlugIn.h"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct WhiteNoise : public Unit {};
 
@@ -1120,7 +1120,6 @@ void ClipBufRd_next0(Unit* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(Noise) {
-    ft = inTable;
 
     DefineSimpleUnit(WhiteNoise);
     DefineSimpleUnit(GrayNoise);

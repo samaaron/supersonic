@@ -24,7 +24,7 @@
 #    define sqrtf sqrt
 #endif
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct FreeVerb : public Unit {
     int iota0;
@@ -1515,7 +1515,6 @@ void GVerb_next(GVerb* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(Reverb) {
-    ft = inTable;
     DefineSimpleUnit(FreeVerb);
     DefineSimpleUnit(FreeVerb2);
     DefineDtorUnit(GVerb);

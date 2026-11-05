@@ -27,7 +27,7 @@
 #define RECTWOPI 0.1591549430918953
 #define ONESIXTH 0.1666666666666667
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct NonLinear : public Unit {
     double x0, y0, xn, yn, xnm1, ynm1;
@@ -1741,7 +1741,6 @@ void StandardL_Ctor(StandardL* unit) {
 
 
 PluginLoad(Chaos) {
-    ft = inTable;
 
     DefineSimpleUnit(CuspN);
     DefineSimpleUnit(CuspL);

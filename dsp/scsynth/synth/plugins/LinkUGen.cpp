@@ -36,15 +36,11 @@
 #include "SC_PlugIn.hpp"
 
 #include "clockwork_clock_state.h"   // ClockworkClockState, readClockworkClock, clockwork::wrapPhase
+#include "guest_doors.h"             // the clock clockwork publishes, by the unit's World
 
 #include <algorithm>
 
-static InterfaceTable* ft;
-
-// Parked by the guest at dsp_new / dsp_process — a UGen holds only a Unit*, so
-// this is how it reaches what tau handed over. See scsynth_dsp.cpp.
-extern "C" const ClockworkClockState* supersonic_scsynth_session_clock();
-extern "C" double supersonic_scsynth_block_ntp();
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 namespace {
 
@@ -52,8 +48,8 @@ namespace {
 // UGen author does not have to; with no clock at all it answers with sane
 // defaults rather than failing, which is why there is no "not active" branch
 // here any more.
-inline ClockworkClockSnapshot sessionClock() {
-    return readClockworkClock(supersonic_scsynth_session_clock());
+inline ClockworkClockSnapshot sessionClock(World* world) {
+    return readClockworkClock(supersonic_scsynth_session_clock(world));
 }
 
 }  // namespace
@@ -66,7 +62,7 @@ public:
 
 private:
     void next_k(int /*numSamples*/) {
-        out0(0) = static_cast<float>(sessionClock().bpm / 60.0);
+        out0(0) = static_cast<float>(sessionClock(mWorld).bpm / 60.0);
     }
 };
 
@@ -78,16 +74,15 @@ public:
 private:
     void next_k(int /*numSamples*/) {
         const double quantum = std::max(static_cast<double>(in0(0)), 1e-6);
-        const auto clock = sessionClock();
+        const auto clock = sessionClock(mWorld);
         // The same arithmetic tau and the JS client use — one formula,
         // in clock_math.h, rather than a second opinion computed here.
-        const double beat = clock.beatAt(supersonic_scsynth_block_ntp());
+        const double beat = clock.beatAt(supersonic_scsynth_block_ntp(mWorld));
         out0(0) = static_cast<float>(clockwork::wrapPhase(beat, quantum));
     }
 };
 
 PluginLoad(LinkUGen) {
-    ft = inTable;
-    registerUnit<LinkTempo>(ft, "LinkTempo", false);
-    registerUnit<LinkPhase>(ft, "LinkPhase", false);
+    registerUnit<LinkTempo>(inTable, "LinkTempo", false);
+    registerUnit<LinkPhase>(inTable, "LinkPhase", false);
 }

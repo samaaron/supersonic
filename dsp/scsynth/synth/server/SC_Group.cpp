@@ -29,31 +29,30 @@
 #include "SC_Prototypes.h"
 #include "SC_Str4.h"
 #include "SC_World.h"
+#include "SC_HiddenWorld.h"
 #include "SC_WorldOptions.h"
 #include "SC_Errors.h"
 #include "scsynthsend.h"
 
 // From audio_processor.cpp
-extern "C" {
-}
-
-NodeDef gGroupNodeDef;
-
 void Group_Dtor(Group* inGroup) {
     Group_DeleteAll(inGroup);
     inGroup->mNode.mWorld->mNumGroups--;
     Node_Dtor(&inGroup->mNode);
 }
 
-void GroupNodeDef_Init() {
-    str4cpy(gGroupNodeDef.mName, "group");
-    gGroupNodeDef.mHash = Hash(gGroupNodeDef.mName);
-    gGroupNodeDef.mAllocSize = sizeof(Group);
+// SuperSonic (plural guest): the group's node definition is the World's
+// (HiddenWorld::mGroupNodeDef), where upstream's is one per process.
+void GroupNodeDef_Init(World* inWorld) {
+    NodeDef& def = inWorld->hw->mGroupNodeDef;
+    str4cpy(def.mName, "group");
+    def.mHash = Hash(def.mName);
+    def.mAllocSize = sizeof(Group);
 }
 
 int Group_New(World* inWorld, int32 inID, Group** outGroup) {
     Group* group;
-    int err = Node_New(inWorld, &gGroupNodeDef, inID, (Node**)&group);
+    int err = Node_New(inWorld, &inWorld->hw->mGroupNodeDef, inID, (Node**)&group);
     if (err)
         return err;
 
@@ -77,11 +76,11 @@ void Group_Calc(Group* inGroup) {
 }
 
 void Group_CalcTrace(Group* inGroup) {
-    scprintf("TRACE Group %d\n", inGroup->mNode.mID);
+    scprintf(inGroup->mNode.mWorld, "TRACE Group %d\n", inGroup->mNode.mID);
     Node* child = inGroup->mHead;
     while (child) {
         Node* next = child->mNext;
-        scprintf("   %d %s\n", child->mID, (char*)child->mDef->mName);
+        scprintf(inGroup->mNode.mWorld, "   %d %s\n", child->mID, (char*)child->mDef->mName);
         (*child->mCalcFunc)(child);
         child = next;
     }
@@ -95,16 +94,18 @@ void Group_Trace(Group* inGroup) {
 }
 
 void Group_DumpNodeTree(Group* inGroup) {
-    static int tabCount = 0;
+    // SuperSonic (plural guest): the depth of this dump: the recursion goes through the groups' calc
+    // funcs, which carry no argument, so the World holds it.
+    int32& tabCount = inGroup->mNode.mWorld->hw->mDumpTabCount;
     if (tabCount == 0)
-        scprintf("NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf(inGroup->mNode.mWorld, "NODE TREE Group %d\n", inGroup->mNode.mID);
     tabCount++;
     Node* child = inGroup->mHead;
     while (child) {
         Node* next = child->mNext;
         for (int i = 0; i < tabCount; i++)
-            scprintf("   "); // small 'tabs'
-        scprintf("%d %s\n", child->mID, (char*)child->mDef->mName);
+            scprintf(inGroup->mNode.mWorld, "   "); // small 'tabs'
+        scprintf(inGroup->mNode.mWorld, "%d %s\n", child->mID, (char*)child->mDef->mName);
         if (child->mIsGroup) {
             Group_DumpTree((Group*)child);
         }
@@ -113,30 +114,30 @@ void Group_DumpNodeTree(Group* inGroup) {
     }
     tabCount--;
     if (tabCount == 0)
-        scprintf("END NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf(inGroup->mNode.mWorld, "END NODE TREE Group %d\n", inGroup->mNode.mID);
 }
 
 void Group_DumpNodeTreeAndControls(Group* inGroup) {
-    static int tabCount = 0;
+    int32& tabCount = inGroup->mNode.mWorld->hw->mDumpTabCount;
     if (tabCount == 0)
-        scprintf("NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf(inGroup->mNode.mWorld, "NODE TREE Group %d\n", inGroup->mNode.mID);
     tabCount++;
     Node* child = inGroup->mHead;
     while (child) {
         Node* next = child->mNext;
         int i;
         for (i = 0; i < tabCount; i++)
-            scprintf("   "); // small 'tabs'
-        scprintf("%d %s", child->mID, (char*)child->mDef->mName); // def will be 'group' if it's a group
+            scprintf(inGroup->mNode.mWorld, "   "); // small 'tabs'
+        scprintf(inGroup->mNode.mWorld, "%d %s", child->mID, (char*)child->mDef->mName); // def will be 'group' if it's a group
         if (child->mIsGroup) {
             Group_DumpTreeAndControls((Group*)child);
         } else {
             Graph* childGraph = (Graph*)child;
             int numControls = childGraph->mNumControls;
             if (numControls > 0) {
-                scprintf("\n ");
+                scprintf(inGroup->mNode.mWorld, "\n ");
                 for (i = 0; i < tabCount; i++)
-                    scprintf("   ");
+                    scprintf(inGroup->mNode.mWorld, "   ");
                 char** names;
                 names = new char*[numControls];
 
@@ -157,9 +158,9 @@ void Group_DumpNodeTreeAndControls(Group* inGroup) {
                     float* ptr = childGraph->mControls + i;
 
                     if (names[i]) {
-                        scprintf(" %s: ", names[i]);
+                        scprintf(inGroup->mNode.mWorld, " %s: ", names[i]);
                     } else {
-                        scprintf(" ", names[i]);
+                        scprintf(inGroup->mNode.mWorld, " ", names[i]);
                     }
                     // the ptr in nMapControls should be the same as the control itself, if not, it's mapped.
                     if ((childGraph->mMapControls[i]) != ptr) {
@@ -167,27 +168,27 @@ void Group_DumpNodeTreeAndControls(Group* inGroup) {
                         if (childGraph->mControlRates[i] == 2) {
                             bus = (childGraph->mMapControls[i]) - (child->mWorld->mAudioBus);
                             bus = sc_float_to_int32((float)bus / child->mWorld->mBufLength);
-                            scprintf("a%d", bus);
+                            scprintf(inGroup->mNode.mWorld, "a%d", bus);
                         } else {
                             bus = (childGraph->mMapControls[i]) - (child->mWorld->mControlBus);
-                            scprintf("c%d", bus);
+                            scprintf(inGroup->mNode.mWorld, "c%d", bus);
                         }
-                        // scprintf("bus: %d\n", bus);
+                        // scprintf(inGroup->mNode.mWorld, "bus: %d\n", bus);
                     } else {
-                        scprintf("%.14g", *ptr);
+                        scprintf(inGroup->mNode.mWorld, "%.14g", *ptr);
                     }
                 }
 
                 delete[] names;
             }
         }
-        scprintf("\n");
+        scprintf(inGroup->mNode.mWorld, "\n");
         (*child->mCalcFunc)(child);
         child = next;
     }
     tabCount--;
     if (tabCount == 0)
-        scprintf("END NODE TREE Group %d\n", inGroup->mNode.mID);
+        scprintf(inGroup->mNode.mWorld, "END NODE TREE Group %d\n", inGroup->mNode.mID);
 }
 
 void Group_CalcDumpTree(Group* inGroup) {
@@ -355,7 +356,7 @@ void Group_QueryTreeAndControls(Group* inGroup, big_scpacket* packet) {
                         bus = (childGraph->mMapControls[i]) - (child->mWorld->mControlBus);
                         snprintf(buf, BUF_SIZE, "%c%d", 'c', bus);
                     }
-                    // scprintf("bus: %d\n", bus);
+                    // scprintf(inGroup->mNode.mWorld, "bus: %d\n", bus);
                     packet->addtag('s');
                     packet->adds(buf);
                 } else {

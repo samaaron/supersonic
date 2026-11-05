@@ -339,6 +339,38 @@ jobs:
       - name: Configure as embedded subproject
         run: cmake -S test/embed -B build/embed-guard -DBUILD_TESTS=ON
 
+  # ── scsynth's mutable statics, against the budget ────────────────────────
+  # scsynth is on its way to declaring DSP_INSTANCES_ANY (any number of it in
+  # one process), which clockwork holds to "no mutable static at all". Until
+  # the count reaches 0, scripts/guest-globals.budget says how many remain,
+  # and this fails when the count rises or a slice forgets to lower it.
+  #
+  # On macOS, where the budget is counted: the platform half of SC_Filesystem
+  # differs per OS (three statics on macOS, six on Linux) and a compiler names
+  # function-local statics its own way, so one platform's count is the budget.
+  # The end state, none, is the same everywhere.
+  guest-globals:
+    runs-on: macos-latest
+    name: guest-globals-budget
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Unoptimised: an optimised build merges file statics into unnamed blocks.
+      - name: Build scsynth unoptimised
+        run: |
+          cmake -B build/native-debug -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=OFF -DCLOCKWORK_PLUGINS=OFF
+          cmake --build build/native-debug --parallel 2 --target scsynth
+
+      - name: Count against the budget
+        run: scripts/check-guest-globals.sh build/native-debug
+
   # ── BEAM NIF shared library (build only) ────────────────────────────────────
   # The NIF is clockwork's (clockwork/src/nif); built here with scsynth as its
   # guest it is SuperSonic-on-the-BEAM. clockwork vendors the erl_nif headers,

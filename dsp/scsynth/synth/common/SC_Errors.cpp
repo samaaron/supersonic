@@ -23,9 +23,7 @@
 
 #include "stdio.h"
 
-int gMissingNodeID;
-
-void SC_ErrorString(SCErr err, char returnString[]) {
+void SC_ErrorString(SCErr err, char returnString[], int missingNodeID) {
     switch (err) {
     case kSCErr_None:
         sprintf(returnString, "none");
@@ -34,13 +32,13 @@ void SC_ErrorString(SCErr err, char returnString[]) {
         sprintf(returnString, "failed");
         break;
     case kSCErr_NodeNotFound:
-        sprintf(returnString, "Node %i not found", gMissingNodeID);
+        sprintf(returnString, "Node %i not found", missingNodeID);
         break;
     case kSCErr_TargetNodeNotFound:
-        sprintf(returnString, "target Node %i not found", gMissingNodeID);
+        sprintf(returnString, "target Node %i not found", missingNodeID);
         break;
     case kSCErr_GroupNotFound:
-        sprintf(returnString, "Group %i not found", gMissingNodeID);
+        sprintf(returnString, "Group %i not found", missingNodeID);
         break;
     case kSCErr_SynthDefNotFound:
         sprintf(returnString, "SynthDef not found");

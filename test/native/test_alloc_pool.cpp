@@ -20,13 +20,15 @@ namespace {
 
 constexpr size_t kPoolSize = size_t(8) << 20;
 
-void* newArea(size_t size) { return std::malloc(size); }
-void freeArea(void* area) { std::free(area); }
+// The pool's area callbacks take the context it was given (a World, in the
+// engine); here there is none.
+void* newArea(void*, size_t size) { return std::malloc(size); }
+void freeArea(void*, void* area) { std::free(area); }
 
 } // namespace
 
 TEST_CASE("AllocPool: a request larger than the pool is refused", "[alloc_pool]") {
-    AllocPool pool(newArea, freeArea, kPoolSize, 0);
+    AllocPool pool(newArea, freeArea, nullptr, kPoolSize, 0);
     void* first = pool.Alloc(64);
     REQUIRE(first != nullptr);
 
@@ -56,7 +58,7 @@ TEST_CASE("AllocPool: a request larger than the pool is refused", "[alloc_pool]"
 // 64-bit pointers and 32 bytes past them with 32-bit ones; with the pool off
 // they are the C library's, on 64 bytes.
 TEST_CASE("AllocPool: every block starts on the widest vector load", "[alloc_pool]") {
-    AllocPool pool(newArea, freeArea, kPoolSize, 0);
+    AllocPool pool(newArea, freeArea, nullptr, kPoolSize, 0);
     std::vector<void*> held;
     for (size_t i = 0; i < 200; ++i) {
         void* block = pool.Alloc(1 + (i * 37) % 3000);

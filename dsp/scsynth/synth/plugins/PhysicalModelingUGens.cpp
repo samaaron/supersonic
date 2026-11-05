@@ -24,7 +24,7 @@
 
 #include "SC_PlugIn.h"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -209,7 +209,6 @@ void TBall_next(TBall* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(PhysicalModeling) {
-    ft = inTable;
 
     DefineSimpleUnit(Spring);
     DefineSimpleUnit(Ball);

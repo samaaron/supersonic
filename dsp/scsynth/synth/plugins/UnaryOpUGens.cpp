@@ -96,7 +96,7 @@ NOVA_SIMD_DEFINE_UNARY_WRAPPER(scurve, sc_scurve_functor)
 }
 #endif
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1332,7 +1332,6 @@ bool ChooseOperatorFunc(UnaryOpUGen* unit) {
 
 extern "C"
 PluginLoad(UnaryOp) {
-    ft = inTable;
 
     DefineSimpleUnit(UnaryOpUGen);
 }

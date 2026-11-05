@@ -28,6 +28,7 @@
 #include "SC_Prototypes.h"
 #include "SC_Str4.h"
 #include "SC_WorldOptions.h"
+#include "SC_HiddenWorld.h"
 
 #ifdef CLOCKWORK_GUEST
 extern "C" {
@@ -191,24 +192,24 @@ SCErr SC_LibCmd::Perform(World* inWorld, int inSize, const char* inData, ReplyAd
         err = (mFunc)(inWorld, inSize, inData, inReply);
     } catch (int iexc) {
         err = iexc;
-        scprintf("ERROR: %s threw int exception: %d", (char*)Name(), iexc);
+        scprintf(inWorld, "ERROR: %s threw int exception: %d", (char*)Name(), iexc);
     } catch (std::exception& exc) {
-        scprintf("ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
+        scprintf(inWorld, "ERROR: %s threw std::exception: %s", (char*)Name(), exc.what());
         if (inWorld->mLocalErrorNotification <= 0 && inWorld->mErrorNotification) {
 #ifdef CLOCKWORK_GUEST
             // Direct synchronous error reporting — SuperSonic runs NRT (single-threaded)
             SendFailure(inReply, (char*)Name(), exc.what());
-            scprintf("FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
+            scprintf(inWorld, "FAILURE IN SERVER %s %s", (char*)Name(), exc.what());
 #else
             CallSendFailureCommand(inWorld, (char*)Name(), exc.what(), inReply);
-            scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), exc.what());
+            scprintf(inWorld, "FAILURE IN SERVER %s %s\n", (char*)Name(), exc.what());
 #endif
         }
         return kSCErr_Failed;
     } catch (...) { err = kSCErr_Failed; }
     if (err && (inWorld->mLocalErrorNotification <= 0 && inWorld->mErrorNotification)) {
         char errstr[128];
-        SC_ErrorString(err, errstr);
+        SC_ErrorString(err, errstr, inWorld->hw->mMissingNodeID);
 #ifdef CLOCKWORK_GUEST
         SendFailure(inReply, (char*)Name(), errstr);
         // An SCErr from a command usually means a stale client reference
@@ -220,32 +221,33 @@ SCErr SC_LibCmd::Perform(World* inWorld, int inSize, const char* inData, ReplyAd
         // but the server can't tell that apart from a bad id, so the log
         // states only what it knows.
         if (err == kSCErr_NodeNotFound && strcmp((char*)Name(), "/n_free") == 0)
-            scprintf("/n_free: %s - nothing to free", errstr);
+            scprintf(inWorld, "/n_free: %s - nothing to free", errstr);
         else
-            scprintf("WARNING: %s failed - %s", (char*)Name(), errstr);
+            scprintf(inWorld, "WARNING: %s failed - %s", (char*)Name(), errstr);
 #else
         CallSendFailureCommand(inWorld, (char*)Name(), errstr, inReply);
-        scprintf("FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);
+        scprintf(inWorld, "FAILURE IN SERVER %s %s\n", (char*)Name(), errstr);
 #endif
     }
     return err;
 }
 
-SCErr NewCommand(const char* inPath, uint32 inCommandNumber, SC_CommandFunc inFunc) {
+SCErr NewCommand(World* inWorld, const char* inPath, uint32 inCommandNumber, SC_CommandFunc inFunc) {
     char path[PATH_BUF_SIZE];
     snprintf(path, PATH_BUF_SIZE, "/%s", inPath);
+    HiddenWorld* hw = inWorld->hw;
 
-    SC_LibCmd* cmd = new SC_LibCmd(inFunc);
+    SC_LibCmd* cmd = guest_new<SC_LibCmd>(inWorld, inFunc);
     cmd->SetName(path);
-    gCmdLib->Add(cmd);
+    hw->mCmdLib->Add(cmd);
 
     // support OSC commands without the leading slash
-    SC_LibCmd* cmd2 = new SC_LibCmd(inFunc);
+    SC_LibCmd* cmd2 = guest_new<SC_LibCmd>(inWorld, inFunc);
     cmd2->SetName(inPath);
-    gCmdLib->Add(cmd2);
+    hw->mCmdLib->Add(cmd2);
 
     // support integer OSC commands
-    gCmdArray[inCommandNumber] = cmd;
+    hw->mCmdArray[inCommandNumber] = cmd;
 
     return kSCErr_None;
 }

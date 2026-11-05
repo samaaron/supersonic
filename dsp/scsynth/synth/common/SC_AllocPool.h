@@ -111,12 +111,15 @@ private:
 const size_t kMinAllocSize = 2 * kAlign;
 const size_t kAreaOverhead = sizeof(AllocAreaHdr) + 2 * sizeof(AllocChunk) + kAlign;
 
-typedef void* (*NewAreaFunc)(size_t size);
-typedef void (*FreeAreaFunc)(void*);
+// SuperSonic (plural guest): the pool asks for its areas through these, with the context it was given:
+// the World whose pool it is, so an area comes from that World's instance.
+typedef void* (*NewAreaFunc)(void* ctx, size_t size);
+typedef void (*FreeAreaFunc)(void* ctx, void*);
 
 class AllocPool {
 public:
-    AllocPool(NewAreaFunc allocArea, FreeAreaFunc freeArea, size_t areaInitSize, size_t areaMoreSize);
+    AllocPool(NewAreaFunc allocArea, FreeAreaFunc freeArea, void* areaCtx, size_t areaInitSize,
+              size_t areaMoreSize);
     ~AllocPool();
 
     void Reinit();
@@ -252,6 +255,7 @@ private:
     AllocAreaPtr mAreas;
     NewAreaFunc mAllocArea;
     FreeAreaFunc mFreeArea;
+    void* mAreaCtx;
     size_t mAreaInitSize, mAreaMoreSize;
     unsigned long mBinBlocks[4];
 };

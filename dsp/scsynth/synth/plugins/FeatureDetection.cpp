@@ -398,7 +398,7 @@ void RunningSum_next_k(RunningSum* unit, int inNumSamples) {
     unit->msum2 = sum2;
 }
 
-void initFeatureDetectors(InterfaceTable* it) {
+void initFeatureDetectors(InterfaceTable* inTable) {
     DefineDtorUnit(PV_JensenAndersen);
     DefineDtorUnit(PV_HainsworthFoote);
     DefineDtorUnit(RunningSum);

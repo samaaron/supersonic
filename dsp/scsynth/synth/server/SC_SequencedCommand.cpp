@@ -79,11 +79,7 @@
 //    capture_notify_clients/restore_notify_clients in audio_processor.cpp.
 // =============================================================================
 
-// From audio_processor.cpp
-extern "C" int  supersonic_assets_contains(const void* ptr);
-extern "C" void supersonic_guest_release_buffer(int bufnum);
-extern "C" {
-}
+#include "guest_doors.h"   // the assets area, the heap and the asset release, by World
 
 namespace fs = std::filesystem;
 
@@ -347,9 +343,9 @@ int BufAllocCmd::Init(const char* inData, int inSize) {
 bool BufAllocCmd::Stage2() {
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
     mFreeData = buf->data;
-    SCErr err = bufAlloc(buf, mNumChannels, mNumFrames, mWorld->mSampleRate);
+    SCErr err = bufAlloc(mWorld, buf, mNumChannels, mNumFrames, mWorld->mSampleRate);
     if (err) {
-        scprintf("/b_alloc: memory allocation failed\n");
+        scprintf(mWorld, "/b_alloc: memory allocation failed\n");
         return false;
     }
     mSndBuf = *buf;
@@ -365,8 +361,8 @@ bool BufAllocCmd::Stage3() {
 }
 
 void BufAllocCmd::Stage4() {
-    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
-    else zfree(mFreeData);
+    if (supersonic_assets_contains(mWorld, mFreeData)) supersonic_guest_release_buffer(mWorld, mBufIndex);
+    else zfree(mWorld, mFreeData);
     SendDoneWithIntValue("/b_alloc", mBufIndex);
 }
 
@@ -374,10 +370,6 @@ void BufAllocCmd::Stage4() {
 
 #include "sc_msg_iter.h"
 #include <string.h>
-
-// Hand a finished block back to whoever allocated it (scsynth_dsp.cpp forwards
-// to DspHost::free_bytes). A call, not a message — see BufFreeCmd::Stage4.
-extern "C" void supersonic_guest_free_bytes(void* ptr);
 
 BufGenCmd::BufGenCmd(World* inWorld, const ReplyAddress* inReplyAddress):
     SC_SequencedCommand(inWorld, inReplyAddress) {}
@@ -399,7 +391,7 @@ int BufGenCmd::Init(const char* inData, int inSize) {
     if (!genName)
         return kSCErr_WrongArgType;
 
-    mBufGen = GetBufGen(genName);
+    mBufGen = GetBufGen(mWorld, genName);
     if (!mBufGen)
         return kSCErr_BufGenNotFound;
 
@@ -427,8 +419,8 @@ bool BufGenCmd::Stage3() {
 }
 
 void BufGenCmd::Stage4() {
-    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
-    else zfree(mFreeData);
+    if (supersonic_assets_contains(mWorld, mFreeData)) supersonic_guest_release_buffer(mWorld, mBufIndex);
+    else zfree(mWorld, mFreeData);
     SendDoneWithIntValue("/b_gen", mBufIndex);
 }
 
@@ -485,10 +477,10 @@ void BufFreeCmd::Stage4() {
          * block leaked on native, silently, because a match that fails looks
          * exactly like a message that was not for you.
          */
-        supersonic_guest_free_bytes(mFreeData);
+        supersonic_guest_free_bytes(mWorld, mFreeData);
         // …and if the bytes were an asset in the assets area, that is what lets go
         // of it: the client hears /clockwork/asset/released and reclaims.
-        if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
+        if (supersonic_assets_contains(mWorld, mFreeData)) supersonic_guest_release_buffer(mWorld, mBufIndex);
 
     }
     SendDoneWithIntValue("/b_free", mBufIndex);
@@ -570,8 +562,8 @@ bool BufAllocReadCmd::Stage3() {
 }
 
 void BufAllocReadCmd::Stage4() {
-    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
-    else zfree(mFreeData);
+    if (supersonic_assets_contains(mWorld, mFreeData)) supersonic_guest_release_buffer(mWorld, mBufIndex);
+    else zfree(mWorld, mFreeData);
     SendDoneWithIntValue("/b_allocRead", mBufIndex);
 }
 
@@ -726,8 +718,8 @@ bool BufAllocReadChannelCmd::Stage3() {
 }
 
 void BufAllocReadChannelCmd::Stage4() {
-    if (supersonic_assets_contains(mFreeData)) supersonic_guest_release_buffer(mBufIndex);
-    else zfree(mFreeData);
+    if (supersonic_assets_contains(mWorld, mFreeData)) supersonic_guest_release_buffer(mWorld, mBufIndex);
+    else zfree(mWorld, mFreeData);
     SendDoneWithIntValue("/b_allocReadChannel", mBufIndex);
 }
 
@@ -850,7 +842,7 @@ int BufCloseCmd::Init(const char* inData, int inSize) {
 bool BufCloseCmd::Stage2() {
 #ifdef NO_LIBSNDFILE
     SendFailure("/b_close", "scsynth compiled without libsndfile\n");
-    scprintf("scsynth compiled without libsndfile\n");
+    scprintf(mWorld, "scsynth compiled without libsndfile\n");
     return false;
 #else
     SndBuf* buf = World_GetNRTBuf(mWorld, mBufIndex);
@@ -880,7 +872,7 @@ bool AudioQuitCmd::Stage1() { return true; }
 
 bool AudioQuitCmd::Stage2() {
     SendFailure("/quit", "not allowed in AU host\n");
-    scprintf("/quit : quit not allowed in AU host\n");
+    scprintf(mWorld, "/quit : quit not allowed in AU host\n");
     return false;
 }
 
@@ -901,7 +893,7 @@ bool AudioQuitCmd::Stage2() {
         mWorld->hw->mQuitProgram->post();
 #endif
     } else {
-        scprintf("/quit: already quitting\n");
+        scprintf(mWorld, "/quit: already quitting\n");
         SendFailure("/quit", "already quitting\n");
     }
     return false;
@@ -968,7 +960,7 @@ bool NotifyCmd::Stage2() {
 
         if (hw->mUsers->size() >= hw->mMaxUsers) {
             SendFailure("/notify", "too many users\n");
-            scprintf("/notify: too many users\n");
+            scprintf(mWorld, "/notify: too many users\n");
             return false;
         }
 
@@ -990,7 +982,7 @@ bool NotifyCmd::Stage2() {
         }
 
         SendFailure("/notify", "not registered\n");
-        scprintf("/notify: not registered\n");
+        scprintf(mWorld, "/notify: not registered\n");
     }
     return false;
 }
@@ -1029,7 +1021,7 @@ int RecvSynthDefCmd::Init(const char* inData, int inSize) {
 
     mSize = msg.getbsize();
     if (!mSize) {
-        scprintf("ERROR /d_recv: synthdef data is empty");
+        scprintf(mWorld, "ERROR /d_recv: synthdef data is empty");
         throw kSCErr_WrongArgType;
     }
 
@@ -1090,7 +1082,10 @@ void RecvSynthDefCmd::Stage4() {
 
 ///////////////////////////////////////////////////////////////////////////
 
-#ifndef SC_LEAN_TARGET
+// SuperSonic (plural guest): the guest reads no files: /d_load and /d_loadDir are refused in SC_MiscCmds.cpp
+// and these two commands are never made, so upstream's file readers they call
+// are not built (SC_GraphDef.h).
+#if !defined(SC_LEAN_TARGET) && !defined(CLOCKWORK_GUEST)
 LoadSynthDefCmd::LoadSynthDefCmd(World* inWorld, const ReplyAddress* inReplyAddress):
     SC_SequencedCommand(inWorld, inReplyAddress) {}
 
@@ -1125,7 +1120,7 @@ bool LoadSynthDefCmd::Stage2() {
         }
     } catch (const std::exception& e) {
         SendFailure("/d_load", e.what());
-        scprintf(e.what());
+        scprintf(mWorld, e.what());
         return false;
     }
 
@@ -1183,7 +1178,7 @@ bool LoadSynthDefDirCmd::Stage2() {
         }
     } catch (const std::exception& e) {
         SendFailure("/d_loadDir", e.what());
-        scprintf(e.what());
+        scprintf(mWorld, e.what());
         return false;
     }
 
@@ -1197,7 +1192,7 @@ bool LoadSynthDefDirCmd::Stage3() {
 }
 
 void LoadSynthDefDirCmd::Stage4() { SendDone("/d_loadDir"); }
-#endif // !SC_LEAN_TARGET
+#endif // !SC_LEAN_TARGET && !CLOCKWORK_GUEST
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -1334,7 +1329,7 @@ SCErr PerformAsyncUnitCommand(
         // happen if DoAsyncUnitCommand() is called in a Unit destructor (which is not allowed).
         // This check is important because it makes sure that we don't increment a reference count
         // that has already gone to zero!
-        scprintf("ERROR: cannot call DoAsyncUnitCommand() in a Unit destructor!\n");
+        scprintf(inUnit->mWorld, "ERROR: cannot call DoAsyncUnitCommand() in a Unit destructor!\n");
         return kSCErr_Failed;
     }
 

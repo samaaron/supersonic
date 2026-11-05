@@ -32,10 +32,10 @@
 
 ////////////////////////////////////////////////////////////////////////
 
-// replacement for calloc.
+// SuperSonic (plural guest): replacement for calloc, over the heap of the World's instance (guest_doors.h).
 // calloc lazily zeroes memory on first touch. This is good for most purposes, but bad for realtime audio.
-void* zalloc(size_t n, size_t size);
-void zfree(void* ptr);
+void* zalloc(World* inWorld, size_t n, size_t size);
+void zfree(World* inWorld, void* ptr);
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -67,23 +67,24 @@ struct Graph* World_GetGraph(struct World* inWorld, int32 inID);
 
 struct Group* World_GetGroup(struct World* inWorld, int32 inID);
 
+// SuperSonic (plural guest): the registries are the World's (HiddenWorld).
 int32* GetKey(struct UnitDef* inUnitDef);
 int32 GetHash(struct UnitDef* inUnitDef);
-bool AddUnitDef(struct UnitDef* inUnitDef);
-bool RemoveUnitDef(struct UnitDef* inUnitDef);
-struct UnitDef* GetUnitDef(int32* inKey);
+bool AddUnitDef(struct World* inWorld, struct UnitDef* inUnitDef);
+bool RemoveUnitDef(struct World* inWorld, struct UnitDef* inUnitDef);
+struct UnitDef* GetUnitDef(struct World* inWorld, int32* inKey);
 
 int32* GetKey(struct BufGen* inBufGen);
 int32 GetHash(struct BufGen* inBufGen);
-bool AddBufGen(struct BufGen* inBufGen);
-bool RemoveBufGen(struct BufGen* inBufGen);
-struct BufGen* GetBufGen(int32* inKey);
+bool AddBufGen(struct World* inWorld, struct BufGen* inBufGen);
+bool RemoveBufGen(struct World* inWorld, struct BufGen* inBufGen);
+struct BufGen* GetBufGen(struct World* inWorld, int32* inKey);
 
 int32* GetKey(struct PlugInCmd* inPlugInCmd);
 int32 GetHash(struct PlugInCmd* inPlugInCmd);
-bool AddPlugInCmd(struct PlugInCmd* inPlugInCmd);
-bool RemovePlugInCmd(struct PlugInCmd* inPlugInCmd);
-struct PlugInCmd* GetPlugInCmd(int32* inKey);
+bool AddPlugInCmd(struct World* inWorld, struct PlugInCmd* inPlugInCmd);
+bool RemovePlugInCmd(struct World* inWorld, struct PlugInCmd* inPlugInCmd);
+struct PlugInCmd* GetPlugInCmd(struct World* inWorld, int32* inKey);
 SCErr PlugIn_DoCmd(World* inWorld, int inSize, const char* inArgs, struct ReplyAddress* inReply);
 
 int32* GetKey(struct GraphDef* inGraphDef);
@@ -92,10 +93,10 @@ void World_AddGraphDef(struct World* inWorld, struct GraphDef* inGraphDef);
 void World_RemoveGraphDef(struct World* inWorld, struct GraphDef* inGraphDef);
 struct GraphDef* World_GetGraphDef(struct World* inWorld, int32* inKey);
 void World_FreeAllGraphDefs(World* inWorld);
-void GraphDef_Free(GraphDef* inGraphDef);
+void GraphDef_Free(World* inWorld, GraphDef* inGraphDef);
 void GraphDef_Define(World* inWorld, GraphDef* inList);
 
-SCErr bufAlloc(struct SndBuf* buf, int numChannels, int numFrames, double sampleRate);
+SCErr bufAlloc(World* inWorld, struct SndBuf* buf, int numChannels, int numFrames, double sampleRate);
 
 ////////////////////////////////////////////////////////////////////////
 
@@ -206,7 +207,7 @@ int32 Hash(struct ReplyAddress* inReplyAddress);
 ////////////////////////////////////////////////////////////////////////
 
 extern "C" {
-int32 server_timeseed();
+int32 server_timeseed(struct World* inWorld);
 }
 
 ////////////////////////////////////////////////////////////////////////

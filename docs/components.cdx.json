@@ -125,49 +125,6 @@
     },
     {
       "type": "library",
-      "bom-ref": "tlsf",
-      "name": "TLSF",
-      "version": "2.4.6",
-      "licenses": [
-        {
-          "expression": "GPL-2.0-only OR LGPL-2.1-only"
-        }
-      ],
-      "externalReferences": [
-        {
-          "type": "website",
-          "url": "http://www.gii.upv.es/tlsf/"
-        }
-      ],
-      "properties": [
-        {
-          "name": "clockwork:path",
-          "value": "dsp/scsynth/synth/external_libraries/TLSF-2.4.6"
-        },
-        {
-          "name": "clockwork:targets",
-          "value": "native,web"
-        },
-        {
-          "name": "clockwork:version_file",
-          "value": "dsp/scsynth/synth/external_libraries/TLSF-2.4.6/src/tlsf.c"
-        },
-        {
-          "name": "clockwork:version_pattern",
-          "value": "Version (\\d+)\\.(\\d+)\\.(\\d+)"
-        },
-        {
-          "name": "clockwork:advisory_search",
-          "value": "TLSF"
-        },
-        {
-          "name": "clockwork:modified",
-          "value": "no"
-        }
-      ]
-    },
-    {
-      "type": "library",
       "bom-ref": "sc3-plugins",
       "name": "sc3-plugins (DistortionUGens, MdaUGens)",
       "version": "066d4b1",

@@ -43,17 +43,14 @@ Copyright (c) 2008 Dan Stowell. All rights reserved.
 
 #ifdef CLOCKWORK_GUEST
 #include <stddef.h>
-// The layout of the windows and cosine tables in the guest's working memory (scsynth_tables.h): a window of
-// 2^k is 2^k floats, size 2^n's starts after the smaller ones (2^n − 2^MIN); a cosine table of 2^k is
-// 2^k/4 + 1 floats, rounded up to four so each starts 16-aligned.
+// SuperSonic (plural guest): the windows and cosine tables are constants (scsynth_tables.h), laid out
+// so: a window of 2^k is 2^k floats, size 2^n's starts after the smaller ones (2^n − 2^MIN); a cosine
+// table of 2^k is 2^k/4 + 1 floats, rounded up to four so each starts 16-aligned. A transform larger
+// than SC_FFT_MAXSIZE has no table and is refused (scfft_create returns null).
 constexpr size_t scfft_window_offset(int log2n) { return (size_t(1) << log2n) - (size_t(1) << SC_FFT_LOG2_MINSIZE); }
 constexpr size_t scfft_window_floats() { return scfft_window_offset(SC_FFT_LOG2_MAXSIZE + 1); }
 constexpr size_t scfft_cos_floats(int log2k) { return ((size_t(1) << log2k) / 4 + 1 + 3) & ~size_t(3); }
 constexpr size_t scfft_cos_offset(int log2n) { size_t at = 0; for (int k = SC_FFT_LOG2_MINSIZE; k < log2n; ++k) at += scfft_cos_floats(k); return at; }
-// Floats the whole store takes: two window types, then the cosine tables.
-constexpr size_t scfft_tables_floats() { return 2 * scfft_window_floats() + scfft_cos_offset(SC_FFT_LOG2_MAXSIZE + 1); }
-// Point the store at `base` and build every table; the floats taken (scfft_tables_floats()).
-size_t scfft_tables_place(float* base);
 #endif
 #define SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1 19
 

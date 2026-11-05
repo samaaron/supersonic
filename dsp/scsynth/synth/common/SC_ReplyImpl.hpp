@@ -35,10 +35,11 @@ enum Protocol {
 
 struct ReplyAddress {
     // SuperSonic identifies the reply target by the origin token in mReplyData
-    // (osc_reply_to_ring_buffer / the transport route by it); scsynth's network
-    // address is unused, so this is a trivially-copyable placeholder on every
-    // build — no boost::asio, on native or lean.
-    uint32_t mAddressPlaceholder[4];
+    // (the transport routes by it) and answers through the World the message
+    // came to, whose instance holds the host's reply door (scsynth_dsp.cpp:
+    // reply_to_host). scsynth's network address is unused: no boost::asio, on
+    // native or lean. Trivially copyable on every build.
+    struct World* mWorld;
     enum Protocol mProtocol;
     int mPort;
     int mSocket;

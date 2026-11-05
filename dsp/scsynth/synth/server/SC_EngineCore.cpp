@@ -10,21 +10,19 @@
 #include "SC_WorldOptions.h"   // WorldOptions, World_New
 #include "SC_Prototypes.h"     // World_Start, World_SetSampleRate, World_Run
 
-World* EngineCore_New(const WorldOptions* options, const char** outError) {
+World* EngineCore_New(const WorldOptions* options, SupersonicGuest* guest, char* outError, size_t errorBytes) {
     auto fail = [&](const char* msg) -> World* {
-        if (outError)
-            *outError = msg;
+        if (outError && errorBytes)
+            snprintf(outError, errorBytes, "%s", msg);
         return nullptr;
     };
-    if (outError)
-        *outError = nullptr;
+    if (outError && errorBytes)
+        outError[0] = '\0';
 
-    World* world = World_New(const_cast<WorldOptions*>(options));
-    if (!world) {
-        // World_New's own reason when it gave one: the caller passes it on.
-        const char* why = World_NewError();
-        return fail(why ? why : "World_New returned null");
-    }
+    // SuperSonic (plural guest): World_New's own reason when it gave one, else ours.
+    World* world = World_New(const_cast<WorldOptions*>(options), guest, outError, errorBytes);
+    if (!world)
+        return outError && outError[0] ? nullptr : fail("World_New returned null");
 
     // Realtime worlds get their sample rate from the audio driver, NRT worlds
     // from the input soundfile. A self-driven engine has neither, so set it

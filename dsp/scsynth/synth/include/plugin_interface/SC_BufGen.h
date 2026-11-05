@@ -31,6 +31,7 @@ struct BufGen {
     BufGenFunc mBufGenFunc;
 };
 
+// SuperSonic (plural guest): registers into the World whose table `inTable` is.
 extern "C" {
-bool BufGen_Create(const char* inName, BufGenFunc inFunc);
+bool BufGen_Create(struct InterfaceTable* inTable, const char* inName, BufGenFunc inFunc);
 }

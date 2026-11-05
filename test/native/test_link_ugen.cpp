@@ -15,6 +15,7 @@
 #include "EngineFixture.h"
 #include "FakeLinkPeerProcess.h"
 #include "ClockworkProcessor.h"
+#include "GuestWorld.h"   // supersonic_scsynth_block_ntp, by the engine's World
 #include "OscTestUtils.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -136,8 +137,6 @@ TEST_CASE("LinkUGen: LinkTempo.kr outputs session tempo in CPS",
     fx.send(osc_test::message("/n_free", 2400));
 }
 
-extern "C" double supersonic_scsynth_block_ntp();
-
 TEST_CASE("LinkUGen: the clock UGens read the block's time as present-day NTP seconds",
           "[Link][LinkUGen]") {
     // LinkPhase takes the beat at this time. Read as a signed integer, a
@@ -146,7 +145,7 @@ TEST_CASE("LinkUGen: the clock UGens read the block's time as present-day NTP se
     EngineFixture fx(linkProbeConfig());
     std::vector<float> bus;
     REQUIRE(pumpAndSnapshot(fx, 128, bus));
-    const double ntp = supersonic_scsynth_block_ntp();
+    const double ntp = supersonic_scsynth_block_ntp(guestWorld(fx));
     INFO("block NTP seconds " << ntp);
     CHECK(ntp > 3.9e9);            // after 2023
     CHECK(ntp < 4294967296.0);     // before the 2036 rollover

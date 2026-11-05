@@ -80,13 +80,11 @@ struct GraphDef {
 };
 
 GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDef* inList, std::string* outErrorMsg = nullptr);
-#ifndef __EMSCRIPTEN__
-GraphDef* GraphDef_Load(struct World* inWorld, const std::filesystem::path& path, GraphDef* inList);
-GraphDef* GraphDef_LoadDir(struct World* inWorld, const std::filesystem::path& path, GraphDef* inList);
-GraphDef* GraphDef_LoadGlob(World* inWorld, const char* pattern, GraphDef* inList);
-#endif
+// SuperSonic (plural guest): upstream's GraphDef_Load / GraphDef_LoadDir / GraphDef_LoadGlob are not here:
+// the engine reads no files. A host reads the directories and hands the
+// definitions over as bytes (GraphDef_Recv).
 SCErr GraphDef_Remove(World* inWorld, int32* inName);
 SCErr GraphDef_Release(World* inWorld, GraphDef* inGraphDef);
-void GraphDef_Dump(GraphDef* inGraphDef);
+void GraphDef_Dump(World* inWorld, GraphDef* inGraphDef);
 int32 GetHash(ParamSpec* inParamSpec);
 int32* GetKey(ParamSpec* inParamSpec);

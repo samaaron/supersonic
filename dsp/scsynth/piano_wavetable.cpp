@@ -6,20 +6,14 @@
 #include "SC_InterfaceTable.h"
 #include "SC_Prototypes.h"
 #include "sc_msg_iter.h"
-#include "buffer_commands.h"   // supersonic_guest_alloc_bytes: the guest's heap
+#include "guest_doors.h"   // the instance's table, and its heap
+#include "guest_heap.h"
 
-#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <new>
 
-extern "C" void supersonic_set_piano_wavetable(const short* data, size_t count);
-
 namespace {
-
-// What the plugin plays from. Swapped on the audio thread, freed off it.
-short*             g_table  = nullptr;
-std::atomic<size_t> g_frames{0};
 
 struct TableCmd {
     int    bufnum;      // -1: take the table away
@@ -36,7 +30,7 @@ bool stage2(World* world, void* data) {
     const SndBuf* buf = World_GetNRTBuf(world, (uint32)cmd->bufnum);
     if (!buf || !buf->data || buf->frames <= 0) return true;
     const size_t frames = (size_t)buf->frames;
-    short* table = static_cast<short*>(supersonic_guest_alloc_bytes(frames * sizeof(short)));   // the guest's heap, not new
+    short* table = static_cast<short*>(supersonic_guest_alloc_bytes(world, frames * sizeof(short)));
     if (!table) return true;
     const int stride = buf->channels > 0 ? buf->channels : 1;
     for (size_t i = 0; i < frames; ++i) {
@@ -52,40 +46,27 @@ bool stage2(World* world, void* data) {
 
 // Real time: the plugin reads the table pointer on this thread, so this is
 // where it changes hands.
-bool stage3(World*, void* data) {
+bool stage3(World* world, void* data) {
     auto* cmd = static_cast<TableCmd*>(data);
     if (cmd->bufnum >= 0 && !cmd->fresh) return true;  // nothing built: leave it
-    cmd->stale = g_table;
-    g_table    = cmd->fresh;
-    g_frames.store(cmd->frames, std::memory_order_relaxed);
-    supersonic_set_piano_wavetable(g_table, cmd->frames);
+    cmd->stale = supersonic_piano_wavetable_swap(world, cmd->fresh, cmd->frames);
     return true;
 }
 
 // Non real time: the table nobody reads any more.
-bool stage4(World*, void* data) {
+bool stage4(World* world, void* data) {
     auto* cmd = static_cast<TableCmd*>(data);
-    supersonic_guest_free_bytes(cmd->stale);
+    supersonic_guest_free_bytes(world, cmd->stale);
     return true;   // /done
 }
 
-void cleanup(World*, void* data) { delete static_cast<TableCmd*>(data); }
+void cleanup(World* world, void* data) { guest_delete(world, static_cast<TableCmd*>(data)); }
 
 } // namespace
 
-extern "C" size_t supersonic_piano_wavetable_frames(void) {
-    return g_frames.load(std::memory_order_relaxed);
-}
-
-extern "C" void supersonic_piano_wavetable_reset(void) {
-    g_table = nullptr;
-    g_frames.store(0, std::memory_order_relaxed);
-    supersonic_set_piano_wavetable(nullptr, 0);
-}
-
 extern "C" int supersonic_meth_piano_wavetable(World* inWorld, int inSize, const char* inData,
                                                ReplyAddress* inReply) {
-    static const char* kName = "/supersonic/piano/wavetable";
+    constexpr const char* kName = "/supersonic/piano/wavetable";
     sc_msg_iter msg(inSize, inData);
     const int bufnum = msg.geti(-1);
 
@@ -104,11 +85,14 @@ extern "C" int supersonic_meth_piano_wavetable(World* inWorld, int inSize, const
         }
     }
 
-    auto* cmd = new (std::nothrow) TableCmd{bufnum, nullptr, 0, nullptr};
-    if (!cmd) {
+    // The command's record from the instance's heap, as everything the server
+    // makes is (guest_heap.h): the system allocator is off the audio thread.
+    void* mem = supersonic_guest_alloc_bytes(inWorld, sizeof(TableCmd));
+    if (!mem) {
         SendFailureWithIntValue(inReply, kName, "out of memory", bufnum);
         return 0;
     }
+    auto* cmd = new (mem) TableCmd{bufnum, nullptr, 0, nullptr};
     (*inWorld->ft->fDoAsynchronousCommand)(inWorld, inReply, kName, cmd,
                                            stage2, stage3, stage4, cleanup, 0, nullptr);
     return 0;

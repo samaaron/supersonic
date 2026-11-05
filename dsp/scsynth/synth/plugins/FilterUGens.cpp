@@ -38,7 +38,7 @@ static const float uninitializedControl = std::numeric_limits<float>::quiet_NaN(
     unit->mRate->mFilterLoops = tmp_floops;                                                                            \
     unit->mRate->mFilterRemain = tmp_fremain;
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct Ramp : public Unit {
     double m_level, m_slope;
@@ -3848,8 +3848,8 @@ void FreqShift_next_kk(FreqShift* unit, int inNumSamples) {
     double y1[12];
     double coefs[12];
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
     int32 lomask = unit->m_lomask;
     int32 phase = unit->m_phase;
 
@@ -3900,8 +3900,8 @@ void FreqShift_next_aa(FreqShift* unit, int inNumSamples) {
     double y1[12];
     double coefs[12];
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
     int32 lomask = unit->m_lomask;
     int32 phase = unit->m_phase;
 
@@ -3948,8 +3948,8 @@ void FreqShift_next_ak(FreqShift* unit, int inNumSamples) {
     double y1[12];
     double coefs[12];
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
     int32 lomask = unit->m_lomask;
     int32 phase = unit->m_phase;
     float phasemod = unit->m_phasein;
@@ -3999,8 +3999,8 @@ void FreqShift_next_ka(FreqShift* unit, int inNumSamples) {
     double y1[12];
     double coefs[12];
 
-    float* table0 = ft->mSineWavetable;
-    float* table1 = table0 + 1;
+    const float* table0 = ft->mSineWavetable;
+    const float* table1 = table0 + 1;
     int32 lomask = unit->m_lomask;
     int32 phase = unit->m_phase;
 
@@ -5429,7 +5429,6 @@ void BHiShelf_next_kkk(BHiShelf* unit, int inNumSamples) {
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 extern "C"
 PluginLoad(Filter) {
-    ft = inTable;
 
     DefineSimpleUnit(Ramp);
     DefineSimpleUnit(Lag);

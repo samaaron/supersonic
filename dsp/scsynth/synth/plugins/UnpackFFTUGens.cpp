@@ -275,7 +275,6 @@ void PackFFT_next(PackFFT* unit, int inNumSamples) {
 
 
 PluginLoad(UnpackFFTUGens) {
-    ft = inTable;
 
     DefineSimpleUnit(Unpack1FFT);
     DefineSimpleUnit(PackFFT);

@@ -20,16 +20,20 @@
  * frames; everything inside the graph is the guest's business, which is why
  * the eight sizing options the old options block carried stop at this file.
  *
- * COMPLETE. Every entry point is implemented and the engine is driven: dsp_new
- * builds a World from the client's config block, dsp_process runs a block,
- * dsp_osc performs messages and bundles with sample-accurate offsets.
+ * THE INSTANCE. Each dsp_new makes one SupersonicGuest: the host's table, the
+ * memory and the clock the host handed over, the World, the node-tree mirror
+ * and the piano table. The World names its instance (HiddenWorld::mGuest),
+ * and every door the server has to the host (guest_doors.h) takes the World
+ * and finds the instance through it, so nothing here is kept process-wide
+ * and any number of instances can share a process.
  */
 #include "SC_FloatToInt.h"
 #include "dsp_api.h"
 #include "engine_api.h"
+#include "guest_doors.h"
 #include "scsynth_config.h"
 #include "scsynth_options.h"
-#include "buffer_commands.h"
+#include "buffer_commands.h"   // buffer_set_data: a buffer onto an asset's frames
 
 #include "SC_World.h"
 #include "SC_WorldOptions.h"
@@ -37,7 +41,6 @@
 #include "SC_Group.h"        // mTopGroup is only a forward declaration in SC_World.h
 #include "SC_InterfaceTable.h"   // ScopeBufferHnd, the ugens' shape of a scope handle
 #include "node_tree.h"
-#include "piano_wavetable.h"   // supersonic_piano_wavetable_reset: the table goes with the instance
 #include "scsynth_scope.h"
 
 // SC_Reply.h only forward-declares ReplyAddress; the layout — and mReplyData,
@@ -55,8 +58,6 @@
 #include <cstring>
 #include <cstdlib>
 #include <new>
-
-namespace {
 
 /*
  * WHAT SCSYNTH KEEPS IN DspConfig::persistent.
@@ -89,26 +90,103 @@ struct NotifyPersist {
     uint32_t origins[kMaxOrigins];
 };
 
-struct ScsynthDsp {
+// One instance of the guest (guest_doors.h): what dsp_new makes, in the
+// memory the host's heap gives it, and what a World belongs to.
+struct SupersonicGuest {
     DspConfig config{};
     DspHost   host{};
     World*    world = nullptr;
     // The timetag of the block currently rendering, so dsp_osc can place a
-    // timestamped message at its exact sample within that block.
+    // timestamped message at its exact sample within that block, and the
+    // clock UGens can read the block's time.
     ClockworkTimetag block_time{};
     // OSC 32.32 fixed-point units to samples: sample_rate / 2^32.
     double    osc_to_samples = 0.0;
     // The persistent notify table, or nullptr if the host offered no region —
     // which is a working state: nothing is remembered and nothing is restored.
     NotifyPersist* notify = nullptr;
+    // The node-tree mirror in the window the host handed over (node_tree.h).
+    NodeTreeMirror tree{};
+    // MdaPiano's sample table, this instance's copy (piano_wavetable.cpp):
+    // swapped on the audio thread, freed off it.
+    short*  piano_table  = nullptr;
+    size_t  piano_frames = 0;
+    // How often ScopeOut2 found its slot released under it (guest_doors.h).
+    uint32_t scope_defence_trips = 0;
 };
 
-// The one instance a reply can be routed through. scsynth answers a command by
-// calling a function pointer on the ReplyAddress it was given, and that
-// signature has no room for a context pointer of ours — mReplyData already
-// carries the origin token. There is exactly one World per process here, so a
-// file-scope pointer is honest rather than a shortcut.
-ScsynthDsp* g_dsp = nullptr;
+namespace {
+
+// The instance a World belongs to, or nullptr for no World.
+inline SupersonicGuest* guestOf(World* world) {
+    return world && world->hw ? world->hw->mGuest : nullptr;
+}
+
+// One line to a host's log, finished text in: cut to fit and terminated, since
+// the text need not be (the OSC dump builds its line in place).
+void log_line(const DspHost& host, const char* text, uint32_t len) {
+    if (!text || len == 0 || !host.log) return;
+    char line[1024];
+    if (len >= sizeof(line)) len = sizeof(line) - 1;
+    std::memcpy(line, text, len);
+    line[len] = '\0';
+    host.log(host.ctx, 6, line);
+}
+
+// Memory for the instance itself, before and after it exists: the host's
+// heap when there is a host (guest_heap.h: nothing of an instance is on the
+// system allocator), nova's aligned malloc when there is none.
+void* instance_alloc(const DspHost& host, size_t bytes) {
+    return host.alloc_bytes ? host.alloc_bytes(host.ctx, bytes) : nova::malloc_aligned(bytes);
+}
+
+void instance_free(const DspHost& host, void* ptr) {
+    if (!ptr) return;
+    if (host.alloc_bytes) {
+        if (host.free_bytes) host.free_bytes(host.ctx, ptr);
+        return;
+    }
+    nova::free_aligned(ptr);
+}
+
+void release_instance(SupersonicGuest* d) {
+    const DspHost host = d->host;   // the table outlives the instance it frees
+    d->~SupersonicGuest();
+    instance_free(host, d);
+}
+
+/*
+ * Whether a pointer lies in the assets area. A buffer that points INTO THE ASSETS was
+ * never allocated by anyone on this side: the client wrote the sample there
+ * and /b_allocPtr pointed the buffer at it in place. Freeing such a buffer
+ * means the engine is done with the range — it does not mean the memory is
+ * the engine's to give back — and handing a lane address to any allocator is
+ * a crash on native and heap corruption on the web. So every free the engine
+ * performs asks this first: the host-routed one below, and scsynth's own
+ * sc_free, which World_Cleanup and a re-alloc reach directly.
+ */
+uint32_t assets_bytes(const SupersonicGuest* d) {
+#if defined(__EMSCRIPTEN__)
+    // On the web the assets area is the LAST region and grows by growing the memory
+    // (memory_layout.js), so its size is "from its base to the end of the
+    // memory" — measured now, because the number handed over at dsp_new was
+    // the size at boot and a sample pool has grown past it since. Nothing
+    // tells a guest a lane grew; this is how it does not need telling.
+    if (!d->config.assets) return 0;
+    const uint64_t end = (uint64_t)__builtin_wasm_memory_size(0) * 65536u;
+    const uint64_t base = (uint64_t)(uintptr_t)d->config.assets;
+    return end > base ? (uint32_t)(end - base) : 0u;
+#else
+    return d->config.assets_bytes;
+#endif
+}
+
+bool assets_contains(const SupersonicGuest* d, const void* ptr) {
+    const uint8_t* base = static_cast<const uint8_t*>(d->config.assets);
+    const uint8_t* p    = static_cast<const uint8_t*>(ptr);
+    if (!base || !p) return false;
+    return p >= base && p < base + assets_bytes(d);
+}
 
 } // namespace
 
@@ -122,42 +200,20 @@ namespace {
 
 // scsynth's reply path, forwarded to clockwork. `origin` came in with the
 // message and goes back out with the answer, which is how clockwork routes a
-// reply to the client that asked rather than broadcasting it.
+// reply to the client that asked rather than broadcasting it. The World the
+// message came to rides on the address too (ReplyAddress::mWorld), and names
+// the instance whose host answers.
 void reply_to_host(struct ReplyAddress* addr, char* msg, int size) {
-    if (!g_dsp || !g_dsp->host.emit_osc || size <= 0) return;
-    const uint32_t origin =
-        addr ? (uint32_t)(uintptr_t)addr->mReplyData : 0u;
-    g_dsp->host.emit_osc(g_dsp->host.ctx, origin,
-                         reinterpret_cast<const uint8_t*>(msg), (uint32_t)size);
+    SupersonicGuest* d = addr ? guestOf(addr->mWorld) : nullptr;
+    if (!d || !d->host.emit_osc || size <= 0) return;
+    const uint32_t origin = (uint32_t)(uintptr_t)addr->mReplyData;
+    d->host.emit_osc(d->host.ctx, origin, reinterpret_cast<const uint8_t*>(msg), (uint32_t)size);
 }
-
-// The origin of the message being dispatched right now.
-//
-// A synchronous reply reads it off the ReplyAddress it was handed, but the
-// sample loader answers LATER, from its own thread, long after that address is
-// gone — so the token has to be captured while the request is still being
-// dispatched. Plain, not atomic, and deliberately: dsp_osc writes it and the
-// loader's enqueue reads it on that same audio thread, within the same call.
-// The loader's I/O thread never touches it; it carries the copy it was given.
-uint32_t g_dispatch_origin = 0;
-
-} // namespace
-
-// The two doors the sample loader needs. Free functions, so there is no wiring
-// step between construction and first use for a caller to miss.
-extern "C" int supersonic_emit_osc(uint32_t origin, const uint8_t* bytes, uint32_t len) {
-    if (!g_dsp || !g_dsp->host.emit_osc || !bytes || len == 0) return 0;
-    return g_dsp->host.emit_osc(g_dsp->host.ctx, origin, bytes, len);
-}
-
-extern "C" uint32_t supersonic_dispatch_origin(void) { return g_dispatch_origin; }
-
-namespace {
 
 // Place a timestamped message at its exact sample within the current block.
 // scsynth reads mSampleOffset when it creates a node, which is what makes a
 // bundle sample-accurate rather than merely block-accurate.
-void apply_offset(ScsynthDsp* d, ClockworkTimetag when, ClockworkTimetag block_time) {
+void apply_offset(SupersonicGuest* d, ClockworkTimetag when, ClockworkTimetag block_time) {
     World* w = d->world;
     if (clockwork_timetag_is_immediate(when)) {
         w->mSampleOffset = 0;
@@ -255,10 +311,14 @@ const DspInfo kInfo = {
     // instance destroyed and built again (clockwork's docs/RESTARTS.md),
     // and dsp_reconfigure below is never asked.
     /* survives                */ 0,
-    // One to a process: scsynth keeps process-wide state (its plugin tables,
-    // its startup time), so clockwork refuses a second core's instance with
-    // the reason rather than let two share it (clockwork's dsp_api.h).
-    /* instances               */ 1,
+    // Any number in a process: the server keeps nothing process-wide. Every
+    // World names its instance and every door takes the World, its lookup
+    // tables are constants, its registries are the World's (docs/
+    // UPSTREAM_SYNC_GUIDE.md, "Plural guest"). scripts/check-guest-globals.sh
+    // holds it to no mutable static at all, and
+    // test/native/test_plural_engines.cpp to rendering beside another exactly
+    // what it renders alone.
+    /* instances               */ DSP_INSTANCES_ANY,
 };
 
 } // namespace
@@ -296,53 +356,52 @@ uint64_t dsp_memory_bulk_bytes(const void* guest_config, uint32_t guest_config_b
     return SCSYNTH_HEAP_HEADROOM_BYTES;
 }
 
-/*
- * Guest-internal: SC code deep in the server only ever holds a World*, and the
- * host table lives on the ScsynthDsp instance. The server's allocator, its
- * printing and its scope ugens all need a way back to the host, so the table
- * is parked here at bring-up and reached through the doors below. Guest
- * plumbing for a guest problem — clockwork sees only its own callbacks.
- */
-static DspHost g_host{};
-
-// scsynth's /clearSched, in a server whose scheduler is clockwork's: the
-// bundles clockwork holds for this guest ahead of their time are dropped
-// (DspHost::flush_schedule). Called from SC_AudioDriver::ClearSched, on the
-// audio thread, where the host says it may be.
-extern "C" void supersonic_flush_schedule(void) {
-    if (g_host.flush_schedule) g_host.flush_schedule(g_host.ctx);
-}
-// The guest's working memory (DspConfig::memory): clockwork reserved it for
-// the pool (dsp_memory_bytes), and the pool is carved from it when it fits.
-static void*    g_arena       = nullptr;
-static uint32_t g_arena_bytes = 0;
-
-// ── The doors ────────────────────────────────────────────────────────────────
+// ── The doors (guest_doors.h) ────────────────────────────────────────────────
 //
 // Everything the server wants from the host goes through one of these, so the
 // server's own sources name no clockwork symbol: dsp_api.h is the whole of
 // what the guest knows, and scripts/check-guest-boundary.sh holds it to that.
+// Each takes the World and finds its instance; a World of no instance gets
+// nothing.
 
-extern "C" void* supersonic_guest_alloc_bytes(size_t bytes) {
-    if (bytes == 0) return nullptr;
-    if (g_host.alloc_bytes) return g_host.alloc_bytes(g_host.ctx, bytes);
-    return nova::malloc_aligned(bytes);   // a host with no heap: the system's
+World* supersonic_guest_world(struct Dsp* instance) {
+    auto* d = reinterpret_cast<SupersonicGuest*>(instance);
+    return d ? d->world : nullptr;
 }
 
-extern "C" const void* supersonic_guest_memory(uint32_t* bytes) {
-    if (bytes) *bytes = g_arena ? g_arena_bytes : 0;
-    return g_arena;
+void* supersonic_guest_alloc_bytes_for(SupersonicGuest* d, size_t bytes) {
+    if (!d || bytes == 0) return nullptr;
+    return instance_alloc(d->host, bytes);
 }
 
-// One line of diagnostics to the host, finished text in. `len` bounds a buffer
-// that need not be terminated (the OSC dump builds its line in place).
-extern "C" void supersonic_guest_log(const char* text, uint32_t len) {
-    if (!text || len == 0) return;
-    char line[1024];
-    if (len >= sizeof(line)) len = sizeof(line) - 1;
-    std::memcpy(line, text, len);
-    line[len] = '\0';
-    if (g_host.log) g_host.log(g_host.ctx, 6, line);
+void supersonic_guest_free_bytes_for(SupersonicGuest* d, void* ptr) {
+    if (!d || !ptr) return;
+    if (assets_contains(d, ptr)) return;   // the client's range, not ours
+    instance_free(d->host, ptr);
+}
+
+void* supersonic_guest_alloc_bytes(World* world, size_t bytes) {
+    return supersonic_guest_alloc_bytes_for(guestOf(world), bytes);
+}
+
+void supersonic_guest_free_bytes(World* world, void* ptr) {
+    supersonic_guest_free_bytes_for(guestOf(world), ptr);
+}
+
+const void* supersonic_guest_memory(World* world, uint32_t* bytes) {
+    SupersonicGuest* d = guestOf(world);
+    const void* memory = d ? d->config.memory : nullptr;
+    if (bytes) *bytes = memory ? d->config.memory_bytes : 0;
+    return memory;
+}
+
+void supersonic_guest_log(World* world, const char* text, uint32_t len) {
+    if (SupersonicGuest* d = guestOf(world)) log_line(d->host, text, len);
+}
+
+void supersonic_flush_schedule(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    if (d && d->host.flush_schedule) d->host.flush_schedule(d->host.ctx);
 }
 
 // The scope doors: ScopeBufferHnd is the ugens' shape of DspTapHandle.
@@ -352,48 +411,61 @@ static_assert(offsetof(ScopeBufferHnd, internalData) == offsetof(DspTapHandle, s
               && offsetof(ScopeBufferHnd, channels) == offsetof(DspTapHandle, channels),
               "ScopeBufferHnd and DspTapHandle must agree on slot and channels");
 
-extern "C" bool supersonic_scope_get(World*, int index, int channels, int /*maxFrames*/,
-                                     ScopeBufferHnd* hnd) {
+bool supersonic_scope_get(World* world, int index, int channels, int /*maxFrames*/, ScopeBufferHnd* hnd) {
     if (!hnd) return false;
     hnd->internalData = nullptr;
     hnd->data = nullptr;
     hnd->channels = 0;
     hnd->maxFrames = 0;
-    if (!g_host.tap_open || index < 0 || channels < 0) return false;
-    return g_host.tap_open(g_host.ctx, (uint32_t)index, (uint32_t)channels,
-                             reinterpret_cast<DspTapHandle*>(hnd)) != 0;
+    SupersonicGuest* d = guestOf(world);
+    if (!d || !d->host.tap_open || index < 0 || channels < 0) return false;
+    return d->host.tap_open(d->host.ctx, (uint32_t)index, (uint32_t)channels,
+                            reinterpret_cast<DspTapHandle*>(hnd)) != 0;
 }
 
-extern "C" void supersonic_scope_push(World*, ScopeBufferHnd*, int) {}   // a stream publishes on write
+void supersonic_scope_push(World*, ScopeBufferHnd*, int) {}   // a stream publishes on write
 
-extern "C" void supersonic_scope_release(World*, ScopeBufferHnd* hnd) {
-    if (hnd && g_host.tap_close) g_host.tap_close(g_host.ctx, reinterpret_cast<DspTapHandle*>(hnd));
+void supersonic_scope_release(World* world, ScopeBufferHnd* hnd) {
+    SupersonicGuest* d = guestOf(world);
+    if (hnd && d && d->host.tap_close) d->host.tap_close(d->host.ctx, reinterpret_cast<DspTapHandle*>(hnd));
 }
 
-extern "C" void supersonic_scope_write(ScopeBufferHnd* hnd, const float* const* channels,
-                                       uint32_t n_channels, uint32_t frames) {
-    if (hnd && hnd->internalData && g_host.tap_write)
-        g_host.tap_write(g_host.ctx, reinterpret_cast<DspTapHandle*>(hnd), channels, n_channels, frames);
+void supersonic_scope_write(World* world, ScopeBufferHnd* hnd, const float* const* channels,
+                            uint32_t n_channels, uint32_t frames) {
+    SupersonicGuest* d = guestOf(world);
+    if (hnd && hnd->internalData && d && d->host.tap_write)
+        d->host.tap_write(d->host.ctx, reinterpret_cast<DspTapHandle*>(hnd), channels, n_channels, frames);
+}
+
+void supersonic_scope_defence_tripped(World* world) {
+    if (SupersonicGuest* d = guestOf(world)) ++d->scope_defence_trips;
+}
+
+uint32_t supersonic_scope_defence_trips(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d ? d->scope_defence_trips : 0;
 }
 
 /*
- * The session clock, and the time of the block being rendered.
- *
- * A UGen runs deep inside the server holding only a Unit*, so anything it needs
- * from clockwork has to be parked somewhere it can reach. These two are what
- * the clock UGens read: DspConfig::clock is the ClockworkClockState mirror the
- * clockwork publishes — the same bytes JavaScript polls, and the same ones Link
- * writes its converged tempo into when it is running — and block_time is the
- * OSC timetag for the block, already carried on every dsp_process.
- *
- * They exist so no UGen has to know whether Link is present. The clock is the
- * clock; who drives it is clockwork's business.
+ * The session clock, and the time of the block being rendered: what the clock
+ * UGens read. DspConfig::clock is the ClockworkClockState mirror clockwork
+ * publishes — the same bytes JavaScript polls, and the same ones Link writes
+ * its converged tempo into when it is running — and block_time is the OSC
+ * timetag for the block, carried on every dsp_process. They exist so no UGen
+ * has to know whether Link is present. The clock is the clock; who drives it
+ * is clockwork's business.
  */
-static const ClockworkClockState* g_session_clock = nullptr;
-static std::atomic<uint64_t>  g_block_osc_time{0};   // ClockworkTimetag::ntp
+const ClockworkClockState* supersonic_scsynth_session_clock(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d ? d->config.clock : nullptr;
+}
 
-extern "C" const ClockworkClockState* supersonic_scsynth_session_clock() {
-    return g_session_clock;
+double supersonic_scsynth_block_ntp(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    if (!d) return 0.0;
+    // OSC timetag -> NTP seconds: whole seconds over a 32-bit fraction.
+    const uint64_t t = d->block_time.ntp;
+    return static_cast<double>(t >> 32) + static_cast<double>(t & 0xFFFFFFFFu) / 4294967296.0;
 }
 
 /*
@@ -403,63 +475,29 @@ extern "C" const ClockworkClockState* supersonic_scsynth_session_clock() {
  * dsp_new. On the web the sum is the address the client already had; natively
  * the engine maps the lane wherever it likes, and only this sum is right.
  */
-static const uint8_t* g_assets_base  = nullptr;
-static uint32_t       g_assets_bytes = 0;
-static uint8_t*       g_returns_base  = nullptr;
-static uint32_t       g_returns_bytes = 0;
-extern "C" uint8_t* supersonic_returns_base(void)  { return g_returns_base; }
-
-extern "C" uint32_t supersonic_returns_bytes(void) { return g_returns_base ? g_returns_bytes : 0; }
-
-extern "C" const uint8_t* supersonic_assets_base(void)  { return g_assets_base; }
-extern "C" uint32_t       supersonic_assets_bytes(void) {
-#if defined(__EMSCRIPTEN__)
-    // On the web the assets area is the LAST region and grows by growing the memory
-    // (memory_layout.js), so its size is "from its base to the end of the
-    // memory" — measured now, because the number handed over at dsp_new was
-    // the size at boot and a sample pool has grown past it since. Nothing
-    // tells a guest a lane grew; this is how it does not need telling.
-    if (!g_assets_base) return 0;
-    const uint64_t end = (uint64_t)__builtin_wasm_memory_size(0) * 65536u;
-    const uint64_t base = (uint64_t)(uintptr_t)g_assets_base;
-    return end > base ? (uint32_t)(end - base) : 0u;
-#else
-    return g_assets_bytes;
-#endif
+const uint8_t* supersonic_assets_base(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d ? static_cast<const uint8_t*>(d->config.assets) : nullptr;
 }
 
-extern "C" double supersonic_scsynth_block_ntp() {
-    // OSC timetag -> NTP seconds: whole seconds over a 32-bit fraction.
-    const uint64_t t = g_block_osc_time.load(std::memory_order_relaxed);
-    return static_cast<double>(t >> 32) + static_cast<double>(t & 0xFFFFFFFFu) / 4294967296.0;
+uint32_t supersonic_assets_bytes(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d ? assets_bytes(d) : 0;
 }
 
-/*
- * Whether a pointer lies in the assets area. A buffer that points INTO THE ASSETS was
- * never allocated by anyone on this side: the client wrote the sample there
- * and /b_allocPtr pointed the buffer at it in place. Freeing such a buffer
- * means the engine is done with the range — it does not mean the memory is
- * the engine's to give back — and handing a lane address to any allocator is
- * a crash on native and heap corruption on the web. So every free the engine
- * performs asks this first: the host-routed one below, and scsynth's own
- * sc_free, which World_Cleanup and a re-alloc reach directly.
- */
-extern "C" int supersonic_assets_contains(const void* ptr) {
-    const uint8_t* base  = g_assets_base;
-    const uint8_t* p     = static_cast<const uint8_t*>(ptr);
-    if (!base || !p) return 0;
-    const uint64_t bytes = supersonic_assets_bytes();
-    return (p >= base && p < base + bytes) ? 1 : 0;
+int supersonic_assets_contains(World* world, const void* ptr) {
+    SupersonicGuest* d = guestOf(world);
+    return d && assets_contains(d, ptr) ? 1 : 0;
 }
 
-void supersonic_guest_free_bytes(void* ptr) {
-    if (!ptr) return;
-    if (supersonic_assets_contains(ptr)) return;   // the client's range, not ours
-    if (g_host.alloc_bytes) {
-        if (g_host.free_bytes) g_host.free_bytes(g_host.ctx, ptr);
-        return;
-    }
-    nova::free_aligned(ptr);   // what supersonic_guest_alloc_bytes fell back to
+uint8_t* supersonic_returns_base(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d ? static_cast<uint8_t*>(d->config.returns) : nullptr;
+}
+
+uint32_t supersonic_returns_bytes(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d && d->config.returns ? d->config.returns_bytes : 0;
 }
 
 // A buffer bound to an ASSET is letting go: its bytes are the client's, in
@@ -467,11 +505,36 @@ void supersonic_guest_free_bytes(void* ptr) {
 // is released (dsp_api.h, "Assets"). A buffer whose data came from /b_allocPtr
 // (the web client's spelling) is not an asset clockwork knows; the release
 // is then nothing, and that client hears /supersonic/buffer/freed as before.
-extern "C" void supersonic_guest_release_buffer(int bufnum) {
-    if (bufnum < 0) return;
-    if (g_host.asset_release)
-        g_host.asset_release(g_host.ctx, (uint32_t)bufnum);
+void supersonic_guest_release_buffer(World* world, int bufnum) {
+    SupersonicGuest* d = guestOf(world);
+    if (bufnum < 0 || !d || !d->host.asset_release) return;
+    d->host.asset_release(d->host.ctx, (uint32_t)bufnum);
 }
+
+const short* supersonic_piano_wavetable(World* world, size_t* frames) {
+    SupersonicGuest* d = guestOf(world);
+    if (frames) *frames = d ? d->piano_frames : 0;
+    return d ? d->piano_table : nullptr;
+}
+
+short* supersonic_piano_wavetable_swap(World* world, short* fresh, size_t frames) {
+    SupersonicGuest* d = guestOf(world);
+    if (!d) return fresh;   // no instance to keep it: the caller frees what it made
+    short* stale = d->piano_table;
+    d->piano_table  = fresh;
+    d->piano_frames = fresh ? frames : 0;
+    return stale;
+}
+
+} // extern "C"
+
+// The World's mirror while it is bound (node_tree.h).
+NodeTreeMirror* supersonic_node_tree(World* world) {
+    SupersonicGuest* d = guestOf(world);
+    return d && d->tree.bound() ? &d->tree : nullptr;
+}
+
+extern "C" {
 
 struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uint32_t err_bytes) {
     // Why it refused, into the host's buffer, cut to fit (dsp_api.h).
@@ -480,22 +543,16 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
         return nullptr;
     };
     if (!config) return refuse("no DspConfig");
-    // The host's doors first: the instance itself is made in the guest's
-    // memory (guest_heap.h), reached through them. Nothing of an instance
-    // is on the system allocator, so a web reload — where the old engine is
-    // gone rather than torn down — leaves nothing of it behind.
-    if (host) g_host = *host;
-    void* mem = supersonic_guest_alloc_bytes(sizeof(ScsynthDsp));
+    // The instance itself is made in the guest's memory (guest_heap.h),
+    // through the host's heap. Nothing of an instance is on the system
+    // allocator, so a web reload — where the old engine is gone rather than
+    // torn down — leaves nothing of it behind.
+    const DspHost hostTable = host ? *host : DspHost{};
+    void* mem = instance_alloc(hostTable, sizeof(SupersonicGuest));
     if (!mem) return refuse("out of memory: the guest's bulk memory cannot hold the instance");
-    auto* d = new (mem) ScsynthDsp;
+    auto* d = new (mem) SupersonicGuest;
     d->config = *config;
-    if (host) d->host = *host;
-    g_arena       = config->memory;
-    g_arena_bytes = config->memory_bytes;
-    g_assets_base  = static_cast<const uint8_t*>(config->assets);
-    g_assets_bytes = config->assets_bytes;
-    g_returns_base  = static_cast<uint8_t*>(config->returns);
-    g_returns_bytes = config->returns_bytes;
+    d->host = hostTable;
 
     WorldOptions options;
     // Externally driven: clockwork owns the device and the clock, so the
@@ -528,8 +585,8 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
     if (scsynth_options_parse(static_cast<const char*>(config->guest_config),
                               config->guest_config_bytes, &so,
                               optionsErr, sizeof(optionsErr)) != 0) {
-        supersonic_guest_log(optionsErr, (uint32_t)std::strlen(optionsErr));
-        d->~ScsynthDsp(); supersonic_guest_free_bytes(d);
+        log_line(d->host, optionsErr, (uint32_t)std::strlen(optionsErr));
+        release_instance(d);
         return refuse(optionsErr);
     }
     options.mNumBuffers            = so.numBuffers;
@@ -554,7 +611,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
             char line[160];
             snprintf(line, sizeof(line), "numAudioBusChannels %u is narrower than the host's %u in + %u out: the bus is widened to %u",
                      options.mNumAudioBusChannels, config->max_input_channels, config->max_output_channels, hostChannels);
-            supersonic_guest_log(line, (uint32_t)std::strlen(line));
+            log_line(d->host, line, (uint32_t)std::strlen(line));
             options.mNumAudioBusChannels = hostChannels;
         }
     }
@@ -564,60 +621,43 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
     options.mLoadGraphDefs         = static_cast<int>(so.loadGraphDefs);
     options.mVerbosity             = static_cast<int>(so.verbosity);
 
+    // A host that needs two renders of one score to agree pins the seeds.
+    options.mDeterministicSeed     = config->deterministic_seed;
+
     d->osc_to_samples = config->sample_rate / 4294967296.0;
-    // The clock clockwork publishes, for this instance's UGens.
-    g_session_clock = config->clock;
 
-    // The node-tree mirror is the guest's, and so is initialising it.
-    //
-    // Clockwork provides the shared-memory region and the mirror mechanism —
-    // a generic way for a guest to publish state a client can poll without
-    // asking. What goes in it is the guest's business: scsynth publishes its
-    // node tree, and a guest with no nodes publishes something else or nothing.
-    //
-    // Upstream initialised this from its audio_processor, back when the host
-    // knew what a node was. Clockwork stopped knowing during the demolition,
-    // correctly, and the call had nowhere to go until here.
-    //
-    // BEFORE THE WORLD, NOT AFTER. EngineCore_New creates the root group, and
-    // creating it publishes it — Node_StateMsg(kNode_Go) writes it into the
-    // mirror. Initialising afterwards therefore WIPED the root group straight
-    // back out, and every later node landed in a mirror with no root: the tree
-    // read one node short forever, and getTree() found no root to hang the
-    // children off, so it returned nothing at all. 58 node_tree cases, one
-    // line in the wrong order.
-    // Bind the window clockwork handed us, then lay it out ourselves: the
-    // host zeroes the region and knows nothing of its shape, so the empty
-    // slots (-1) and the header are ours to write.
-    supersonic_node_tree_bind(config->shm_window, config->shm_window_bytes);
-
-    const char* engineErr = nullptr;
-    d->world = EngineCore_New(&options, &engineErr);
+    char engineErr[DSP_REFUSAL_BYTES] = {0};
+    d->world = EngineCore_New(&options, d, engineErr, sizeof(engineErr));
     if (!d->world) {
-        d->~ScsynthDsp(); supersonic_guest_free_bytes(d);
-        return refuse(engineErr ? engineErr : "EngineCore_New failed");
+        release_instance(d);
+        return refuse(engineErr[0] ? engineErr : "EngineCore_New failed");
     }
 
-    // THE ROOT GROUP HAS TO BE PUBLISHED BY HAND.
+    // The node-tree mirror is the guest's, and so is laying it out.
     //
-    // Every other node reaches the mirror through Node_StateMsg, which the
-    // engine calls on kNode_Go / kNode_End / kNode_Move. The root group is
-    // built directly inside World creation and never goes through that path,
-    // so nothing ever announces it.
-    //
-    // Upstream did this in its audio_processor, right after World_New, with
-    // the same comment. It was lost when clockwork stopped knowing what a
-    // node is — correctly, since a root group is not a clockwork concept — and
-    // the mirror has been one node short ever since. The cost was not one
-    // test: getTree() looks for the root to hang the hierarchy off, so with no
-    // root it returned an EMPTY tree rather than a tree missing its root, and
-    // 58 node_tree cases failed on counts that were never off by one.
-    if (d->world->mTopGroup) {
-        NodeTreeHeader* tree_header  = supersonic_node_tree_header();
-        NodeEntry*      tree_entries = supersonic_node_tree_entries();
-        if (tree_header && tree_entries)
-        NodeTree_Add(&d->world->mTopGroup->mNode, tree_header, tree_entries);
+    // Clockwork provides the window and the mirror mechanism — a generic way
+    // for a guest to publish state a client can poll without asking — and
+    // zeroes the window at every dsp_new, knowing nothing of its shape. What
+    // goes in it is the guest's business: scsynth publishes its node tree,
+    // and a guest with no nodes publishes something else or nothing. The
+    // indices come from this instance's heap, through the World, which is
+    // why the World comes first; a heap that cannot hold them refuses the
+    // boot rather than run with a mirror that cannot be written.
+    try {
+        NodeTree_Bind(&d->tree, d->world, config->shm_window, config->shm_window_bytes);
+    } catch (const std::bad_alloc&) {
+        World_Cleanup(d->world, true);
+        release_instance(d);
+        return refuse("out of memory: the guest's bulk memory cannot hold the node tree's indices");
     }
+
+    // THE ROOT GROUP HAS TO BE PUBLISHED BY HAND. Every other node reaches
+    // the mirror through Node_StateMsg, which the engine calls on kNode_Go /
+    // kNode_End / kNode_Move. The root group is built directly inside World
+    // creation and never goes through that path, so nothing else announces
+    // it; without it getTree() has no root to hang the hierarchy off and
+    // returns an empty tree rather than one missing its root.
+    if (d->world->mTopGroup) NodeTree_Add(&d->tree, &d->world->mTopGroup->mNode);
 
     /*
      * PUT THE CLIENTS' /notify REGISTRATIONS BACK.
@@ -645,6 +685,7 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
                     0, 0, 0, 1,
                 };
                 ReplyAddress reply = {};
+                reply.mWorld = d->world;
                 reply.mReplyFunc = reply_to_host;
                 reply.mReplyData =
                     reinterpret_cast<void*>(static_cast<uintptr_t>(n->origins[i]));
@@ -661,7 +702,6 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
         }
     }
 
-    g_dsp = d;
     return reinterpret_cast<struct Dsp*>(d);
 }
 
@@ -671,14 +711,14 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
 // cannot give heap memory back here, and the client's own /b_free is the
 // honest way to ask.
 int dsp_asset(struct Dsp* dsp, const ClockworkAsset* asset) {
-    auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
+    auto* d = reinterpret_cast<SupersonicGuest*>(dsp);
     if (!d || !d->world || !asset || asset->struct_bytes < sizeof(ClockworkAsset)) return 1;
     if (asset->kind != CLOCKWORK_ASSET_AUDIO_F32) return 2;   // a buffer holds audio; raw bytes mean nothing here
     World* w = d->world;
     const int bufnum = (int)asset->id;
     if (bufnum < 0 || bufnum >= (int)w->mNumSndBufs) return 3;
     SndBuf* nrt = World_GetNRTBuf(w, bufnum);
-    if (nrt && nrt->data && !supersonic_assets_contains(nrt->data)) return 4;  // occupied by heap data: /b_free it first
+    if (nrt && nrt->data && !assets_contains(d, nrt->data)) return 4;  // occupied by heap data: /b_free it first
     if (asset->frames == 0 || asset->channels == 0 || !(asset->sample_rate > 0.f)) return 5;
     if (buffer_set_data(w, bufnum, (float*)asset->bytes, (int)asset->frames, (int)asset->channels,
                         (double)asset->sample_rate, false) != 0) return 6;
@@ -686,7 +726,7 @@ int dsp_asset(struct Dsp* dsp, const ClockworkAsset* asset) {
 }
 
 void dsp_free(struct Dsp* dsp) {
-    auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
+    auto* d = reinterpret_cast<SupersonicGuest*>(dsp);
     if (!d) return;
     // What the guest owes here (dsp_api.h): every ask still held, answered.
     // This World holds none across a block — every command stage runs inline
@@ -694,15 +734,18 @@ void dsp_free(struct Dsp* dsp) {
     // block (a definition's load, a sample's read) are the front's
     // (front/supersonic_commands.cpp), which hears clockwork's refusal of
     // what it had in flight and answers its asker in scsynth's words.
-    if (g_dsp == d) g_dsp = nullptr;
-    if (d->world) World_Cleanup(d->world, true);
-    supersonic_node_tree_unbind();
-    // Nothing of this instance may be remembered past it: its memory goes
-    // with it (guest_heap.h), and a pointer kept in a global would be handed
-    // back to the next instance's heap as if it were the next instance's.
-    supersonic_piano_wavetable_reset();
-    d->~ScsynthDsp();
-    supersonic_guest_free_bytes(d);
+    if (d->world) {
+        // The mirror and the piano table before the World: they are freed
+        // through it. Nothing of this instance may be remembered past it
+        // (guest_heap.h).
+        NodeTree_Unbind(&d->tree, d->world);
+        supersonic_guest_free_bytes(d->world, d->piano_table);
+        d->piano_table = nullptr;
+        d->piano_frames = 0;
+        World_Cleanup(d->world, true);
+        d->world = nullptr;
+    }
+    release_instance(d);
 }
 
 void dsp_process(struct Dsp* dsp,
@@ -710,7 +753,7 @@ void dsp_process(struct Dsp* dsp,
                  float* const* out, uint32_t n_out,
                  uint32_t frames,
                  ClockworkTimetag block_time) {
-    auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
+    auto* d = reinterpret_cast<SupersonicGuest*>(dsp);
     if (!d || !d->world) {
         for (uint32_t c = 0; c < n_out; ++c)
             if (out && out[c]) std::memset(out[c], 0, frames * sizeof(float));
@@ -718,7 +761,6 @@ void dsp_process(struct Dsp* dsp,
     }
     World* w = d->world;
     d->block_time = block_time;
-    g_block_osc_time.store(block_time.ntp, std::memory_order_relaxed);
     const uint32_t block = (uint32_t)w->mBufLength;
     const uint32_t n = frames < block ? frames : block;
 
@@ -763,15 +805,13 @@ void dsp_process(struct Dsp* dsp,
  */
 void dsp_osc(struct Dsp* dsp, const uint8_t* bytes, uint32_t len,
              ClockworkTimetag when, uint32_t origin, ClockworkTimetag block_time) {
-    auto* d = reinterpret_cast<ScsynthDsp*>(dsp);
+    auto* d = reinterpret_cast<SupersonicGuest*>(dsp);
     if (!d || !d->world || !bytes || len == 0) return;
 
     ReplyAddress reply = {};
+    reply.mWorld = d->world;
     reply.mReplyFunc = reply_to_host;
     reply.mReplyData = reinterpret_cast<void*>(static_cast<uintptr_t>(origin));
-
-    // For anything that answers after this call returns — see g_dispatch_origin.
-    g_dispatch_origin = origin;
 
     // Note who is listening, BEFORE the engine acts on it. The table is what
     // survives this instance; see NotifyPersist.

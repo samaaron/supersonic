@@ -16,6 +16,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"   // boots the engine → initialises the native heap
+#include "GuestWorld.h"      // the engine's World, whose heap bufAlloc draws from
 
 #include "SC_World.h"        // World, SndBuf, World_GetBuf/GetNRTBuf (inline)
 #include "SC_SndBuf.h"       // SndBufUpdates
@@ -40,7 +41,7 @@ TEST_CASE("bufAlloc: 32-bit overflow of frames*channels is rejected",
     SndBuf buf;
     std::memset(&buf, 0, sizeof(buf));
 
-    SCErr err = bufAlloc(&buf, /*numChannels*/ 65536, /*numFrames*/ 65537, 48000.0);
+    SCErr err = bufAlloc(guestWorld(fx), &buf, /*numChannels*/ 65536, /*numFrames*/ 65537, 48000.0);
 
     CHECK(err == kSCErr_Failed);
     CHECK(buf.data == nullptr);  // nothing under-allocated behind huge dims
@@ -48,11 +49,12 @@ TEST_CASE("bufAlloc: 32-bit overflow of frames*channels is rejected",
 
 TEST_CASE("bufAlloc: non-positive dimensions are rejected",
           "[buffer][bounds][security]") {
+    // Refused before any memory is asked for, so no World is needed.
     SndBuf buf;
     std::memset(&buf, 0, sizeof(buf));
-    CHECK(bufAlloc(&buf, 0, 1024, 48000.0) == kSCErr_Failed);
-    CHECK(bufAlloc(&buf, 2, 0, 48000.0) == kSCErr_Failed);
-    CHECK(bufAlloc(&buf, -1, 1024, 48000.0) == kSCErr_Failed);
+    CHECK(bufAlloc(nullptr, &buf, 0, 1024, 48000.0) == kSCErr_Failed);
+    CHECK(bufAlloc(nullptr, &buf, 2, 0, 48000.0) == kSCErr_Failed);
+    CHECK(bufAlloc(nullptr, &buf, -1, 1024, 48000.0) == kSCErr_Failed);
 }
 
 TEST_CASE("bufAlloc: a valid request allocates the exact sample count",
@@ -61,18 +63,19 @@ TEST_CASE("bufAlloc: a valid request allocates the exact sample count",
     // engine boot initialises — booting a fixture makes the allocator live so
     // this positive control proves the new bound doesn't over-reject.
     EngineFixture fx;
+    World* world = guestWorld(fx);
 
     SndBuf buf;
     std::memset(&buf, 0, sizeof(buf));
 
-    SCErr err = bufAlloc(&buf, /*numChannels*/ 2, /*numFrames*/ 1024, 48000.0);
+    SCErr err = bufAlloc(world, &buf, /*numChannels*/ 2, /*numFrames*/ 1024, 48000.0);
     REQUIRE(err == kSCErr_None);
     REQUIRE(buf.data != nullptr);
     CHECK(buf.channels == 2);
     CHECK(buf.frames == 1024);
     CHECK(buf.samples == 2048);
 
-    zfree(buf.data);
+    zfree(world, buf.data);
 }
 
 TEST_CASE("World_GetBuf/GetNRTBuf: index == mNumSndBufs clamps instead of "

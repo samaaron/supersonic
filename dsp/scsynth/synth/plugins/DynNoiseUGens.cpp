@@ -29,7 +29,7 @@
 
 #include "SC_PlugIn.h"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct LFDNoise0 : public Unit {
     float mLevel;
@@ -315,7 +315,6 @@ void LFDClipNoise_Ctor(LFDClipNoise* unit) {
 
 extern "C"
 PluginLoad(DynNoise) {
-    ft = inTable;
 
     DefineSimpleUnit(LFDNoise0);
     DefineSimpleUnit(LFDNoise1);

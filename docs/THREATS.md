@@ -61,7 +61,7 @@ Open items, most important first.
 ## Supply chain
 
 `docs/components.cdx.json` lists what SuperSonic carries besides its own code
-and Clockwork: nova-simd, TLSF and two sc3-plugins files, each by upstream
+and Clockwork: nova-simd and two sc3-plugins files, each by upstream
 commit; and Catch2, which the tests fetch. The npm packages come from
 `package-lock.json`.
 

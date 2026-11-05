@@ -1141,7 +1141,7 @@ void Convolution3_next_k(Convolution3* unit) {
     unit->m_prevtrig = curtrig;
 }
 
-void initConvolution(InterfaceTable* it) {
+void initConvolution(InterfaceTable* inTable) {
     DefineDtorUnit(Convolution);
     DefineDtorUnit(Convolution2);
     DefineDtorUnit(Convolution2L);

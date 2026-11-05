@@ -35,8 +35,8 @@ bool supersonic_scope_get(struct World* world, int index, int channels, int maxF
                           struct ScopeBufferHnd* hnd);
 void supersonic_scope_push(struct World* world, struct ScopeBufferHnd* hnd, int frames);
 void supersonic_scope_release(struct World* world, struct ScopeBufferHnd* hnd);
-void supersonic_scope_write(struct ScopeBufferHnd* hnd, const float* const* channels,
-                            uint32_t n_channels, uint32_t frames);
+void supersonic_scope_write(struct World* world, struct ScopeBufferHnd* hnd,
+                            const float* const* channels, uint32_t n_channels, uint32_t frames);
 
 #ifdef __cplusplus
 }

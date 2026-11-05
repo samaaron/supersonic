@@ -37,11 +37,16 @@ private:
     SC_CommandFunc mFunc;
 };
 
+// SuperSonic (plural guest): the command library, the unit definitions, the
+// buffer generators and the plugin commands are one set per World
+// (HiddenWorld), built and freed with it, where upstream's are one set per
+// process behind these globals.
+#ifndef CLOCKWORK_GUEST
 extern Malloc gMalloc;
 extern HashTable<class SC_LibCmd, Malloc>* gCmdLib;
-
-void initialize_library(const char* mUGensPluginPath);
-void deinitialize_library();
-SCErr NewCommand(const char* inPath, uint32 inCommandNumber, SC_CommandFunc inFunc);
-
 extern SC_LibCmd* gCmdArray[NUMBER_OF_COMMANDS];
+#endif
+
+void initialize_library(struct World* inWorld);
+void deinitialize_library(struct World* inWorld);
+SCErr NewCommand(struct World* inWorld, const char* inPath, uint32 inCommandNumber, SC_CommandFunc inFunc);

@@ -72,8 +72,8 @@ void PV_ConformalMap_next(PV_Unit* unit, int inNumSamples) {
 }
 
 
-#define DefinePVUnit(name) (*ft->fDefineUnit)(#name, sizeof(PV_Unit), (UnitCtorFunc)&name##_Ctor, 0, 0);
+#define DefinePVUnit(name) (*inTable->fDefineUnit)(inTable, #name, sizeof(PV_Unit), (UnitCtorFunc)&name##_Ctor, 0, 0);
 
 
 // void initPV_ThirdParty(InterfaceTable *it);
-void initPV_ThirdParty(InterfaceTable* it) { DefinePVUnit(PV_ConformalMap); }
+void initPV_ThirdParty(InterfaceTable* inTable) { DefinePVUnit(PV_ConformalMap); }

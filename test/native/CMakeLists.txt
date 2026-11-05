@@ -68,6 +68,8 @@ add_executable(SuperSonicNativeTests
     test_sample_load_offthread.cpp
     test_load_sample_origin.cpp
     test_piano_wavetable.cpp
+    test_scsynth_tables.cpp
+    test_plural_engines.cpp
     test_supersonic_front.cpp
     test_engine_host.cpp
     test_supersonic_binary.cpp

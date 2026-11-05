@@ -40,6 +40,9 @@
 // basic synthesis, so on embedded SC_COLD_BSS pushes them to PSRAM to free
 // internal SRAM (a no-op on single-tier targets). See SC_Platform.h.
 #include "SC_Platform.h"
+#ifdef CLOCKWORK_GUEST
+#    include "Samp.hpp"   // gSine, the one sine table
+#endif
 
 namespace detail {
 
@@ -51,10 +54,11 @@ const int32 kPolarLUTSize2 = kPolarLUTSize >> 1;
 
 
 #ifdef CLOCKWORK_GUEST
-// One set, in the guest's working memory, placed and filled by scsynth_tables.cpp on every World_New.
-extern float* gMagLUT;
-extern float* gPhaseLUT;
-extern float* gSine;
+// SuperSonic (plural guest): one constant set, generated with the formulas below
+// (scsynth_tables.h); the sine table is Samp's, index for index.
+extern const float gMagLUT[kPolarLUTSize];
+extern const float gPhaseLUT[kPolarLUTSize];
+using ::gSine;
 #else
 /* each object file that is including this header will have separate lookup tables */
 namespace {

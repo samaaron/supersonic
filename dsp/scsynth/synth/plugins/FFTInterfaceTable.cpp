@@ -22,7 +22,7 @@
 
 #include "FFT_UGens.h"
 
-InterfaceTable* ft;
+const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 
 // these are defined in the relevant files
@@ -32,7 +32,6 @@ extern void initPartConv(InterfaceTable* inTable);
 
 extern "C"
 PluginLoad(FFT_UGens) {
-    ft = inTable;
 
     initFFT(inTable);
     initPV(inTable);

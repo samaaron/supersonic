@@ -373,7 +373,6 @@ void FFTTrigger_next(FFTTrigger* unit, int inNumSamples) {
 }
 
 void initFFT(InterfaceTable* inTable) {
-    ft = inTable;
 
     DefineDtorUnit(FFT);
     DefineDtorUnit(IFFT);

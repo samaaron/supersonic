@@ -25,6 +25,7 @@
 #include "SC_Reply.h"
 #include "SC_Command.h"
 #include "HashTable.h"
+#include "guest_heap.h"   // GuestMalloc: a unit's commands are on its World's heap
 
 struct PlugInCmd {
     int32 mCmdName[kSCNameLen];
@@ -51,15 +52,20 @@ struct UnitDef {
     UnitCtorFunc mUnitCtorFunc;
     UnitDtorFunc mUnitDtorFunc;
 
-    HashTable<UnitCmd, Malloc>* mCmds;
+    HashTable<UnitCmd, GuestMalloc>* mCmds;   // SuperSonic (plural guest): on the World's heap
     uint32 mFlags;
 };
 
+// SuperSonic (plural guest): each registers into the World whose table
+// `inTable` is (InterfaceTable::mWorld).
 extern "C" {
-bool UnitDef_Create(const char* inName, size_t inAllocSize, UnitCtorFunc inCtor, UnitDtorFunc inDtor, uint32 inFlags);
-bool UnitDef_AddCmd(const char* inUnitDefName, const char* inCmdName, UnitCmdFunc inFunc);
-SCBool UnitDef_AddCmdEx(const char* inUnitDefName, const char* inCmdName, UnitCmdFuncEx inFunc);
-bool PlugIn_DefineCmd(const char* inCmdName, PlugInCmdFunc inFunc, void* inUserData);
+bool UnitDef_Create(struct InterfaceTable* inTable, const char* inName, size_t inAllocSize, UnitCtorFunc inCtor,
+                    UnitDtorFunc inDtor, uint32 inFlags);
+bool UnitDef_AddCmd(struct InterfaceTable* inTable, const char* inUnitDefName, const char* inCmdName,
+                    UnitCmdFunc inFunc);
+SCBool UnitDef_AddCmdEx(struct InterfaceTable* inTable, const char* inUnitDefName, const char* inCmdName,
+                        UnitCmdFuncEx inFunc);
+bool PlugIn_DefineCmd(struct InterfaceTable* inTable, const char* inCmdName, PlugInCmdFunc inFunc, void* inUserData);
 }
 
 SCErr Unit_DoCmd(World* inWorld, int inSize, const char* inData, ReplyAddress* inReplyAddr);

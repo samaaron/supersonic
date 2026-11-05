@@ -37,7 +37,6 @@ struct NodeDef {
 };
 typedef struct NodeDef NodeDef;
 
-extern NodeDef gGroupNodeDef;
-
-void GroupNodeDef_Init();
-void NodeDef_Dump(NodeDef* inNodeDef);
+// SuperSonic (plural guest): the group's definition is the World's (HiddenWorld::mGroupNodeDef).
+void GroupNodeDef_Init(struct World* inWorld);
+void NodeDef_Dump(struct World* inWorld, NodeDef* inNodeDef);

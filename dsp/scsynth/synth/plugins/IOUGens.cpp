@@ -41,7 +41,7 @@ using nova::slope_argument;
 #endif
 
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -2621,7 +2621,6 @@ void LocalOut_Ctor(LocalOut* unit) {
 
 extern "C"
 PluginLoad(IO) {
-    ft = inTable;
 
     DefineDtorUnit(OffsetOut);
     DefineDtorUnit(LocalIn);

@@ -32,6 +32,9 @@
 #include "SC_Reply.h"
 #include "MsgFifo.h"
 #include "guest_heap.h"
+#include "SC_InterfaceTable.h"   // the World's copy of the table
+#include "SC_Lib_Cintf.h"        // SC_LibCmd, NUMBER_OF_COMMANDS
+#include "SC_SynthDef.h"         // NodeDef
 #include <map>
 #include <deque>
 #include <set>
@@ -43,8 +46,6 @@
 #ifndef NO_LIBSNDFILE
 #    include <SC_SndFileHelpers.hpp> // includes sndfile.h with appropriate configuration
 #endif
-
-extern HashTable<struct UnitDef, Malloc>* gUnitDefLib;
 
 
 struct TriggerMsg {
@@ -112,6 +113,43 @@ typedef std::deque<int, GuestAllocator<int>> ClientIDs;
 typedef std::set<ReplyAddress, std::less<ReplyAddress>, GuestAllocator<ReplyAddress>> Clients;
 
 struct HiddenWorld {
+    // SuperSonic (plural guest): the instance of the guest this World belongs to (scsynth_dsp.cpp):
+    // every door to the host (guest_doors.h) finds it through the World.
+    struct SupersonicGuest* mGuest;
+    // SuperSonic (plural guest): the instance's heap, for the tables (guest_heap.h).
+    GuestMalloc mGuestMalloc;
+    // SuperSonic (plural guest): the real-time pool's first area, pre-sized at World_New and handed over
+    // when the pool asks (rt_pool_area_alloc); and that area when it lies in
+    // the host's working memory, which is the host's and is never freed.
+    void* mRtPoolFirstArea;
+    void* mRtPoolArenaArea;
+    // SuperSonic (plural guest): the seeds of this World's random generators (server_timeseed): from
+    // mSeedBase upwards when a host pinned one (WorldOptions::mDeterministicSeed),
+    // else from the clock, mixed with the count.
+    int32 mSeedBase;
+    int32 mSeedCounter;
+    // SuperSonic (plural guest): the node id the last lookup failed on, for the error's text (SC_ErrorString).
+    int32 mMissingNodeID;
+    // SuperSonic (plural guest): Node_SendReply's dropped replies, each kind logged five times.
+    uint32 mSendReplyAllocFails;
+    uint32 mSendReplyFifoFulls;
+    // SuperSonic (plural guest): Group_DumpNodeTree's indentation while it recurses through the calc funcs.
+    int32 mDumpTabCount;
+    // SuperSonic (plural guest): the definition parser's reason for refusing, for a catch that cannot ask
+    // the exception (GraphDef_Recv).
+    char mLastGraphDefError[256];
+    // SuperSonic (plural guest): the registries upstream keeps one set of per process, one set per
+    // World: built by initialize_library when the World is made, from the
+    // plugins' loads, and freed by deinitialize_library. The World's copy of
+    // the interface table names it (mWorld), so a load registers here.
+    InterfaceTable mInterfaceTable;
+    HashTable<class SC_LibCmd, GuestMalloc>* mCmdLib;
+    class SC_LibCmd* mCmdArray[NUMBER_OF_COMMANDS];
+    HashTable<struct UnitDef, GuestMalloc>* mUnitDefLib;
+    HashTable<struct BufGen, GuestMalloc>* mBufGenLib;
+    HashTable<struct PlugInCmd, GuestMalloc>* mPlugInCmds;
+    NodeDef mGroupNodeDef;
+
     class AllocPool* mAllocPool;
     IntHashTable<struct Node, AllocPool>* mNodeLib;
     GrafDefTable* mGraphDefLib;

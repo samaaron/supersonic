@@ -14,13 +14,15 @@
 // instance goes when its memory does.
 //
 // The helpers here are what upstream's new, delete, new[] and delete[] are,
-// over the guest's heap; GuestAllocator is the same for a standard
-// container, and GuestMalloc for scsynth's own HashTable. Out of memory is
-// std::bad_alloc, as new's would be, for a caller inside a try; a caller
-// that must not throw (dsp_new) takes the bytes itself.
+// over the heap of the World's instance; GuestAllocator is the same for a
+// standard container, and GuestMalloc for scsynth's own HashTable. Each one
+// takes or holds the World, since the heap is the instance's and several
+// instances may share a process. Out of memory is std::bad_alloc, as new's
+// would be, for a caller inside a try; a caller that must not throw
+// (dsp_new) takes the bytes itself.
 #pragma once
 
-#include "buffer_commands.h"   // supersonic_guest_alloc_bytes / free_bytes
+#include "guest_doors.h"   // supersonic_guest_alloc_bytes / free_bytes
 
 #include <cstddef>
 #include <cstdint>
@@ -31,57 +33,59 @@
 // every destructor, as delete[] does. 16 bytes: the heap's alignment.
 constexpr size_t kGuestArrayHeader = 16;
 
-inline void* guest_alloc_or_throw(size_t bytes) {
-    void* p = supersonic_guest_alloc_bytes(bytes);
+inline void* guest_alloc_or_throw(World* world, size_t bytes) {
+    void* p = supersonic_guest_alloc_bytes(world, bytes);
     if (!p) throw std::bad_alloc();
     return p;
 }
 
-template <class T, class... A> T* guest_new(A&&... a) {
-    return new (guest_alloc_or_throw(sizeof(T))) T(std::forward<A>(a)...);
+template <class T, class... A> T* guest_new(World* world, A&&... a) {
+    return new (guest_alloc_or_throw(world, sizeof(T))) T(std::forward<A>(a)...);
 }
 
-template <class T> void guest_delete(T* p) {
+template <class T> void guest_delete(World* world, T* p) {
     if (!p) return;
     p->~T();
-    supersonic_guest_free_bytes(p);
+    supersonic_guest_free_bytes(world, p);
 }
 
-template <class T> T* guest_new_array(size_t n) {
+template <class T> T* guest_new_array(World* world, size_t n) {
     // A count whose size in bytes does not fit in size_t is refused: wrapped,
     // it would allocate a few bytes and the loop below would write past them.
     if (n > (SIZE_MAX - kGuestArrayHeader) / sizeof(T)) throw std::bad_alloc();
-    char* raw = static_cast<char*>(guest_alloc_or_throw(kGuestArrayHeader + sizeof(T) * n));
+    char* raw = static_cast<char*>(guest_alloc_or_throw(world, kGuestArrayHeader + sizeof(T) * n));
     *reinterpret_cast<size_t*>(raw) = n;
     T* items = reinterpret_cast<T*>(raw + kGuestArrayHeader);
     for (size_t i = 0; i < n; ++i) new (items + i) T();   // value-initialised: every count and pointer zero
     return items;
 }
 
-template <class T> void guest_delete_array(T* items) {
+template <class T> void guest_delete_array(World* world, T* items) {
     if (!items) return;
     char* raw = reinterpret_cast<char*>(items) - kGuestArrayHeader;
     const size_t n = *reinterpret_cast<size_t*>(raw);
     for (size_t i = n; i-- > 0;) items[i].~T();
-    supersonic_guest_free_bytes(raw);
+    supersonic_guest_free_bytes(world, raw);
 }
 
-// A standard allocator over the guest's heap, for the server's containers
-// (its client lists, the parser's scratch).
+// A standard allocator over the heap of one World's instance, for the
+// server's containers (its client lists, the parser's scratch).
 template <class T> struct GuestAllocator {
     using value_type = T;
-    GuestAllocator() = default;
-    template <class U> GuestAllocator(const GuestAllocator<U>&) {}
-    T* allocate(size_t n) { return static_cast<T*>(guest_alloc_or_throw(sizeof(T) * n)); }
-    void deallocate(T* p, size_t) { supersonic_guest_free_bytes(p); }
-    template <class U> bool operator==(const GuestAllocator<U>&) const { return true; }
-    template <class U> bool operator!=(const GuestAllocator<U>&) const { return false; }
+    explicit GuestAllocator(World* world) : mWorld(world) {}
+    template <class U> GuestAllocator(const GuestAllocator<U>& o) : mWorld(o.mWorld) {}
+    T* allocate(size_t n) { return static_cast<T*>(guest_alloc_or_throw(mWorld, sizeof(T) * n)); }
+    void deallocate(T* p, size_t) { supersonic_guest_free_bytes(mWorld, p); }
+    template <class U> bool operator==(const GuestAllocator<U>& o) const { return mWorld == o.mWorld; }
+    template <class U> bool operator!=(const GuestAllocator<U>& o) const { return mWorld != o.mWorld; }
+    World* mWorld;
 };
 
 // scsynth's HashTable takes an allocator object with Alloc and Free: this
-// one over the guest's heap, where upstream's Malloc is the system's.
+// one over the heap of one World's instance, where upstream's Malloc is the
+// system's. Each HiddenWorld holds one (mGuestMalloc).
 struct GuestMalloc {
-    void* Alloc(size_t size) { return guest_alloc_or_throw(size); }
-    void Free(void* ptr) { supersonic_guest_free_bytes(ptr); }
+    void* Alloc(size_t size) { return guest_alloc_or_throw(mWorld, size); }
+    void Free(void* ptr) { supersonic_guest_free_bytes(mWorld, ptr); }
+    World* mWorld = nullptr;
 };
-inline GuestMalloc gGuestMalloc;

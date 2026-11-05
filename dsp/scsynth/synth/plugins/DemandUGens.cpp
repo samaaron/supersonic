@@ -27,7 +27,7 @@
 using std::floor;
 using std::numeric_limits;
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct Demand : public Unit {
     float m_prevtrig;
@@ -2359,7 +2359,6 @@ void Dbufwr_Ctor(Dbufwr* unit) {
 
 extern "C"
 PluginLoad(Demand) {
-    ft = inTable;
 
     DefineDtorCantAliasUnit(Demand);
     DefineSimpleCantAliasUnit(Duty);

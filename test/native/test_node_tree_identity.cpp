@@ -12,6 +12,7 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
+#include "GuestWorld.h"
 #include "OscTestUtils.h"
 #include "shm_segment.hpp"
 #include "shared_memory.h"
@@ -61,5 +62,7 @@ TEST_CASE("node tree: a client finds the window's identity in the arena table",
     // And the record behind it is the node tree: its version word, the one
     // the host watches, is where the layout says it is.
     const auto* tree = reinterpret_cast<const NodeTreeHeader*>(client.get_base() + w->offset);
-    CHECK(tree->node_count.load() <= supersonic_node_tree_capacity());
+    NodeTreeMirror* mirror = supersonic_node_tree(guestWorld(fx));
+    REQUIRE(mirror != nullptr);
+    CHECK(tree->node_count.load() <= mirror->capacity);
 }

@@ -28,12 +28,9 @@
 // via EXT_RAM_BSS_ATTR. No-op off embedded. See docs/EMBEDDED_MEMORY.md.
 #include "SC_Platform.h"  // SC_COLD_BSS: cold tables -> PSRAM on embedded, no-op elsewhere
 
-#ifdef CLOCKWORK_GUEST
-float32* gSine = nullptr;           // all four in the guest's working memory (scsynth_tables.h)
-float32* gPMSine = nullptr;
-float32* gInvSine = nullptr;
-float32* gSineWavetable = nullptr;
-#else
+// SuperSonic (plural guest): the four tables are constants (scsynth_tables.h),
+// so nothing here defines or fills them.
+#ifndef CLOCKWORK_GUEST
 float32 gSine[kSineSize + 1]; // hot -> internal SRAM
 float32 SC_COLD_BSS gPMSine[kSineSize + 1];
 float32 SC_COLD_BSS gInvSine[kSineSize + 1];
@@ -67,20 +64,13 @@ void WavetableAsSignal(float32* wavetable, float32* signal, long inSize) {
     }
 }
 
+#ifndef CLOCKWORK_GUEST
 class SynthLibInit {
 public:
     SynthLibInit() { FillTables(); }
 
     static void FillTables() {
-#ifdef CLOCKWORK_GUEST
-        // Nothing to fill until the tables are placed (samp_tables_place); filled again on every placement.
-        if (!gSine) return;
-        // Compute pi/twopi at runtime for extra safety, matching
-        // upstream's runtime computation approach.
-        const double local_twopi = std::acos(-1.0) * 2.0;
-#else
         const double local_twopi = twopi;
-#endif
 
         double sineIndexToPhase = local_twopi / kSineSize;
         double pmf = (1L << 29) / local_twopi;
@@ -108,20 +98,4 @@ public:
 };
 
 static SynthLibInit gSynthLibInit;
-
-#ifdef CLOCKWORK_GUEST
-// Explicit entry point for builds where static constructors may not run.
-extern "C" void InitializeSynthTables() {
-    SynthLibInit::FillTables();
-}
-
-size_t samp_tables_place(float32* base) {
-    constexpr size_t kSlot = (kSineSize + 1 + 3) & ~3;   // 8193 floats, rounded so the next table starts 16-aligned
-    gSine = base;
-    gPMSine = base + kSlot;
-    gInvSine = base + 2 * kSlot;
-    gSineWavetable = base + 3 * kSlot;
-    SynthLibInit::FillTables();
-    return 3 * kSlot + 2 * kSineSize;
-}
-#endif // CLOCKWORK_GUEST
+#endif // !CLOCKWORK_GUEST

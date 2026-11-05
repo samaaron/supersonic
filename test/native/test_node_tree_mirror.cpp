@@ -6,23 +6,29 @@
  * and structural fields (parent_id, head_id, is_group, def_name).
  */
 #include "EngineFixture.h"
-#include "shared_memory.h"
+#include "GuestWorld.h"
 #include "node_tree.h"   // the record is SuperSonic's, not the host's
 
-// ── Helper: find a node by ID in the mirror ─────────────────────────────────
+// ── Helper: the engine's mirror, and a node by ID in it ─────────────────────
 
-static const NodeEntry* findNode(int32_t id) {
-    auto* header = supersonic_node_tree_header();
-    auto* entries = supersonic_node_tree_entries();
-    uint32_t count = header->node_count.load(std::memory_order_acquire);
-    for (uint32_t i = 0; i < count && i < supersonic_node_tree_capacity(); i++) {
+static NodeTreeMirror* mirror(EngineFixture& fx) {
+    NodeTreeMirror* tree = supersonic_node_tree(guestWorld(fx));
+    REQUIRE(tree != nullptr);
+    return tree;
+}
+
+static const NodeEntry* findNode(EngineFixture& fx, int32_t id) {
+    NodeTreeMirror* tree = mirror(fx);
+    NodeEntry* entries = tree->entries();
+    uint32_t count = tree->header()->node_count.load(std::memory_order_acquire);
+    for (uint32_t i = 0; i < count && i < tree->capacity; i++) {
         if (entries[i].id == id) return &entries[i];
     }
     return nullptr;
 }
 
-static NodeTreeHeader* getHeader() {
-    return supersonic_node_tree_header();
+static NodeTreeHeader* getHeader(EngineFixture& fx) {
+    return mirror(fx)->header();
 }
 
 // ── Helper: create a synth via /s_new ────────────────────────────────────────
@@ -49,21 +55,21 @@ static void syncBarrier(EngineFixture& fx, int32_t syncId) {
 TEST_CASE("Root group (0) exists in mirror after boot", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    const NodeEntry* root = findNode(0);
+    const NodeEntry* root = findNode(fx, 0);
     REQUIRE(root != nullptr);
 }
 
 TEST_CASE("Default group (1) exists in mirror after boot", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    const NodeEntry* defGroup = findNode(1);
+    const NodeEntry* defGroup = findNode(fx, 1);
     REQUIRE(defGroup != nullptr);
 }
 
 TEST_CASE("Root group has is_group=1", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    const NodeEntry* root = findNode(0);
+    const NodeEntry* root = findNode(fx, 0);
     REQUIRE(root != nullptr);
     CHECK(root->is_group == 1);
 }
@@ -71,7 +77,7 @@ TEST_CASE("Root group has is_group=1", "[node_tree_mirror]") {
 TEST_CASE("Root group has parent_id=-1 (no parent)", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    const NodeEntry* root = findNode(0);
+    const NodeEntry* root = findNode(fx, 0);
     REQUIRE(root != nullptr);
     CHECK(root->parent_id == -1);
 }
@@ -79,7 +85,7 @@ TEST_CASE("Root group has parent_id=-1 (no parent)", "[node_tree_mirror]") {
 TEST_CASE("Default group (1) has parent_id=0", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    const NodeEntry* defGroup = findNode(1);
+    const NodeEntry* defGroup = findNode(fx, 1);
     REQUIRE(defGroup != nullptr);
     CHECK(defGroup->parent_id == 0);
 }
@@ -87,7 +93,7 @@ TEST_CASE("Default group (1) has parent_id=0", "[node_tree_mirror]") {
 TEST_CASE("Default group (1) has is_group=1", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    const NodeEntry* defGroup = findNode(1);
+    const NodeEntry* defGroup = findNode(fx, 1);
     REQUIRE(defGroup != nullptr);
     CHECK(defGroup->is_group == 1);
 }
@@ -95,7 +101,7 @@ TEST_CASE("Default group (1) has is_group=1", "[node_tree_mirror]") {
 TEST_CASE("node_count is >= 2 after boot (root + default group)", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t count = header->node_count.load(std::memory_order_acquire);
     CHECK(count >= 2);
 }
@@ -103,7 +109,7 @@ TEST_CASE("node_count is >= 2 after boot (root + default group)", "[node_tree_mi
 TEST_CASE("version is non-zero after boot (tree was modified)", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t ver = header->version.load(std::memory_order_acquire);
     CHECK(ver > 0);
 }
@@ -115,7 +121,7 @@ TEST_CASE("version is non-zero after boot (tree was modified)", "[node_tree_mirr
 TEST_CASE("Creating a new group increases node_count", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t before = header->node_count.load(std::memory_order_acquire);
 
     fx.send(osc_test::message("/g_new", 100, 0, 0));
@@ -137,7 +143,7 @@ TEST_CASE("Creating a synth adds it to the mirror with correct def_name", "[node
     fx.send(b.end());
     syncBarrier(fx, 101);
 
-    const NodeEntry* synth = findNode(1000);
+    const NodeEntry* synth = findNode(fx, 1000);
     REQUIRE(synth != nullptr);
     CHECK(std::string(synth->def_name) == "sonic-pi-beep");
 
@@ -154,7 +160,7 @@ TEST_CASE("Freeing a synth decreases node_count", "[node_tree_mirror]") {
     fx.send(b.end());
     syncBarrier(fx, 102);
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t before = header->node_count.load(std::memory_order_acquire);
 
     fx.send(osc_test::message("/n_free", 1000));
@@ -178,7 +184,7 @@ TEST_CASE("Creating nested groups: parent_id is correct", "[node_tree_mirror]") 
     fx.send(osc_test::message("/g_new", 200, 0, 100));
     syncBarrier(fx, 104);
 
-    const NodeEntry* g200 = findNode(200);
+    const NodeEntry* g200 = findNode(fx, 200);
     REQUIRE(g200 != nullptr);
     CHECK(g200->parent_id == 100);
 
@@ -200,7 +206,7 @@ TEST_CASE("Group's head_id points to first child after adding synth", "[node_tre
     fx.send(b.end());
     syncBarrier(fx, 105);
 
-    const NodeEntry* g100 = findNode(100);
+    const NodeEntry* g100 = findNode(fx, 100);
     REQUIRE(g100 != nullptr);
     CHECK(g100->head_id == 1000);
 
@@ -222,7 +228,7 @@ TEST_CASE("Synth's parent_id matches the group it was added to", "[node_tree_mir
     fx.send(b.end());
     syncBarrier(fx, 106);
 
-    const NodeEntry* synth = findNode(1000);
+    const NodeEntry* synth = findNode(fx, 1000);
     REQUIRE(synth != nullptr);
     CHECK(synth->parent_id == 100);
 
@@ -237,7 +243,7 @@ TEST_CASE("Synth's parent_id matches the group it was added to", "[node_tree_mir
 TEST_CASE("version increments when tree changes", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t versionBefore = header->version.load(std::memory_order_acquire);
 
     // Create a group — should bump version
@@ -257,7 +263,7 @@ TEST_CASE("version increments when tree changes", "[node_tree_mirror]") {
 TEST_CASE("dropped_count is 0 with few nodes", "[node_tree_mirror]") {
     EngineFixture fx;
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t dropped = header->dropped_count.load(std::memory_order_acquire);
     CHECK(dropped == 0);
 }
@@ -270,7 +276,7 @@ TEST_CASE("Freeing all synths returns to base count (2 groups)", "[node_tree_mir
     EngineFixture fx;
     REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
 
-    auto* header = getHeader();
+    auto* header = getHeader(fx);
     uint32_t baseCount = header->node_count.load(std::memory_order_acquire);
 
     // Create several synths
@@ -299,12 +305,12 @@ TEST_CASE("def_name is \"group\" for group entries", "[node_tree_mirror]") {
     EngineFixture fx;
 
     // Check root group
-    const NodeEntry* root = findNode(0);
+    const NodeEntry* root = findNode(fx, 0);
     REQUIRE(root != nullptr);
     CHECK(std::string(root->def_name) == "group");
 
     // Check default group
-    const NodeEntry* defGroup = findNode(1);
+    const NodeEntry* defGroup = findNode(fx, 1);
     REQUIRE(defGroup != nullptr);
     CHECK(std::string(defGroup->def_name) == "group");
 
@@ -312,7 +318,7 @@ TEST_CASE("def_name is \"group\" for group entries", "[node_tree_mirror]") {
     fx.send(osc_test::message("/g_new", 100, 0, 0));
     syncBarrier(fx, 110);
 
-    const NodeEntry* g100 = findNode(100);
+    const NodeEntry* g100 = findNode(fx, 100);
     REQUIRE(g100 != nullptr);
     CHECK(std::string(g100->def_name) == "group");
 

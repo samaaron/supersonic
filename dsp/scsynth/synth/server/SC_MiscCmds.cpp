@@ -35,24 +35,18 @@
 #include "SC_WorldOptions.h"
 #include <cstdlib>
 
-extern int gMissingNodeID;
-
 // =============================================================================
 // TAU MODIFICATION START - Direct SAB tree update for /n_order
 // When nodes are reordered within the same group, SuperCollider doesn't send
 // kNode_Move (no OSC notification). But we need to update the SAB tree.
 // This helper updates the SAB tree directly without triggering OSC messages.
 // =============================================================================
-#include "../../node_tree.h"
+#include "node_tree.h"
+#include "guest_doors.h"
 
 static void NodeTree_UpdateDirect(Node* node) {
     if (!node) return;
-
-    NodeTreeHeader* tree_header  = supersonic_node_tree_header();
-    NodeEntry*      tree_entries = supersonic_node_tree_entries();
-    if (!tree_header || !tree_entries) return;
-
-    NodeTree_Update(node, tree_header, tree_entries);
+    if (NodeTreeMirror* tree = supersonic_node_tree(node->mWorld)) NodeTree_Update(tree, node);
 }
 // =============================================================================
 // TAU MODIFICATION END
@@ -63,7 +57,7 @@ Node* Msg_GetNode(World* inWorld, sc_msg_iter& msg) {
     if (msg.nextTag('i') == 's') {
         const char* loc = msg.gets();
         int32 nodeID = msg.geti();
-        gMissingNodeID = nodeID;
+        inWorld->hw->mMissingNodeID = nodeID;
         node = World_GetNode(inWorld, nodeID);
         while (*loc) {
             if (!node)
@@ -94,7 +88,7 @@ Node* Msg_GetNode(World* inWorld, sc_msg_iter& msg) {
         }
     } else {
         int32 nodeID = msg.geti();
-        gMissingNodeID = nodeID;
+        inWorld->hw->mMissingNodeID = nodeID;
         node = World_GetNode(inWorld, nodeID);
     }
     return node;
@@ -202,7 +196,7 @@ SCErr meth_b_zero(World* inWorld, int inSize, const char* inData, ReplyAddress* 
 // /b_read clamped; refused when the channel counts differ, as /b_read
 // refused; the rate, if given, becomes the buffer's, as /b_read set it.
 SCErr meth_supersonic_buffer_read(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) {
-    static const char* kName = "/supersonic/buffer/read";
+    constexpr const char* kName = "/supersonic/buffer/read";
     sc_msg_iter msg(inSize, inData);
     const int bufnum      = msg.geti();
     const int bufOffset   = msg.geti();
@@ -227,10 +221,10 @@ SCErr meth_supersonic_buffer_read(World* inWorld, int inSize, const char* inData
         SendFailureWithIntValue(inReply, kName, str, bufnum);
         return kSCErr_None;
     }
-    const uint8_t* assets = supersonic_assets_base();
+    const uint8_t* assets = supersonic_assets_base(inWorld);
     const uint64_t bytes = (uint64_t)(numFrames > 0 ? numFrames : 0) * (uint64_t)numChannels * sizeof(float);
     if (!assets || assetsOffset < 0 || numFrames < 0
-        || (uint64_t)assetsOffset + bytes > (uint64_t)supersonic_assets_bytes()) {
+        || (uint64_t)assetsOffset + bytes > (uint64_t)supersonic_assets_bytes(inWorld)) {
         SendFailureWithIntValue(inReply, kName, "range is not inside the assets area", bufnum);
         return kSCErr_None;
     }
@@ -255,7 +249,7 @@ SCErr meth_supersonic_buffer_read(World* inWorld, int inSize, const char* inData
 // < 0: to the end), as /b_write clamped. The reply says what landed:
 // /supersonic/buffer/published bufnum channels frames rate.
 SCErr meth_supersonic_buffer_publish(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) {
-    static const char* kName = "/supersonic/buffer/publish";
+    constexpr const char* kName = "/supersonic/buffer/publish";
     sc_msg_iter msg(inSize, inData);
     const int bufnum       = msg.geti();
     const int bufOffset    = msg.geti();
@@ -275,9 +269,9 @@ SCErr meth_supersonic_buffer_publish(World* inWorld, int inSize, const char* inD
     int framesToEnd = buf->frames - start;
     if (framesToEnd < 0) framesToEnd = 0;
     const int n = numFrames < 0 || numFrames > framesToEnd ? framesToEnd : numFrames;
-    uint8_t* returns = supersonic_returns_base();
+    uint8_t* returns = supersonic_returns_base(inWorld);
     const uint64_t bytes = (uint64_t)n * (uint64_t)buf->channels * sizeof(float);
-    if (!returns || returnsOffset < 0 || (uint64_t)returnsOffset + bytes > (uint64_t)supersonic_returns_bytes()) {
+    if (!returns || returnsOffset < 0 || (uint64_t)returnsOffset + bytes > (uint64_t)supersonic_returns_bytes(inWorld)) {
         SendFailureWithIntValue(inReply, kName, "range is not inside the returns area", bufnum);
         return kSCErr_None;
     }
@@ -968,7 +962,7 @@ SCErr meth_s_do_new(World* inWorld, int inSize, const char* inData, bool argtype
 
     GraphDef* def = World_GetGraphDef(inWorld, defname);
     if (!def) {
-        scprintf("*** ERROR: SynthDef %s not found\n", (char*)defname);
+        scprintf(inWorld, "*** ERROR: SynthDef %s not found\n", (char*)defname);
         return kSCErr_SynthDefNotFound;
     }
 
@@ -1489,13 +1483,12 @@ SCErr meth_quit(World* inWorld, int inSize, const char* inData, ReplyAddress* in
 
 // SuperSonic: the world is not scsynth's real-time one (mRealTime is false:
 // clockwork drives it), and the bundles sent ahead are clockwork's to hold, so
-// clearing the schedule asks the host (scsynth_dsp.cpp, DspHost::flush_schedule).
-extern "C" void supersonic_flush_schedule(void);
+// SuperSonic (plural guest): clearing the schedule asks the host (guest_doors.h, DspHost::flush_schedule).
 SCErr meth_clearSched(World* inWorld, int inSize, const char* inData, ReplyAddress* inReply) {
     if (inWorld->mRealTime && inWorld->hw->mAudioDriver) {
         inWorld->hw->mAudioDriver->ClearSched();
     }
-    supersonic_flush_schedule();
+    supersonic_flush_schedule(inWorld);
     return kSCErr_None;
 }
 
@@ -2059,9 +2052,9 @@ SCErr meth_error(World* inWorld, int inSize, const char* inData, ReplyAddress* /
     return kSCErr_None;
 }
 
-#define NEW_COMMAND(name) NewCommand(#name, cmd_##name, meth_##name)
+#define NEW_COMMAND(name) NewCommand(inWorld, #name, cmd_##name, meth_##name)
 
-void initMiscCommands() {
+void initMiscCommands(World* inWorld) {
     // nrt
     NEW_COMMAND(none);
     NEW_COMMAND(notify);
@@ -2134,9 +2127,9 @@ void initMiscCommands() {
     NEW_COMMAND(b_gen);
 
     // The guest's own verbs, implemented beside the guest (piano_wavetable.cpp).
-    NewCommand("supersonic/piano/wavetable", cmd_supersonic_piano_wavetable, supersonic_meth_piano_wavetable);
-    NewCommand("supersonic/buffer/read", cmd_supersonic_buffer_read, meth_supersonic_buffer_read);
-    NewCommand("supersonic/buffer/publish", cmd_supersonic_buffer_publish, meth_supersonic_buffer_publish);
+    NewCommand(inWorld, "supersonic/piano/wavetable", cmd_supersonic_piano_wavetable, supersonic_meth_piano_wavetable);
+    NewCommand(inWorld, "supersonic/buffer/read", cmd_supersonic_buffer_read, meth_supersonic_buffer_read);
+    NewCommand(inWorld, "supersonic/buffer/publish", cmd_supersonic_buffer_publish, meth_supersonic_buffer_publish);
 
     NEW_COMMAND(c_set);
     NEW_COMMAND(c_setn);

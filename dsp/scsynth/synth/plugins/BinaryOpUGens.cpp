@@ -198,7 +198,7 @@ NOVA_SIMD_DEFINE_BINARY_WRAPPER(sc_sqrdif, sc_sqrdif_functor)
 
 #endif
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -7332,7 +7332,6 @@ bool ChooseOperatorFunc(BinaryOpUGen* unit) {
 
 extern "C"
 PluginLoad(BinaryOp) {
-    ft = inTable;
 
     DefineSimpleUnit(BinaryOpUGen);
 }

@@ -17,13 +17,17 @@ struct WorldOptions;
 struct SndBuf;
 struct ReplyAddress;
 struct OSC_Packet;
+struct SupersonicGuest;   /* the instance a World belongs to (guest_doors.h) */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* World lifecycle. */
-struct World* World_New(struct WorldOptions* options);
+/* World lifecycle. The World and everything it owns come from the instance's
+ * heap, and every door to the host finds the instance through the World. A
+ * World_New that returns null says why in `outReason`, cut to `reasonBytes`. */
+struct World* World_New(struct WorldOptions* options, struct SupersonicGuest* guest, char* outReason,
+                        size_t reasonBytes);
 void World_Cleanup(struct World* world, bool unload_plugins);
 void World_Run(struct World* world);
 
@@ -40,7 +44,8 @@ int World_CopySndBuf(struct World* world, uint32_t index, struct SndBuf* out,
                      bool onlyIfChanged, bool* didChange);
 
 /* Self-driven bring-up and the per-block cycle. */
-struct World* EngineCore_New(const struct WorldOptions* options, const char** outError);
+struct World* EngineCore_New(const struct WorldOptions* options, struct SupersonicGuest* guest, char* outError,
+                             size_t errorBytes);
 void EngineCore_BeginBlock(struct World* world);
 void EngineCore_RunBlock(struct World* world, unsigned int activeInputChannels);
 void EngineCore_FlushNotifications(struct World* world);

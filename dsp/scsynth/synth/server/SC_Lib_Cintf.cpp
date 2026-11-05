@@ -39,19 +39,11 @@
 // None of this applies to SuperSonic builds (both WASM and native use STATIC_PLUGINS).
 // See upstream: server/synth/SC_Lib_Cintf.cpp
 
-// From audio_processor.cpp
-extern "C" {
-}
+#include "SC_HiddenWorld.h"   // the World's registries (SuperSonic, plural guest)
+#include "SC_UnitDef.h"
+#include "SC_BufGen.h"
 
-Malloc gMalloc;
-HashTable<SC_LibCmd, Malloc>* gCmdLib;
-HashTable<struct UnitDef, Malloc>* gUnitDefLib = nullptr;
-HashTable<struct BufGen, Malloc>* gBufGenLib = nullptr;
-HashTable<struct PlugInCmd, Malloc>* gPlugInCmds = nullptr;
-extern struct InterfaceTable gInterfaceTable;
-SC_LibCmd* gCmdArray[NUMBER_OF_COMMANDS];
-
-void initMiscCommands();
+void initMiscCommands(World* inWorld);
 
 #ifdef STATIC_PLUGINS
 // Plugin loader function declarations - these are defined in the plugin files
@@ -99,53 +91,90 @@ extern void DiskIO_Unload();
 extern void UIUGens_Unload();
 #endif // STATIC_PLUGINS
 
-void deinitialize_library() {
+// SuperSonic (plural guest): every entry of a World's registry, given back to the World's heap, then the
+// table; a unit definition's own commands first.
+void deinitialize_library(World* inWorld) {
 #if defined(STATIC_PLUGINS) && !defined(NO_LIBSNDFILE)
     DiskIO_Unload();
     UIUGens_Unload();
 #endif // STATIC_PLUGINS
+    HiddenWorld* hw = inWorld->hw;
+    if (hw->mUnitDefLib) {
+        for (int32 i = 0; i < hw->mUnitDefLib->TableSize(); ++i) {
+            UnitDef* def = hw->mUnitDefLib->AtIndex(i);
+            if (!def) continue;
+            if (def->mCmds) {
+                for (int32 c = 0; c < def->mCmds->TableSize(); ++c) guest_delete(inWorld, def->mCmds->AtIndex(c));
+                guest_delete(inWorld, def->mCmds);
+            }
+            guest_delete(inWorld, def);
+        }
+        guest_delete(inWorld, hw->mUnitDefLib);
+        hw->mUnitDefLib = nullptr;
+    }
+    if (hw->mBufGenLib) {
+        for (int32 i = 0; i < hw->mBufGenLib->TableSize(); ++i) guest_delete(inWorld, hw->mBufGenLib->AtIndex(i));
+        guest_delete(inWorld, hw->mBufGenLib);
+        hw->mBufGenLib = nullptr;
+    }
+    if (hw->mPlugInCmds) {
+        for (int32 i = 0; i < hw->mPlugInCmds->TableSize(); ++i) guest_delete(inWorld, hw->mPlugInCmds->AtIndex(i));
+        guest_delete(inWorld, hw->mPlugInCmds);
+        hw->mPlugInCmds = nullptr;
+    }
+    if (hw->mCmdLib) {
+        for (int32 i = 0; i < hw->mCmdLib->TableSize(); ++i) guest_delete(inWorld, hw->mCmdLib->AtIndex(i));
+        guest_delete(inWorld, hw->mCmdLib);
+        hw->mCmdLib = nullptr;
+    }
+    for (SC_LibCmd*& cmd : hw->mCmdArray) cmd = nullptr;
 }
 
-void initialize_library(const char* uGensPluginPath) {
-    gCmdLib = new HashTable<SC_LibCmd, Malloc>(&gMalloc, 64, true);
-    gUnitDefLib = new HashTable<UnitDef, Malloc>(&gMalloc, 512, true);
-    gBufGenLib = new HashTable<BufGen, Malloc>(&gMalloc, 512, true);
-    gPlugInCmds = new HashTable<PlugInCmd, Malloc>(&gMalloc, 64, true);
+// SuperSonic (plural guest): the World's registries, from its heap, filled by the plugins' loads through
+// the World's own copy of the interface table (which names the World).
+void initialize_library(World* inWorld) {
+    HiddenWorld* hw = inWorld->hw;
+    GuestMalloc* heap = &hw->mGuestMalloc;
+    hw->mCmdLib = guest_new<HashTable<SC_LibCmd, GuestMalloc>>(inWorld, heap, 64, true);
+    hw->mUnitDefLib = guest_new<HashTable<UnitDef, GuestMalloc>>(inWorld, heap, 512, true);
+    hw->mBufGenLib = guest_new<HashTable<BufGen, GuestMalloc>>(inWorld, heap, 512, true);
+    hw->mPlugInCmds = guest_new<HashTable<PlugInCmd, GuestMalloc>>(inWorld, heap, 64, true);
 
-    initMiscCommands();
+    initMiscCommands(inWorld);
 
 #ifdef STATIC_PLUGINS
-    IO_Load(&gInterfaceTable);
-    Osc_Load(&gInterfaceTable);
-    Delay_Load(&gInterfaceTable);
-    BinaryOp_Load(&gInterfaceTable);
-    Filter_Load(&gInterfaceTable);
-    Gendyn_Load(&gInterfaceTable);
-    LF_Load(&gInterfaceTable);
-    Noise_Load(&gInterfaceTable);
-    MulAdd_Load(&gInterfaceTable);
-    Grain_Load(&gInterfaceTable);
-    Pan_Load(&gInterfaceTable);
-    Reverb_Load(&gInterfaceTable);
-    Trigger_Load(&gInterfaceTable);
-    UnaryOp_Load(&gInterfaceTable);
+    InterfaceTable* table = &hw->mInterfaceTable;
+    IO_Load(table);
+    Osc_Load(table);
+    Delay_Load(table);
+    BinaryOp_Load(table);
+    Filter_Load(table);
+    Gendyn_Load(table);
+    LF_Load(table);
+    Noise_Load(table);
+    MulAdd_Load(table);
+    Grain_Load(table);
+    Pan_Load(table);
+    Reverb_Load(table);
+    Trigger_Load(table);
+    UnaryOp_Load(table);
 #    ifndef NO_LIBSNDFILE
-    DiskIO_Load(&gInterfaceTable);
+    DiskIO_Load(table);
 #    endif
-    PhysicalModeling_Load(&gInterfaceTable);
-    Test_Load(&gInterfaceTable);
-    Demand_Load(&gInterfaceTable);
-    DynNoise_Load(&gInterfaceTable);
+    PhysicalModeling_Load(table);
+    Test_Load(table);
+    Demand_Load(table);
+    DynNoise_Load(table);
 #    if defined(SC_IPHONE) && !TARGET_IPHONE_SIMULATOR
-    // iPhone_Load(&gInterfaceTable);  // Not needed for WASM
+    // iPhone_Load(table);  // Not needed for WASM
 #    endif
-    FFT_UGens_Load(&gInterfaceTable);
+    FFT_UGens_Load(table);
     // sc3-plugins
-    Distortion_Load(&gInterfaceTable);
-    Mda_Load(&gInterfaceTable);
+    Distortion_Load(table);
+    Mda_Load(table);
     // demo plugins (for testing plugin/unit commands)
-    DemoUGens_Load(&gInterfaceTable);
-    LinkUGen_Load(&gInterfaceTable);
-    SPLimiterUGen_Load(&gInterfaceTable);
+    DemoUGens_Load(table);
+    LinkUGen_Load(table);
+    SPLimiterUGen_Load(table);
 #endif // STATIC_PLUGINS
 }

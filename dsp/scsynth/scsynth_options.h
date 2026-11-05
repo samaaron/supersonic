@@ -108,25 +108,23 @@ const ScsynthOptionInfo* scsynth_option_info(uint32_t index);
  * the host may raise. Only a host that reads the options can do the first
  * sum, and clockwork never does, so both are written once, here.
  *
- *   memory = SCSYNTH_TABLES_BYTES + realTimeMemorySize * 1024 + SCSYNTH_POOL_OVERHEAD_BYTES
+ *   memory = realTimeMemorySize * 1024 + SCSYNTH_POOL_OVERHEAD_BYTES
  *   bulk   = SCSYNTH_HEAP_HEADROOM_BYTES
  *
- * The tables are scsynth's lookup tables — the sine tables, the polar LUTs,
- * the FFT windows and cosine tables (scsynth_tables.cpp) — built at the
- * start of the working memory on every World_New, so the guest's fixed state
- * is its fast memory and nothing of it is a global or a malloc. The web
- * client sizes the engine's memory, which both spans come out of, as their
- * sum plus what the engine takes beside them (js/supersonic.js, through the
- * generated schema and clockwork's memory_layout.js). Plain literals, so
- * scripts/gen-scsynth-options.mjs can read them.
+ * The lookup tables — the sine tables, the polar LUTs, the FFT windows and
+ * cosine tables — are constants in the program (scsynth_tables.h), so no
+ * memory is asked for them. The web client sizes the engine's memory, which
+ * both spans come out of, as their sum plus what the engine takes beside
+ * them (js/supersonic.js, through the generated schema and clockwork's
+ * memory_layout.js). Plain literals, so scripts/gen-scsynth-options.mjs can
+ * read them.
  */
 #define SCSYNTH_HEAP_HEADROOM_BYTES 16777216u   /* 16 MB: the bulk span's floor */
 #define SCSYNTH_POOL_OVERHEAD_BYTES 4096u       /* the pool's area header and alignment (kAreaOverhead), rounded up */
-#define SCSYNTH_TABLES_BYTES        819200u     /* the lookup tables, 800 KB: scsynth_tables.cpp checks the layout fits */
 
-/* The working memory these options ask for: the tables, then the pool. */
+/* The working memory these options ask for: the pool. */
 static inline uint64_t scsynth_memory_bytes(uint32_t real_time_memory_kb) {
-    return SCSYNTH_TABLES_BYTES + (uint64_t)real_time_memory_kb * 1024u + SCSYNTH_POOL_OVERHEAD_BYTES;
+    return (uint64_t)real_time_memory_kb * 1024u + SCSYNTH_POOL_OVERHEAD_BYTES;
 }
 
 /* Both spans together: what the guest asks of the engine's memory, before

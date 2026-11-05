@@ -28,18 +28,18 @@
 #include <string.h>
 #include "SC_Prototypes.h"
 #include "SC_Str4.h"
+#include "SC_HiddenWorld.h"   // the World's registries and heap
 
-extern InterfaceTable gInterfaceTable;
-
-bool BufGen_Create(const char* inName, BufGenFunc inFunc) {
-    BufGen* bufGen = (BufGen*)malloc(sizeof(BufGen));
+bool BufGen_Create(InterfaceTable* inTable, const char* inName, BufGenFunc inFunc) {
+    World* world = inTable->mWorld;
+    BufGen* bufGen = guest_new<BufGen>(world);
     str4cpy(bufGen->mBufGenName, inName);
     bufGen->mHash = Hash(bufGen->mBufGenName);
 
     bufGen->mBufGenFunc = inFunc;
 
-    if (!AddBufGen(bufGen)) {
-        free(bufGen);
+    if (!AddBufGen(world, bufGen)) {
+        guest_delete(world, bufGen);
         return false;
     }
     return true;

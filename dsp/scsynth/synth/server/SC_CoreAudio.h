@@ -126,7 +126,7 @@ typedef MsgFifo<FifoMsg, 65536> EngineFifo;
 
 // Functions to be implemented by the driver backend
 extern "C" {
-int32 server_timeseed();
+int32 server_timeseed(struct World* inWorld);
 int64 oscTimeNow();
 };
 

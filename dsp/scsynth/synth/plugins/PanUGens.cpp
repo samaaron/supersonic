@@ -32,7 +32,7 @@ using nova::slope_argument;
 #endif
 
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct LinPan2 : public Unit {
     float m_pos, m_level, m_leftamp, m_rightamp;
@@ -396,7 +396,7 @@ void Balance2_next_aa(Balance2* unit, int inNumSamples) {
     float nextlevel = ZIN0(3);
     float level = unit->m_level;
 
-    float* sineTable = ft->mSine;
+    const float* sineTable = ft->mSine;
     if (level != nextlevel) {
         float levelSlope = (nextlevel - level) * unit->mRate->mSlopeFactor;
         LOOP1(inNumSamples, int32 ipos = sc_float_to_int32(1024.f * ZXP(pos) + 1024.f + 0.5f); ipos = sc_clip(ipos, 0, 2048);
@@ -540,7 +540,7 @@ void XFade2_next_aa(XFade2* unit, int inNumSamples) {
     float nextlevel = ZIN0(3);
     float level = unit->m_level;
 
-    float* sineTable = ft->mSine;
+    const float* sineTable = ft->mSine;
     if (level != nextlevel) {
         float levelSlope = (nextlevel - level) * unit->mRate->mSlopeFactor;
         LOOP1(inNumSamples, int32 ipos = sc_float_to_int32(1024.f * ZXP(pos) + 1024.f + 0.5f); ipos = sc_clip(ipos, 0, 2048);
@@ -1568,7 +1568,6 @@ void DecodeB2_next_nova(DecodeB2* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(Pan) {
-    ft = inTable;
 
     DefineSimpleUnit(Pan2);
     DefineSimpleUnit(Pan4);

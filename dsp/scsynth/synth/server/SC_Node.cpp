@@ -38,7 +38,7 @@
 // allowing JavaScript to poll the synth/group hierarchy without OSC latency.
 // When merging upstream changes, preserve this block.
 // =============================================================================
-#include "../../node_tree.h"
+#include "node_tree.h"
 // =============================================================================
 // TAU MODIFICATION END
 // =============================================================================
@@ -52,20 +52,20 @@ int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
             HiddenWorld* hw = inWorld->hw;
             inID = hw->mHiddenID = (hw->mHiddenID - 8) | 0x80000000;
         } else {
-            scprintf("[Node_New] ERROR: Reserved node ID: %d", inID);
+            scprintf(inWorld, "[Node_New] ERROR: Reserved node ID: %d", inID);
             return kSCErr_ReservedNodeID;
         }
     }
 
     if (World_GetNode(inWorld, inID)) {
-        scprintf("[Node_New] ERROR: Duplicate node ID: %d", inID);
+        scprintf(inWorld, "[Node_New] ERROR: Duplicate node ID: %d", inID);
         return kSCErr_DuplicateNodeID;
     }
 
     Node* node = (Node*)World_Alloc(inWorld, def->mAllocSize);
 
     if (!node) {
-        scprintf("[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
+        scprintf(inWorld, "[Node_New] FATAL: World_Alloc returned NULL - OUT OF MEMORY!");
         return kSCErr_OutOfRealTimeMemory;
     }
     node->mWorld = inWorld;
@@ -78,7 +78,7 @@ int Node_New(World* inWorld, NodeDef* def, int32 inID, Node** outNode) {
     node->mID = inID;
     node->mHash = Hash(inID);
     if (!World_AddNode(inWorld, node)) {
-        scprintf("[Node_New] ERROR: World_AddNode failed - too many nodes");
+        scprintf(inWorld, "[Node_New] ERROR: World_AddNode failed - too many nodes");
         World_Free(inWorld, node);
         return kSCErr_TooManyNodes;
     }
@@ -141,7 +141,7 @@ void Node_RemoveID(Node* inNode) {
     inNode->mID = id;
     inNode->mHash = Hash(id);
     if (!World_AddNode(world, inNode)) {
-        scprintf("mysterious failure in Node_RemoveID\n");
+        scprintf(inNode->mWorld, "mysterious failure in Node_RemoveID\n");
         Node_Delete(inNode);
         // enums are uncatchable. must throw an int.
         int err = kSCErr_Failed; // shouldn't happen..
@@ -194,7 +194,7 @@ void Node_AddBefore(Node* s, Node* beforeThisOne) {
 }
 
 void Node_Replace(Node* s, Node* replaceThisOne) {
-    // scprintf("->Node_Replace\n");
+    // scprintf(s->mWorld, "->Node_Replace\n");
     Group* group = replaceThisOne->mParent;
     if (!group)
         return; // failed
@@ -219,7 +219,7 @@ void Node_Replace(Node* s, Node* replaceThisOne) {
     replaceThisOne->mParent = nullptr;
 
     Node_Delete(replaceThisOne);
-    // scprintf("<-Node_Replace\n");
+    // scprintf(s->mWorld, "<-Node_Replace\n");
 }
 
 // set a node's control so that it reads from a control bus - index argument
@@ -370,9 +370,8 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
         // message that was never sent (Sonic Pi's Studio blocks its whole
         // cold-swap reinit on one). Rate limited — a SendReply UGen fires
         // every control block, so an unguarded log would flood the ring.
-        static std::atomic<uint32_t> allocFailCount{0};
-        if (allocFailCount.fetch_add(1, std::memory_order_relaxed) < 5)
-            scprintf("[Node_SendReply] ERROR: World_Alloc(%zu) failed — dropped %s"
+        if (world->hw->mSendReplyAllocFails++ < 5)
+            scprintf(inNode->mWorld, "[Node_SendReply] ERROR: World_Alloc(%zu) failed — dropped %s"
                    " for node %d (RT pool exhausted)",
                    replySize, cmdName, inNode->mID);
         return;
@@ -396,9 +395,8 @@ void Node_SendReply(Node* inNode, int replyID, const char* cmdName, int numArgs,
         // holding the reply's memory hostage to a queue that already rejected
         // it exhausts the RT pool, and then World_Alloc above starts failing
         // for every reply the World will ever send.
-        static std::atomic<uint32_t> fifoFullCount{0};
-        if (fifoFullCount.fetch_add(1, std::memory_order_relaxed) < 5)
-            scprintf("[Node_SendReply] ERROR: mNodeMsgs FIFO full — dropped %s"
+        if (world->hw->mSendReplyFifoFulls++ < 5)
+            scprintf(inNode->mWorld, "[Node_SendReply] ERROR: mNodeMsgs FIFO full — dropped %s"
                    " for node %d", cmdName, inNode->mID);
         World_Free(world, mem);
     }
@@ -423,19 +421,17 @@ void Node_StateMsg(Node* inNode, int inState) {
     // - But we want ALL nodes in the SAB tree for real-time visualization
     // - The SAB tree is polled locally, so there's no network overhead concern
     // =========================================================================
-    // The window clockwork handed the guest, if it handed one (node_tree.h).
-    NodeTreeHeader* tree_header  = supersonic_node_tree_header();
-    NodeEntry*      tree_entries = supersonic_node_tree_entries();
-    if (tree_header && tree_entries) {
+    // SuperSonic (plural guest): this World's mirror, if its host handed it a window (node_tree.h).
+    if (NodeTreeMirror* tree = supersonic_node_tree(inNode->mWorld)) {
         switch (inState) {
             case kNode_Go:
-                NodeTree_Add(inNode, tree_header, tree_entries);
+                NodeTree_Add(tree, inNode);
                 break;
             case kNode_End:
-                NodeTree_Remove(inNode->mID, tree_header, tree_entries);
+                NodeTree_Remove(tree, inNode->mID);
                 break;
             case kNode_Move:
-                NodeTree_Update(inNode, tree_header, tree_entries);
+                NodeTree_Update(tree, inNode);
                 break;
             // kNode_On, kNode_Off, kNode_Info don't affect tree structure
         }

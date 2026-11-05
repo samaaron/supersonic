@@ -136,6 +136,7 @@ endif()
 add_executable(SuperSonic
     host/SuperSonicMain.cpp
     host/EngineHost.cpp
+    host/scsynth_synthdef_dirs.cpp
     front/supersonic_commands.cpp
     front/Recorder.cpp)
 add_dependencies(SuperSonic scsynth)

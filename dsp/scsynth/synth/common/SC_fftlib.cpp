@@ -37,6 +37,7 @@ For speed we keep this global, although this makes the code non-thread-safe.
 #include "malloc_aligned.hpp"
 
 #ifdef CLOCKWORK_GUEST
+#    include "scsynth_tables.h"   // the windows and cosine tables, as constants
 #endif
 
 #ifdef NOVA_SIMD
@@ -98,6 +99,7 @@ typedef struct scfft {
 } scfft;
 
 
+#ifndef CLOCKWORK_GUEST
 static float* fftWindow[2][SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1];
 
 #if SC_FFT_VDSP
@@ -108,6 +110,7 @@ static COMPLEX_SPLIT splitBuf; // Temp buf for holding rearranged data
 #if SC_FFT_GREEN
 static float* cosTable[SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1];
 #endif
+#endif // !CLOCKWORK_GUEST
 
 #if SC_FFT_FFTW
 static fftwf_plan precompiledForwardPlans[SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1];
@@ -120,34 +123,29 @@ static fftwf_plan precompiledBackwardPlansInPlace[SC_FFT_LOG2_ABSOLUTE_MAXSIZE_P
 #define twopi 6.28318530717952646f
 
 #ifdef CLOCKWORK_GUEST
-// The windows and cosine tables for every size up to SC_FFT_MAXSIZE live in the
-// guest's working memory, placed by scfft_tables_place (scsynth_tables.cpp)
-// on every World_New and filled then. Upstream mallocs each one at load,
-// which put ~576 KB of tables in malloc with nothing to say what they were.
-// A size past SC_FFT_MAXSIZE (up to the absolute maximum) is still built on
-// demand with malloc, as upstream does. The layout is SC_fftlib.h's
-// (scfft_tables_floats, scfft_window_offset, scfft_cos_offset).
-namespace {
-constexpr int kLastLog2 = SC_FFT_LOG2_MAXSIZE;
-float* gFftWindowStore = nullptr;   // the sine (Welch) and Hann windows, every size end to end, one run per type
-float* gFftCosStore = nullptr;      // the cosine quarter-tables, every size end to end
-bool gFftTablesBuilt = false;       // for this placement
-} // namespace
+// SuperSonic (plural guest): the windows and cosine tables for every size up
+// to SC_FFT_MAXSIZE are constants (scsynth_tables.h), where upstream mallocs
+// each one at load, and the Green FFT is the one backend on every target, so
+// nothing here is built, kept or shared between instances. A size past
+// SC_FFT_MAXSIZE has no table: scfft_create refuses it.
+static const float* scfft_window(int wintype, int log2n) {
+    return (wintype == kSineWindow ? gFftSineWindows : gFftHannWindows) + scfft_window_offset(log2n);
+}
+static float* scfft_costable(int log2n) {
+    return const_cast<float*>(gFftCosTables + scfft_cos_offset(log2n));   // rffts reads it; its C signature is not const
+}
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Functions
 
+#ifndef CLOCKWORK_GUEST
 #if SC_FFT_GREEN
 static float* create_cosTable(int log2n);
 static float* create_cosTable(int log2n) {
     int size = 1 << log2n;
     int size2 = size / 4 + 1;
-#ifdef CLOCKWORK_GUEST
-    float* win = (gFftCosStore && log2n <= kLastLog2) ? gFftCosStore + scfft_cos_offset(log2n) : (float*)nova::malloc_aligned(size2 * sizeof(float));
-#else
     float* win = (float*)nova::malloc_aligned(size2 * sizeof(float));
-#endif
     if (win == NULL)
         return NULL;
 
@@ -163,11 +161,7 @@ static float* create_cosTable(int log2n) {
 static inline float* scfft_create_fftwindow(int wintype, int log2n) {
     int size = 1 << log2n;
 
-#ifdef CLOCKWORK_GUEST
-    float* win = (gFftWindowStore && log2n <= kLastLog2) ? gFftWindowStore + wintype * scfft_window_floats() + scfft_window_offset(log2n) : (float*)nova::malloc_aligned(size * sizeof(float));
-#else
     float* win = (float*)nova::malloc_aligned(size * sizeof(float));
-#endif
 
     if (!win)
         return NULL;
@@ -196,12 +190,6 @@ static inline float* scfft_create_fftwindow(int wintype, int log2n) {
 static void scfft_ensurewindow(unsigned short log2_fullsize, unsigned short log2_winsize, short wintype);
 
 static bool scfft_global_initialization() {
-#ifdef CLOCKWORK_GUEST
-    // Nothing until the store is placed (the static constructor runs before any is); once per placement after.
-    if (!gFftWindowStore || gFftTablesBuilt) return false;
-    gFftTablesBuilt = true;
-#endif
-
     for (int wintype = 0; wintype < 2; ++wintype) {
         for (int i = 0; i < SC_FFT_LOG2_ABSOLUTE_MAXSIZE_PLUS1; ++i) {
             fftWindow[wintype][i] = 0;
@@ -257,21 +245,7 @@ static bool scfft_global_initialization() {
 }
 
 static bool dummy = scfft_global_initialization();
-
-#ifdef CLOCKWORK_GUEST
-// Explicit entry point for builds where static constructors may not run.
-extern "C" void InitializeFFTTables() {
-    scfft_global_initialization();
-}
-
-size_t scfft_tables_place(float* base) {
-    gFftWindowStore = base;
-    gFftCosStore = base + 2 * scfft_window_floats();
-    gFftTablesBuilt = false;
-    scfft_global_initialization();
-    return scfft_tables_floats();
-}
-#endif // CLOCKWORK_GUEST
+#endif // !CLOCKWORK_GUEST
 
 // You need to provide an intermediate "transform buffer". Size will depend on which underlying lib is being used.
 // "fullsize" is the number of samples in the input buffer (inc any padding), aka the number of "points" in the FFT.
@@ -289,8 +263,12 @@ static size_t scfft_trbufsize(unsigned int fullsize) {
 #endif
 }
 
+#ifdef CLOCKWORK_GUEST
+constexpr int largest_fftsize = SC_FFT_MAXSIZE;   // the tables' reach, which does not grow
+#else
 static int largest_log2n = SC_FFT_LOG2_MAXSIZE;
 static int largest_fftsize = 1 << largest_log2n;
+#endif
 
 scfft* scfft_create(size_t fullsize, size_t winsize, int32 wintype, float* indata, float* outdata,
                     int32 direction, SCFFT_Allocator* alloc) {
@@ -322,7 +300,13 @@ scfft* scfft_create(size_t fullsize, size_t winsize, int32 wintype, float* indat
 
     // Buffer is larger than the range of sizes we provide for at startup; we can get ready just-in-time though
     if (fullsize > largest_fftsize) {
+#ifdef CLOCKWORK_GUEST
+        // SuperSonic (plural guest): no table for it, and none is built on the audio thread: refused.
+        alloc->mFree(alloc->mUser, chunk);
+        return NULL;
+#else
         scfft_ensurewindow(f->log2nfull, f->log2nwin, wintype);
+#endif
     }
 
     // The scale factors rescale the data to unity gain. The old Green lib did this itself, meaning scalefacs would here
@@ -347,6 +331,7 @@ scfft* scfft_create(size_t fullsize, size_t winsize, int32 wintype, float* indat
 }
 
 
+#ifndef CLOCKWORK_GUEST
 // check the global list of windows incs ours; create if not.
 // Note that expanding the table, if triggered, will cause a CPU hit as things are malloc'ed, realloc'ed, etc.
 void scfft_ensurewindow(unsigned short log2_fullsize, unsigned short log2_winsize, short wintype) {
@@ -397,16 +382,21 @@ void scfft_ensurewindow(unsigned short log2_fullsize, unsigned short log2_winsiz
         cosTable[log2_fullsize] = create_cosTable(log2_fullsize);
 #endif
 }
+#endif // !CLOCKWORK_GUEST
 
 // these do the main jobs.
 static void scfft_dowindowing(float* data, unsigned int winsize, unsigned int fullsize, unsigned short log2_winsize,
                               short wintype, float scalefac) {
     if (wintype != kRectWindow) {
+#ifdef CLOCKWORK_GUEST
+        const float* win = scfft_window(wintype, log2_winsize);
+#else
         float* win = fftWindow[wintype][log2_winsize];
         if (!win) {
             // return;
             win = fftWindow[wintype][log2_winsize] = scfft_create_fftwindow(wintype, log2_winsize);
         }
+#endif
 #if SC_FFT_VDSP
         vDSP_vmul(data, 1, win, 1, data, 1, winsize);
 #elif defined(NOVA_SIMD)
@@ -418,7 +408,7 @@ static void scfft_dowindowing(float* data, unsigned int winsize, unsigned int fu
 #else
         --win;
         float* in = data - 1;
-        for (int i = 0; i < winsize; ++i) {
+        for (unsigned int i = 0; i < winsize; ++i) {
             *++in *= *++win;
         }
 #endif
@@ -459,7 +449,11 @@ void scfft_dofft(scfft* f) {
     vDSP_ztoc(&splitBuf, 1, (DSPComplex*)f->outdata, 2, f->nfull >> 1);
 #elif SC_FFT_GREEN
     // Green FFT is in-place
+#ifdef CLOCKWORK_GUEST
+    rffts(f->trbuf, f->log2nfull, 1, scfft_costable(f->log2nfull));
+#else
     rffts(f->trbuf, f->log2nfull, 1, cosTable[f->log2nfull]);
+#endif
     // Copy to public buffer
     memcpy(f->outdata, f->trbuf, f->nfull * sizeof(float));
 #endif
@@ -485,7 +479,11 @@ void scfft_doifft(scfft* f) {
     size_t bytesize = f->nfull * sizeof(float);
     memcpy(trbuf, f->indata, bytesize);
     // Green FFT is in-place
+#ifdef CLOCKWORK_GUEST
+    riffts(trbuf, f->log2nfull, 1, scfft_costable(f->log2nfull));
+#else
     riffts(trbuf, f->log2nfull, 1, cosTable[f->log2nfull]);
+#endif
     // Copy to public buffer
     memcpy(f->outdata, trbuf, f->nwin * sizeof(float));
 #endif

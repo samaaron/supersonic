@@ -25,6 +25,3 @@ export const scsynthHeapHeadroomBytes = 16777216;
 // What the pool's own bookkeeping adds to the working memory scsynth asks for
 // (dsp_memory_bytes, by scsynth_memory_bytes) — SCSYNTH_POOL_OVERHEAD_BYTES.
 export const scsynthPoolOverheadBytes = 4096;
-// The lookup tables at the start of the working memory, before the pool
-// (scsynth_tables.cpp) — SCSYNTH_TABLES_BYTES.
-export const scsynthTablesBytes = 819200;

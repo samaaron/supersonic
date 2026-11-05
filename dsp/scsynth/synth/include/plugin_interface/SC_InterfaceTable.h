@@ -54,32 +54,41 @@ struct ScopeBufferHnd {
 
 struct InterfaceTable {
     uint32 mSineSize;
-    float32* mSineWavetable;
-    float32* mSine;
-    float32* mCosecant;
+    // SuperSonic (plural guest): constants (scsynth_tables.h), read only.
+    const float32* mSineWavetable;
+    const float32* mSine;
+    const float32* mCosecant;
 
     // call printf for debugging. should not use in finished code.
-    int32 (*fPrint)(const char* fmt, ...);
+    // SuperSonic (plural guest): names the World the line is about.
+    int32 (*fPrint)(World* inWorld, const char* fmt, ...);
 
-    // get a seed for a random number generator
-    int32 (*fRanSeed)();
+    // SuperSonic (plural guest): get a seed for a random number generator, from the World's own sequence
+    int32 (*fRanSeed)(World* inWorld);
 
+    // SuperSonic (plural guest): each definition goes into the registries of
+    // the World whose table `inTable` is (mWorld, below), where upstream's
+    // are one set per process. A plugin's load is given that table and
+    // registers through it (the Define* macros below).
     // define a unit def
-    SCBool (*fDefineUnit)(const char* inUnitClassName, size_t inAllocSize, UnitCtorFunc inCtor, UnitDtorFunc inDtor,
-                          uint32 inFlags);
+    SCBool (*fDefineUnit)(struct InterfaceTable* inTable, const char* inUnitClassName, size_t inAllocSize,
+                          UnitCtorFunc inCtor, UnitDtorFunc inDtor, uint32 inFlags);
 
     // define a command  /cmd
-    SCBool (*fDefinePlugInCmd)(const char* inCmdName, PlugInCmdFunc inFunc, void* inUserData);
+    SCBool (*fDefinePlugInCmd)(struct InterfaceTable* inTable, const char* inCmdName, PlugInCmdFunc inFunc,
+                               void* inUserData);
 
     // define a command for a unit generator  /u_cmd
-    SCBool (*fDefineUnitCmd)(const char* inUnitClassName, const char* inCmdName, UnitCmdFunc inFunc);
+    SCBool (*fDefineUnitCmd)(struct InterfaceTable* inTable, const char* inUnitClassName, const char* inCmdName,
+                             UnitCmdFunc inFunc);
 
     // define a command for a unit generator  /u_cmd.
     // this is an extended version of fDefineUnitCmd that takes a UnitCmdFuncEx instead of UnitCmdFunc.
-    SCBool (*fDefineUnitCmdEx)(const char* inUnitClassName, const char* inCmdName, UnitCmdFuncEx inFunc);
+    SCBool (*fDefineUnitCmdEx)(struct InterfaceTable* inTable, const char* inUnitClassName, const char* inCmdName,
+                               UnitCmdFuncEx inFunc);
 
     // define a buf gen
-    SCBool (*fDefineBufGen)(const char* inName, BufGenFunc inFunc);
+    SCBool (*fDefineBufGen)(struct InterfaceTable* inTable, const char* inName, BufGenFunc inFunc);
 
     // clear all of the unit's outputs.
     void (*fClearUnitOutputs)(Unit* inUnit, int32 inNumSamples);
@@ -144,8 +153,9 @@ struct InterfaceTable {
         AsyncUnitStageFn stage4, // stage4 is non real time - sends done if stage4 returns true
         AsyncFreeFn cleanup, int32 completionMsgSize, const void* completionMsgData);
 
-    // fBufAlloc should only be called within a BufGenFunc
-    SCErr (*fBufAlloc)(SndBuf* inBuf, int32 inChannels, int32 inFrames, double inSampleRate);
+    // SuperSonic (plural guest): fBufAlloc should only be called within a BufGenFunc. The samples come
+    // from the heap of the World's instance.
+    SCErr (*fBufAlloc)(World* inWorld, SndBuf* inBuf, int32 inChannels, int32 inFrames, double inSampleRate);
 
     // To initialise a specific FFT, ensure your input and output buffers exist. Internal data structures
     // will be allocated using the alloc object,
@@ -171,19 +181,34 @@ struct InterfaceTable {
     SCBool (*fGetScopeBuffer)(World* inWorld, int32 index, int32 channels, int32 maxFrames, struct ScopeBufferHnd*);
     void (*fPushScopeBuffer)(World* inWorld, struct ScopeBufferHnd*, int frames);
     void (*fReleaseScopeBuffer)(World* inWorld, struct ScopeBufferHnd*);
+
+    // SuperSonic (plural guest): the World this table is a copy for, whose
+    // registries the Define* calls fill; null in the one constant table
+    // (gInterfaceTable) every plugin reads its functions from.
+    World* mWorld;
 };
 
 typedef struct InterfaceTable InterfaceTable;
 
-#define Print (*ft->fPrint)
+#ifdef CLOCKWORK_GUEST
+// SuperSonic (plural guest): the one constant table. Each World has a copy
+// naming itself (HiddenWorld::mInterfaceTable); a plugin's `ft` points here.
+extern const InterfaceTable gInterfaceTable;
+#endif
+
+// SuperSonic (plural guest): a unit's print is about its World; where there is
+// no `unit` in scope, call fPrint with the World by hand.
+#define Print(...) (*ft->fPrint)(unit->mWorld, __VA_ARGS__)
 #define RanSeed (*ft->fRanSeed)
 #define NodeEnd (*ft->fNodeEnd)
 #define NodeRun (*ft->fNodeRun)
-#define DefineUnit (*ft->fDefineUnit)
-#define DefinePlugInCmd (*ft->fDefinePlugInCmd)
-#define DefineUnitCmd (*ft->fDefineUnitCmd)
-#define DefineUnitCmdEx (*ft->fDefineUnitCmdEx)
-#define DefineBufGen (*ft->fDefineBufGen)
+// SuperSonic (plural guest): a definition registers through the table a
+// plugin's load was given (`inTable`, PluginLoad's argument), the World's own.
+#define DefineUnit(...) (*inTable->fDefineUnit)(inTable, __VA_ARGS__)
+#define DefinePlugInCmd(...) (*inTable->fDefinePlugInCmd)(inTable, __VA_ARGS__)
+#define DefineUnitCmd(...) (*inTable->fDefineUnitCmd)(inTable, __VA_ARGS__)
+#define DefineUnitCmdEx(...) (*inTable->fDefineUnitCmdEx)(inTable, __VA_ARGS__)
+#define DefineBufGen(...) (*inTable->fDefineBufGen)(inTable, __VA_ARGS__)
 #define ClearUnitOutputs (*ft->fClearUnitOutputs)
 #define SendTrigger (*ft->fSendTrigger)
 #define SendNodeReply (*ft->fSendNodeReply)
@@ -223,20 +248,21 @@ typedef struct InterfaceTable InterfaceTable;
 #define DoAsyncUnitCommand (*ft->fDoAsyncUnitCommand)
 
 #ifdef CLOCKWORK_GUEST
-#    define DefineSimpleUnit(name) (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0)
+#    define DefineSimpleUnit(name) (*inTable->fDefineUnit)(inTable, #name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0)
 #else
-#    define DefineSimpleUnit(name) (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0);
+#    define DefineSimpleUnit(name) (*inTable->fDefineUnit)(inTable, #name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, 0);
 #endif
 
 #define DefineDtorUnit(name)                                                                                           \
-    (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, (UnitDtorFunc)&name##_Dtor, 0);
+    (*inTable->fDefineUnit)(inTable, #name, sizeof(name), (UnitCtorFunc)&name##_Ctor, (UnitDtorFunc)&name##_Dtor, 0);
 
 #define DefineSimpleCantAliasUnit(name)                                                                                \
-    (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0, kUnitDef_CantAliasInputsToOutputs);
+    (*inTable->fDefineUnit)(inTable, #name, sizeof(name), (UnitCtorFunc)&name##_Ctor, 0,                               \
+                            kUnitDef_CantAliasInputsToOutputs);
 
 #define DefineDtorCantAliasUnit(name)                                                                                  \
-    (*ft->fDefineUnit)(#name, sizeof(name), (UnitCtorFunc)&name##_Ctor, (UnitDtorFunc)&name##_Dtor,                    \
-                       kUnitDef_CantAliasInputsToOutputs);
+    (*inTable->fDefineUnit)(inTable, #name, sizeof(name), (UnitCtorFunc)&name##_Ctor, (UnitDtorFunc)&name##_Dtor,      \
+                            kUnitDef_CantAliasInputsToOutputs);
 
 typedef enum { sc_server_scsynth = 0, sc_server_supernova = 1 } SC_ServerType;
 
@@ -286,7 +312,7 @@ SC_INLINE void SCWorld_Allocator_free(void* user, void* ptr) {
 #ifdef __cplusplus
 struct SCWorld_Allocator : SCFFT_Allocator {
     // Note: this constructor ensures source compatibility with plugins written before SC 3.15
-    SCWorld_Allocator(InterfaceTable* ft, World* world): SCWorld_Allocator(world) {}
+    SCWorld_Allocator(const InterfaceTable* ft, World* world): SCWorld_Allocator(world) {}
 
     SCWorld_Allocator(World* world) {
         mAlloc = SCWorld_Allocator_alloc;

@@ -36,8 +36,6 @@
 #include "SC_Prototypes.h"
 #include "SC_CoreAudio.h"
 #include "SC_Errors.h"
-#include "SC_Filesystem.hpp"
-#include "buffer_commands.h"   // supersonic_guest_alloc_bytes: the guest's heap
 
 #include <cassert>
 #include <stdio.h>
@@ -47,12 +45,7 @@
 #include <string>
 #include <vector>
 #include <memory>
-
-#include <filesystem>
-#include <fstream>
 #include <algorithm>
-
-namespace fs = std::filesystem;
 
 // =============================================================================
 // TAU MODIFICATIONS
@@ -95,10 +88,12 @@ const size_t ERR_BUF_SIZE(256);
 // loaded, measured by clockwork's census (2026-10-15), and the last ones
 // this path made.
 
-// Static error message storage for GraphDef parsing errors
-// Used to preserve error messages across exception boundaries in Emscripten/WASM
-// where C++ exception RTTI doesn't always work correctly
-static std::string g_lastGraphDefError;
+// SuperSonic (plural guest): the parser's reason for refusing a definition, kept on the World before the
+// throw: the wasm build's catch-all cannot ask the exception for it
+// (GraphDef_Recv).
+static void rememberError(World* inWorld, const char* str) {
+    snprintf(inWorld->hw->mLastGraphDefError, sizeof(inWorld->hw->mLastGraphDefError), "%s", str);
+}
 
 int32 GetHash(ParamSpec* inParamSpec) { return inParamSpec->mHash; }
 
@@ -116,20 +111,22 @@ inline int32 readCount(const char*& buffer, const char* end, int version) {
 // takes at least `minBytes` of the def. A count the bytes that follow cannot
 // hold is refused before anything is allocated from it: allocated first, it
 // could exhaust the heap or, where size_t is 32 bits, wrap the array's size.
-static uint32 checkArrayCount(int64 count, const char* buffer, const char* end, size_t minBytes, const char* what) {
+static uint32 checkArrayCount(World* inWorld, int64 count, const char* buffer, const char* end, size_t minBytes,
+                              const char* what) {
     const size_t remaining = (size_t)(end - buffer);
     if (count >= 0 && (uint64)count <= remaining / minBytes)
         return (uint32)count;
     char str[ERR_BUF_SIZE];
     snprintf(str, ERR_BUF_SIZE, "SynthDef: %lld %s claimed, but only %zu bytes follow.", (long long)count, what,
              remaining);
-    g_lastGraphDefError = str;
+    rememberError(inWorld, str);
     throw std::runtime_error(str);
 }
 
-static uint32 readArrayCount(const char*& buffer, const char* end, int version, size_t minBytes, const char* what) {
+static uint32 readArrayCount(World* inWorld, const char*& buffer, const char* end, int version, size_t minBytes,
+                             const char* what) {
     const int32 count = readCount(buffer, end, version);
-    return checkArrayCount(count, buffer, end, minBytes, what);
+    return checkArrayCount(inWorld, count, buffer, end, minBytes, what);
 }
 
 // The fewest bytes a count field takes in a def of this version.
@@ -178,16 +175,16 @@ void OutputSpec_Read(OutputSpec* inOutputSpec, const char*& buffer, const char* 
     inOutputSpec->mNumConsumers = 0;
 }
 
-void UnitSpec_Read(UnitSpec* inUnitSpec, const char*& buffer, const char* end, int version) {
+void UnitSpec_Read(World* inWorld, UnitSpec* inUnitSpec, const char*& buffer, const char* end, int version) {
     int32 name[kSCNameLen];
     ReadName(buffer, end, name);
 
-    inUnitSpec->mUnitDef = GetUnitDef(name);
+    inUnitSpec->mUnitDef = GetUnitDef(inWorld, name);
     if (!inUnitSpec->mUnitDef) {
         char str[ERR_BUF_SIZE];
         snprintf(str, ERR_BUF_SIZE, "UGen '%s' not installed.", (char*)name);
-        scprintf("ERROR: UGen '%s' not installed", (char*)name);
-        g_lastGraphDefError = str;
+        scprintf(inWorld, "ERROR: UGen '%s' not installed", (char*)name);
+        rememberError(inWorld, str);
         throw std::runtime_error(str);
     }
     inUnitSpec->mCalcRate = readInt8(buffer, end);
@@ -198,11 +195,11 @@ void UnitSpec_Read(UnitSpec* inUnitSpec, const char*& buffer, const char* end, i
     // Each input is two counts and each output its rate, one byte; the inputs
     // come first.
     const size_t inputBytes = 2 * countBytes(version);
-    inUnitSpec->mNumInputs = checkArrayCount(numInputs, buffer, end, inputBytes, "unit inputs");
+    inUnitSpec->mNumInputs = checkArrayCount(inWorld, numInputs, buffer, end, inputBytes, "unit inputs");
     inUnitSpec->mNumOutputs =
-        checkArrayCount(numOutputs, buffer + inputBytes * inUnitSpec->mNumInputs, end, 1, "unit outputs");
-    inUnitSpec->mInputSpec = guest_new_array<InputSpec>(inUnitSpec->mNumInputs);
-    inUnitSpec->mOutputSpec = guest_new_array<OutputSpec>(inUnitSpec->mNumOutputs);
+        checkArrayCount(inWorld, numOutputs, buffer + inputBytes * inUnitSpec->mNumInputs, end, 1, "unit outputs");
+    inUnitSpec->mInputSpec = guest_new_array<InputSpec>(inWorld, inUnitSpec->mNumInputs);
+    inUnitSpec->mOutputSpec = guest_new_array<OutputSpec>(inWorld, inUnitSpec->mNumOutputs);
     for (uint32 i = 0; i < inUnitSpec->mNumInputs; ++i) {
         InputSpec_Read(inUnitSpec->mInputSpec + i, buffer, end, version);
     }
@@ -271,7 +268,7 @@ void GraphDef_ReadVariant(World* inWorld, const char*& buffer, const char* end, 
     ReadName(buffer, end, inVariant->mNodeDef.mName);
     inVariant->mNodeDef.mHash = Hash(inVariant->mNodeDef.mName);
 
-    inVariant->mInitialControlValues = guest_new_array<float32>(inGraphDef->mNumControls);
+    inVariant->mInitialControlValues = guest_new_array<float32>(inWorld, inGraphDef->mNumControls);
     for (uint32 i = 0; i < inGraphDef->mNumControls; ++i) {
         inVariant->mInitialControlValues[i] = readFloat_be(buffer, end);
     }
@@ -283,13 +280,14 @@ typedef struct IndexMap {
     uint32 paramSpecIndex;
 } IndexMap;
 
-inline static void calcParamSpecs(GraphDef* graphDef, const char*& buffer, const char* end, int version) {
+inline static void calcParamSpecs(World* inWorld, GraphDef* graphDef, const char*& buffer, const char* end,
+                                  int version) {
     uint32 numSpecs = graphDef->mNumParamSpecs;
     if (numSpecs > 0) {
         int hashTableSize = NEXTPOWEROFTWO(numSpecs);
-        graphDef->mParamSpecTable = guest_new<ParamSpecTable>(&gGuestMalloc, hashTableSize, false);
-        graphDef->mParamSpecs = guest_new_array<ParamSpec>(numSpecs);
-        std::vector<IndexMap, GuestAllocator<IndexMap>> tempMaps(numSpecs);
+        graphDef->mParamSpecTable = guest_new<ParamSpecTable>(inWorld, &inWorld->hw->mGuestMalloc, hashTableSize, false);
+        graphDef->mParamSpecs = guest_new_array<ParamSpec>(inWorld, numSpecs);
+        std::vector<IndexMap, GuestAllocator<IndexMap>> tempMaps(numSpecs, GuestAllocator<IndexMap>(inWorld));
 
         for (uint32 i = 0; i < numSpecs; ++i) {
             ParamSpec* paramSpec = &graphDef->mParamSpecs[i];
@@ -314,7 +312,7 @@ inline static void calcParamSpecs(GraphDef* graphDef, const char*& buffer, const
         paramSpec.mNumChannels = graphDef->mNumControls - tempMap.paramSpecIndex;
     } else {
         // empty table to eliminate test in Graph_SetControl
-        graphDef->mParamSpecTable = guest_new<ParamSpecTable>(&gGuestMalloc, 4, false);
+        graphDef->mParamSpecTable = guest_new<ParamSpecTable>(inWorld, &inWorld->hw->mGuestMalloc, 4, false);
         graphDef->mParamSpecs = nullptr;
     }
 }
@@ -347,7 +345,7 @@ static void GraphDef_SetAllocSizes(GraphDef* graphDef) {
 // Every input must name a constant that exists or an output of an earlier
 // unit; a negative unit index means a constant. Buffer colouring and graph
 // construction index arrays with these numbers unchecked.
-static void CheckInputSpecs(const GraphDef* graphDef) {
+static void CheckInputSpecs(World* inWorld, const GraphDef* graphDef) {
     for (uint32 j = 0; j < graphDef->mNumUnitSpecs; ++j) {
         const UnitSpec* unitSpec = graphDef->mUnitSpecs + j;
         for (uint32 i = 0; i < unitSpec->mNumInputs; ++i) {
@@ -367,7 +365,7 @@ static void CheckInputSpecs(const GraphDef* graphDef) {
                 snprintf(str, ERR_BUF_SIZE,
                          "SynthDef '%s': unit %u input %u reads output %d of unit %d, which is not an earlier unit's output.",
                          (const char*)graphDef->mNodeDef.mName, j, i, index, unit);
-            g_lastGraphDefError = str;
+            rememberError(inWorld, str);
             throw std::runtime_error(str);
         }
     }
@@ -379,9 +377,9 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     ReadNodeDefName(buffer, end, name);
 
     // Use custom deleter for automatic cleanup in case an exception is thrown.
-    auto deleter = [](GraphDef* def) { GraphDef_Free(def); };
+    auto deleter = [inWorld](GraphDef* def) { GraphDef_Free(inWorld, def); };
     // value-initialize so that all members of GraphDef are initially set to zero!
-    std::unique_ptr<GraphDef, decltype(deleter)> graphDef(guest_new<GraphDef>(), deleter);
+    std::unique_ptr<GraphDef, decltype(deleter)> graphDef(guest_new<GraphDef>(inWorld), deleter);
 
     graphDef->mOriginal = graphDef.get();
 
@@ -391,31 +389,33 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
 
     graphDef->mNodeDef.mHash = Hash(graphDef->mNodeDef.mName);
 
-    graphDef->mNumConstants = readArrayCount(buffer, end, inVersion, sizeof(float32), "constants");
-    graphDef->mConstants = guest_new_array<float32>(graphDef->mNumConstants);
+    graphDef->mNumConstants = readArrayCount(inWorld, buffer, end, inVersion, sizeof(float32), "constants");
+    graphDef->mConstants = guest_new_array<float32>(inWorld, graphDef->mNumConstants);
     for (uint32 i = 0; i < graphDef->mNumConstants; ++i) {
         graphDef->mConstants[i] = readFloat_be(buffer, end);
     }
     graphDef->mNumWires = graphDef->mNumConstants;
 
-    graphDef->mNumControls = readArrayCount(buffer, end, inVersion, sizeof(float32), "controls");
-    graphDef->mInitialControlValues = guest_new_array<float32>(graphDef->mNumControls);
+    graphDef->mNumControls = readArrayCount(inWorld, buffer, end, inVersion, sizeof(float32), "controls");
+    graphDef->mInitialControlValues = guest_new_array<float32>(inWorld, graphDef->mNumControls);
     for (uint32 i = 0; i < graphDef->mNumControls; ++i) {
         graphDef->mInitialControlValues[i] = readFloat_be(buffer, end);
     }
 
     // A control name is its length byte and its control index at the least.
-    graphDef->mNumParamSpecs = readArrayCount(buffer, end, inVersion, 1 + countBytes(inVersion), "control names");
-    calcParamSpecs(graphDef.get(), buffer, end, inVersion);
+    graphDef->mNumParamSpecs =
+        readArrayCount(inWorld, buffer, end, inVersion, 1 + countBytes(inVersion), "control names");
+    calcParamSpecs(inWorld, graphDef.get(), buffer, end, inVersion);
 
     // A unit is its name's length byte, its rate, two counts and its special index at the least.
-    uint32 numUnitSpecs = readArrayCount(buffer, end, inVersion, 1 + 1 + 2 * countBytes(inVersion) + 2, "units");
-    graphDef->mUnitSpecs = guest_new_array<UnitSpec>(numUnitSpecs);
+    uint32 numUnitSpecs =
+        readArrayCount(inWorld, buffer, end, inVersion, 1 + 1 + 2 * countBytes(inVersion) + 2, "units");
+    graphDef->mUnitSpecs = guest_new_array<UnitSpec>(inWorld, numUnitSpecs);
     graphDef->mNumCalcUnits = 0;
     graphDef->mNumUnitSpecs = 0;
     for (uint32 i = 0; i < numUnitSpecs; ++i) {
         UnitSpec* unitSpec = &graphDef->mUnitSpecs[i];
-        UnitSpec_Read(unitSpec, buffer, end, inVersion);
+        UnitSpec_Read(inWorld, unitSpec, buffer, end, inVersion);
 
         switch (unitSpec->mCalcRate) {
         case calc_ScalarRate:
@@ -441,7 +441,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
         graphDef->mNumWires += unitSpec->mNumOutputs;
     }
 
-    CheckInputSpecs(graphDef.get());
+    CheckInputSpecs(inWorld, graphDef.get());
     DoBufferColoring(inWorld, graphDef.get());
 
     GraphDef_SetAllocSizes(graphDef.get());
@@ -450,9 +450,10 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
         // A variant is its name's length byte and a value for every control at the least.
         const uint16 claimedVariants = readInt16_be(buffer, end);
         uint32 numVariants =
-            checkArrayCount(claimedVariants, buffer, end, 1 + sizeof(float32) * graphDef->mNumControls, "variants");
+            checkArrayCount(inWorld, claimedVariants, buffer, end, 1 + sizeof(float32) * graphDef->mNumControls,
+                            "variants");
         if (numVariants > 0) {
-            graphDef->mVariants = guest_new_array<GraphDef>(numVariants);
+            graphDef->mVariants = guest_new_array<GraphDef>(inWorld, numVariants);
             for (uint32 i = 0; i < numVariants; ++i) {
                 GraphDef_ReadVariant(inWorld, buffer, end, graphDef.get(), graphDef->mVariants + i);
                 // increment mNumVariants after every successful call to GraphDef_ReadVariant()
@@ -547,24 +548,25 @@ SCErr GraphDef_Release(World* inWorld, GraphDef* inGraphDef) {
 }
 
 GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDef* inList, std::string* outErrorMsg) {
-    g_lastGraphDefError.clear();
+    char* lastError = inWorld->hw->mLastGraphDefError;
+    lastError[0] = '\0';
     try {
         inList = GraphDefLib_Read(inWorld, buffer, size, inList);
     } catch (std::exception& exc) {
-        scprintf("exception in GraphDef_Recv: %s\n", exc.what());
+        scprintf(inWorld, "exception in GraphDef_Recv: %s\n", exc.what());
         if (outErrorMsg) {
             *outErrorMsg = exc.what();
         }
     } catch (...) {
         // Emscripten WASM exception handling may not preserve std::exception type info,
-        // so use g_lastGraphDefError which was set before throwing
-        if (!g_lastGraphDefError.empty()) {
-            scprintf("exception in GraphDef_Recv: %s\n", g_lastGraphDefError.c_str());
+        // so use the reason the parser kept on the World before throwing
+        if (lastError[0]) {
+            scprintf(inWorld, "exception in GraphDef_Recv: %s\n", lastError);
             if (outErrorMsg) {
-                *outErrorMsg = g_lastGraphDefError;
+                *outErrorMsg = lastError;
             }
         } else {
-            scprintf("unknown exception in GraphDef_Recv\n");
+            scprintf(inWorld, "unknown exception in GraphDef_Recv\n");
             if (outErrorMsg) {
                 *outErrorMsg = "unknown exception";
             }
@@ -574,123 +576,46 @@ GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDe
     return inList;
 }
 
-#ifndef __EMSCRIPTEN__
-GraphDef* GraphDef_LoadGlob(World* inWorld, const char* pattern, GraphDef* inList) {
-    SC_Filesystem::Glob* glob = SC_Filesystem::makeGlob(pattern);
-    if (!glob)
-        return inList;
-
-    fs::path path;
-    while (!(path = SC_Filesystem::globNext(glob)).empty()) {
-        if (path.extension() == ".scsyndef") {
-            inList = GraphDef_Load(inWorld, path, inList);
-        }
-        // why? <sk>
-        GraphDef_Load(inWorld, path, inList);
-    }
-
-    SC_Filesystem::freeGlob(glob);
-    return inList;
+static void UnitSpec_Free(World* inWorld, UnitSpec* inUnitSpec) {
+    guest_delete_array(inWorld, inUnitSpec->mInputSpec);
+    guest_delete_array(inWorld, inUnitSpec->mOutputSpec);
 }
 
-std::string load_file(const std::filesystem::path& file_path) {
-    std::ifstream file(file_path, std::ifstream::binary);
-    if (!file.is_open()) {
-        throw std::runtime_error("Could not open file: " + file_path.string());
-    }
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
-}
-
-GraphDef* GraphDef_Load(World* inWorld, const fs::path& path, GraphDef* inList) {
-    try {
-        std::string file_contents = load_file(path);
-        inList = GraphDefLib_Read(inWorld, file_contents.data(), file_contents.size(), inList);
-    } catch (const std::exception& e) {
-        scprintf("exception in GraphDef_Load: %s\n", e.what());
-    } catch (...) {
-        scprintf("unknown exception in GraphDef_Load\n");
-    }
-
-    return inList;
-}
-
-GraphDef* GraphDef_LoadDir(World* inWorld, const fs::path& dirname, GraphDef* inList) {
-    std::error_code ec;
-    fs::recursive_directory_iterator rditer(dirname, fs::directory_options::follow_directory_symlink, ec);
-
-    if (ec) {
-        scprintf("*** ERROR: open directory failed '%s'\n", SC_Codecvt::path_to_utf8_str(dirname).c_str());
-        return inList;
-    }
-
-    while (rditer != fs::end(rditer)) {
-        const fs::path path = *rditer;
-
-        if (fs::is_directory(path)) {
-            if (SC_Filesystem::instance().shouldNotCompileDirectory(path))
-                rditer.disable_recursion_pending();
-            else
-                ; // do nothing; recursion will happen automatically
-        } else if (path.extension() == ".scsyndef") { // ordinary file
-            inList = GraphDef_Load(inWorld, path, inList);
-        } else {
-            // ignore file, wasn't a synth def
-        }
-
-        rditer.increment(ec);
-        if (ec) {
-            scprintf("*** ERROR: Could not iterate on '%s': %s\n", SC_Codecvt::path_to_utf8_str(path).c_str(),
-                     ec.message().c_str());
-            return inList;
-        }
-    }
-
-    return inList;
-}
-#endif // !__EMSCRIPTEN__
-
-void UnitSpec_Free(UnitSpec* inUnitSpec) {
-    guest_delete_array(inUnitSpec->mInputSpec);
-    guest_delete_array(inUnitSpec->mOutputSpec);
-}
-
-void GraphDef_Free(GraphDef* inGraphDef) {
+void GraphDef_Free(World* inWorld, GraphDef* inGraphDef) {
     if (inGraphDef != inGraphDef->mOriginal)
         return;
 
     for (uint32 i = 0; i < inGraphDef->mNumUnitSpecs; ++i) {
-        UnitSpec_Free(inGraphDef->mUnitSpecs + i);
+        UnitSpec_Free(inWorld, inGraphDef->mUnitSpecs + i);
     }
     for (uint32 i = 0; i < inGraphDef->mNumVariants; ++i) {
-        guest_delete_array(inGraphDef->mVariants[i].mInitialControlValues);
+        guest_delete_array(inWorld, inGraphDef->mVariants[i].mInitialControlValues);
     }
-    guest_delete(inGraphDef->mParamSpecTable);
-    guest_delete_array(inGraphDef->mParamSpecs);
-    guest_delete_array(inGraphDef->mInitialControlValues);
-    guest_delete_array(inGraphDef->mConstants);
-    guest_delete_array(inGraphDef->mUnitSpecs);
-    guest_delete_array(inGraphDef->mVariants);
-    guest_delete(inGraphDef);
+    guest_delete(inWorld, inGraphDef->mParamSpecTable);
+    guest_delete_array(inWorld, inGraphDef->mParamSpecs);
+    guest_delete_array(inWorld, inGraphDef->mInitialControlValues);
+    guest_delete_array(inWorld, inGraphDef->mConstants);
+    guest_delete_array(inWorld, inGraphDef->mUnitSpecs);
+    guest_delete_array(inWorld, inGraphDef->mVariants);
+    guest_delete(inWorld, inGraphDef);
 }
 
-void NodeDef_Dump(NodeDef* inNodeDef) {
-    scprintf("mName '%s'\n", (char*)inNodeDef->mName);
-    scprintf("mHash %d\n", inNodeDef->mHash);
-    scprintf("mAllocSize %lu\n", inNodeDef->mAllocSize);
+void NodeDef_Dump(World* inWorld, NodeDef* inNodeDef) {
+    scprintf(inWorld, "mName '%s'\n", (char*)inNodeDef->mName);
+    scprintf(inWorld, "mHash %d\n", inNodeDef->mHash);
+    scprintf(inWorld, "mAllocSize %lu\n", inNodeDef->mAllocSize);
 }
 
-void GraphDef_Dump(GraphDef* inGraphDef) {
-    NodeDef_Dump(&inGraphDef->mNodeDef);
+void GraphDef_Dump(World* inWorld, GraphDef* inGraphDef) {
+    NodeDef_Dump(inWorld, &inGraphDef->mNodeDef);
 
-    scprintf("mNumControls %d\n", inGraphDef->mNumControls);
-    scprintf("mNumWires %d\n", inGraphDef->mNumWires);
-    scprintf("mNumUnitSpecs %d\n", inGraphDef->mNumUnitSpecs);
-    scprintf("mNumWireBufs %d\n", inGraphDef->mNumWireBufs);
+    scprintf(inWorld, "mNumControls %d\n", inGraphDef->mNumControls);
+    scprintf(inWorld, "mNumWires %d\n", inGraphDef->mNumWires);
+    scprintf(inWorld, "mNumUnitSpecs %d\n", inGraphDef->mNumUnitSpecs);
+    scprintf(inWorld, "mNumWireBufs %d\n", inGraphDef->mNumWireBufs);
 
     for (uint32 i = 0; i < inGraphDef->mNumControls; ++i) {
-        scprintf("   %d mInitialControlValues %g\n", i, inGraphDef->mInitialControlValues[i]);
+        scprintf(inWorld, "   %d mInitialControlValues %g\n", i, inGraphDef->mInitialControlValues[i]);
     }
 
     for (uint32 i = 0; i < inGraphDef->mNumWires; ++i) {
@@ -703,7 +628,7 @@ void GraphDef_Dump(GraphDef* inGraphDef) {
 
 class BufColorAllocator {
 public:
-    BufColorAllocator();
+    explicit BufColorAllocator(World* inWorld);
 
     uint32 alloc(uint32 count);
     bool release(int inIndex);
@@ -714,7 +639,8 @@ private:
     std::vector<int16, GuestAllocator<int16>> mStack;
 };
 
-inline BufColorAllocator::BufColorAllocator() {
+inline BufColorAllocator::BufColorAllocator(World* inWorld)
+    : mRefs(GuestAllocator<int16>(inWorld)), mStack(GuestAllocator<int16>(inWorld)) {
     mRefs.reserve(32);
     mStack.reserve(32);
 }
@@ -792,7 +718,7 @@ void DoBufferColoring(World* inWorld, GraphDef* inGraphDef) {
 
     // buffer coloring
     {
-        BufColorAllocator bufColor;
+        BufColorAllocator bufColor(inWorld);
         int32 wireIndexCtr = inGraphDef->mNumConstants; // mNumConstants is a uint32, but limited to int32 in OSC
         for (uint32 j = 0; j < inGraphDef->mNumUnitSpecs; ++j) {
             UnitSpec* unitSpec = inGraphDef->mUnitSpecs + j;

@@ -282,8 +282,10 @@ inline double sc_trunc(double x, double quant) { return quant == 0. ? x : sc_flo
 /// Computes the arc tangent of a/b using the signs of arguments to determine the correct quadrant.
 inline float sc_atan2(float a, float b) { return std::atan2(a, b); }
 
-const float kFSQRT2M1 = static_cast<float32>(sqrt(2.) - 1.);
-const double kDSQRT2M1 = sqrt(2.) - 1.;
+// SuperSonic (plural guest): sqrt(2) - 1, as the literals the expressions come to: constants, where a
+// call to sqrt at load would be a static written then (SuperSonic, plural guest).
+constexpr float kFSQRT2M1 = 0x1.a8279ap-2f;
+constexpr double kDSQRT2M1 = 0x1.a827999fcef34p-2;
 
 ///  Returns the hypotenuse of a right-angled triangle whose legs are x and y.
 inline float sc_hypotx(float x, float y) {

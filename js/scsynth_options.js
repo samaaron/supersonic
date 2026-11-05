@@ -20,7 +20,7 @@
  * here and consumed here (supersonic.js), and they are listed below so a
  * caller who knows scsynth's options finds them under the names they expect.
  */
-import { scsynthOptionSchema, scsynthHeapHeadroomBytes, scsynthPoolOverheadBytes, scsynthTablesBytes } from "./lib/scsynth_options_schema.js";
+import { scsynthOptionSchema, scsynthHeapHeadroomBytes, scsynthPoolOverheadBytes } from "./lib/scsynth_options_schema.js";
 
 const guestDefaults = Object.fromEntries(scsynthOptionSchema.map((o) => [o.name, o.default]));
 
@@ -63,7 +63,7 @@ export const guestOptionNames = Object.freeze(scsynthOptionSchema.map((o) => o.n
  * memArenaSize.
  */
 export function scsynthMemoryBytes(realTimeMemorySize) {
-  return scsynthTablesBytes + realTimeMemorySize * 1024 + scsynthPoolOverheadBytes;
+  return realTimeMemorySize * 1024 + scsynthPoolOverheadBytes;
 }
 export function scsynthHeapBytes(realTimeMemorySize) {
   return scsynthMemoryBytes(realTimeMemorySize) + scsynthHeapHeadroomBytes;

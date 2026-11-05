@@ -5,7 +5,7 @@
 #define LIN_INTERP(f,a,b) ((a) + (f) * ((b) - (a))) // from ladspa-util.h
 
 
-static InterfaceTable *ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 //----------------------------------------------------------
 
@@ -338,7 +338,6 @@ void Disintegrator_next(Disintegrator *unit, int inNumSamples)
 extern "C"
 PluginLoad(Distortion)
 {
-  ft = inTable;
 
   DefineSimpleUnit(CrossoverDistortion);
   DefineSimpleUnit(SmoothDecimator);

@@ -94,12 +94,14 @@ void AllocPool::InitBins() {
     }
 }
 
-AllocPool::AllocPool(NewAreaFunc inAllocArea, FreeAreaFunc inFreeArea, size_t inAreaInitSize, size_t inAreaMoreSize) {
+AllocPool::AllocPool(NewAreaFunc inAllocArea, FreeAreaFunc inFreeArea, void* inAreaCtx, size_t inAreaInitSize,
+                     size_t inAreaMoreSize) {
     InitBins();
     mAreaInitSize = inAreaInitSize;
     mAreaMoreSize = inAreaMoreSize;
     mAllocArea = inAllocArea;
     mFreeArea = inFreeArea;
+    mAreaCtx = inAreaCtx;
     mAreas = 0;
     check_pool();
 
@@ -115,7 +117,7 @@ void AllocPool::FreeAll() {
         AllocAreaPtr firstArea = area;
         do {
             AllocAreaPtr nextarea = area->mNext;
-            (mFreeArea)(area->mUnalignedPointerToThis);
+            (mFreeArea)(mAreaCtx, area->mUnalignedPointerToThis);
             area = nextarea;
         } while (area != firstArea);
         mAreas = NULL;
@@ -193,7 +195,7 @@ void AllocPool::Free(void* inPtr) {
 
 
 AllocAreaPtr AllocPool::NewArea(size_t inAreaSize) {
-    void* ptr = (AllocAreaPtr)(mAllocArea)(inAreaSize + kAreaOverhead);
+    void* ptr = (AllocAreaPtr)(mAllocArea)(mAreaCtx, inAreaSize + kAreaOverhead);
 
     if (ptr == NULL)
         throw std::runtime_error(std::string("Could not allocate new area"));
@@ -236,7 +238,7 @@ void AllocPool::FreeArea(AllocChunkPtr chunk) {
         area->mNext->mPrev = area->mPrev;
     }
 
-    (mFreeArea)(area->mUnalignedPointerToThis);
+    (mFreeArea)(mAreaCtx, area->mUnalignedPointerToThis);
 }
 
 

@@ -33,7 +33,7 @@
 
 #endif
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -2670,7 +2670,6 @@ static void SendPeakRMS_Dtor(SendPeakRMS* unit) { unit->~SendPeakRMS(); }
 
 extern "C"
 PluginLoad(Trigger) {
-    ft = inTable;
 
     DefineSimpleUnit(Trig1);
     DefineSimpleUnit(Trig);

@@ -8,32 +8,26 @@ The mda plug-ins are released under the MIT license or under the GPL
 */
 #include "SC_PlugIn.h"
 #include "mdaPiano_sc3.h"
+#include "guest_doors.h"   // supersonic_piano_wavetable: the instance's table
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten/emscripten.h>
-#define SS_KEEPALIVE EMSCRIPTEN_KEEPALIVE
-#else
-#define SS_KEEPALIVE
-#endif
-
-static InterfaceTable *ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 // The ~1.1MB piano sample table used to be compiled in via mdaPianoData.h.
 // That blob is too big for embedded / WASM binaries, so it lives outside the
 // binary and is handed over at runtime through /supersonic/piano/wavetable
-// (piano_wavetable.cpp), from a buffer the client loaded like any sample.
-// Until injected, MdaPiano outputs silence rather than reading a null pointer.
-static const short* gPianoData = nullptr;
+// (piano_wavetable.cpp), from a buffer the client loaded like any sample, and
+// kept by the instance the unit's World belongs to. Until then MdaPiano
+// outputs silence rather than reading a null pointer.
 
-extern "C" SS_KEEPALIVE
-void supersonic_set_piano_wavetable(const short* data, size_t count) {
-	// Reject a short/absent table so the audio thread never reads past the
-	// end (max index touched is kgrp.end + 1).
-	gPianoData = (data && count >= (size_t)WAVELEN) ? data : nullptr;
+extern "C" size_t supersonic_piano_wavetable_min_frames(void) { return (size_t)WAVELEN; }
+
+// SuperSonic (plural guest): the table, or null when the instance has none or has one too short to
+// read safely (the highest index touched is kgrp.end + 1).
+static const short* pianoTable(World* world) {
+	size_t frames = 0;
+	const short* data = supersonic_piano_wavetable(world, &frames);
+	return (data && frames >= (size_t)WAVELEN) ? data : nullptr;
 }
-
-extern "C" SS_KEEPALIVE
-size_t supersonic_piano_wavetable_min_frames(void) { return (size_t)WAVELEN; }
 
 struct MdaPiano : public Unit
 {
@@ -95,7 +89,7 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 
 	// No wavetable injected (e.g. a deployment that ships without the piano
 	// asset): stay silent instead of dereferencing a null table.
-	const short* pianoData = gPianoData;
+	const short* pianoData = pianoTable(unit->mWorld);
 	if(!pianoData){
 		for (int iter=0; iter < inNumSamples; ++iter){ *out0++ = 0.f; *out1++ = 0.f; }
 		unit->prevgate = IN0(1);
@@ -266,7 +260,6 @@ void MdaPiano_next(MdaPiano *unit, int inNumSamples)
 extern "C"
 PluginLoad(Mda)
 {
-	ft = inTable;
 
 	DefineDtorUnit(MdaPiano);
 }

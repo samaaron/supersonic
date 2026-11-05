@@ -69,6 +69,10 @@ struct WorldOptions {
 
     uint32 mLoadGraphDefs = 1;
 
+    // SuperSonic (plural guest): pins the random generators' seeds (server_timeseed hands out this, this
+    // + 1, ...) so two renders of one score agree; 0 seeds from the clock.
+    int32 mDeterministicSeed = 0;
+
     const char* mInputStreamsEnabled = nullptr;
     const char* mOutputStreamsEnabled = nullptr;
     const char* mInDeviceName = nullptr;
@@ -104,10 +108,13 @@ struct WorldOptions {
 struct SndBuf;
 
 SCSYNTH_DLLEXPORT_C void SetPrintFunc(PrintFunc func);
-SCSYNTH_DLLEXPORT_C struct World* World_New(struct WorldOptions* inOptions);
-// Why the last World_New returned null, or NULL when it did not (or could not
-// say). Valid until the next World_New.
-SCSYNTH_DLLEXPORT_C const char* World_NewError();
+// SuperSonic (plural guest): `inGuest` is the instance of the guest the World belongs to (guest_doors.h):
+// the World and all it owns come from that instance's heap. A World_New that
+// returns null says why in `outReason` (the first reason, cut to
+// `reasonBytes`), or leaves it empty when it cannot say.
+struct SupersonicGuest;
+SCSYNTH_DLLEXPORT_C struct World* World_New(struct WorldOptions* inOptions, struct SupersonicGuest* inGuest,
+                                            char* outReason, size_t reasonBytes);
 SCSYNTH_DLLEXPORT_C void World_Cleanup(struct World* inWorld, bool unload_plugins = false);
 // noexcept(false): the body throws on bad NRT options, but MSVC assumes
 // extern "C" functions never throw (/EHsc) and warns C4297 — make the
@@ -122,4 +129,6 @@ SCSYNTH_DLLEXPORT_C bool World_SendPacketWithContext(struct World* inWorld, int 
                                                      void* inContext);
 SCSYNTH_DLLEXPORT_C int World_CopySndBuf(struct World* world, uint32 index, struct SndBuf* outBuf, bool onlyIfChanged,
                                          bool* didChange);
-SCSYNTH_DLLEXPORT_C int scprintf(const char* fmt, ...);
+// SuperSonic (plural guest): a print names the World it is about, whose
+// instance's host hears it (guest_doors.h).
+SCSYNTH_DLLEXPORT_C int scprintf(struct World* inWorld, const char* fmt, ...);

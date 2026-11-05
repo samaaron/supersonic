@@ -28,7 +28,7 @@
 
 //////////////////////////////////////////////////////////////////////////////////////////////////
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct CheckBadValues : public Unit {
     long sameCount;
@@ -238,7 +238,6 @@ void Sanitize_next_kk(Sanitize* unit, int inNumSamples) {
 // the load function is called by the host when the plug-in is loaded
 extern "C"
 PluginLoad(Test) {
-    ft = inTable;
     DefineSimpleUnit(CheckBadValues);
     DefineSimpleUnit(Sanitize);
 }

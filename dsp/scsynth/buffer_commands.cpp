@@ -38,11 +38,11 @@ int buffer_set_data(World* world, int bufnum, float* data, int numFrames, int nu
                     double sampleRate, bool hasGuardSamples) {
     if (!world || !data) return -1;
     if (bufnum < 0 || bufnum >= (int)world->mNumSndBufs) {
-        scprintf("[buffer_set_data] invalid buffer number %d (max %d)\n", bufnum, (int)world->mNumSndBufs - 1);
+        scprintf(world, "[buffer_set_data] invalid buffer number %d (max %d)\n", bufnum, (int)world->mNumSndBufs - 1);
         return -1;
     }
     if (numFrames <= 0 || numChannels <= 0) {
-        scprintf("[buffer_set_data] invalid dimensions (frames %d, channels %d)\n", numFrames, numChannels);
+        scprintf(world, "[buffer_set_data] invalid dimensions (frames %d, channels %d)\n", numFrames, numChannels);
         return -1;
     }
     SndBuf* nrtBuf = World_GetNRTBuf(world, bufnum);

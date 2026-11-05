@@ -22,7 +22,7 @@
 
 #include "SC_PlugIn.h"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct Gendy1 : public Unit // Iannis Xenakis/Marie-Helene Serra GENDYN simulation
 {
@@ -643,7 +643,6 @@ void Gendy3_next_k(Gendy3* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(Gendyn) {
-    ft = inTable;
 
     DefineDtorUnit(Gendy1);
     DefineDtorUnit(Gendy2);

@@ -31,17 +31,13 @@
  */
 #include <catch2/catch_test_macros.hpp>
 #include "EngineFixture.h"
+#include "GuestWorld.h"   // supersonic_scope_defence_trips, by the engine's World
 #include "OscBuilder.h"
 #include "OscTestUtils.h"
 
-#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <thread>
-
-// Exposed by DelayUGens.cpp; tests extern it directly to avoid adding a
-// whole diagnostics header for a single counter.
-extern std::atomic<int> gScopeOut2DefenseTripCount;
 
 static ClockworkEngine::Config scopeStressConfig() {
     ClockworkEngine::Config cfg;
@@ -74,7 +70,7 @@ TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace][rt
     }
 
     EngineFixture fix(scopeStressConfig());
-    const int startCount = gScopeOut2DefenseTripCount.load();
+    const int startCount = (int)supersonic_scope_defence_trips(guestWorld(fix));
 
     OscReply reply;
     fix.send(osc_test::message("/notify", 1));
@@ -118,7 +114,7 @@ TEST_CASE("ScopeRace: many cold swaps with active scope synths", "[ScopeRace][rt
     fix.send(osc_test::message("/status"));
     REQUIRE(fix.waitForReply("/status.reply", reply, 3000));
 
-    const int endCount   = gScopeOut2DefenseTripCount.load();
+    const int endCount   = (int)supersonic_scope_defence_trips(guestWorld(fix));
     const int tripsHere  = endCount - startCount;
     if (tripsHere > 0) {
         WARN("[ScopeRace] ScopeOut2 defensive guards tripped "
@@ -143,7 +139,7 @@ TEST_CASE("ScopeRace: aggressive stress — 100 swaps with 8 scope synths",
     }
 
     EngineFixture fix(scopeStressConfig());
-    const int startCount = gScopeOut2DefenseTripCount.load();
+    const int startCount = (int)supersonic_scope_defence_trips(guestWorld(fix));
 
     OscReply reply;
     fix.send(osc_test::message("/notify", 1));
@@ -175,7 +171,7 @@ TEST_CASE("ScopeRace: aggressive stress — 100 swaps with 8 scope synths",
     fix.send(osc_test::message("/status"));
     REQUIRE(fix.waitForReply("/status.reply", reply, 3000));
 
-    const int endCount  = gScopeOut2DefenseTripCount.load();
+    const int endCount  = (int)supersonic_scope_defence_trips(guestWorld(fix));
     const int tripsHere = endCount - startCount;
     if (tripsHere > 0) {
         WARN("[ScopeRace] Aggressive stress tripped defenses "

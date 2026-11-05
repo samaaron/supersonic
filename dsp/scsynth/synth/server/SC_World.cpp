@@ -41,13 +41,11 @@
 #include "SC_Errors.h"
 #include <stdio.h>
 #include "SC_Prototypes.h"
-#include "SC_Filesystem.hpp"
 #include "SC_Lock.h"
 #include "SC_Lib_Cintf.h"
 #include "../../common/SC_SndFileHelpers.hpp"
 #include "../../common/Samp.hpp"
 #include "../../common/SC_fftlib.hpp"
-#include "SC_StringParser.h"
 #include "guest_heap.h"
 
 #ifdef CLOCKWORK_GUEST
@@ -83,30 +81,16 @@ extern "C" {
 #    include <sys/mman.h>
 #endif
 
-#include <filesystem>
-
-namespace fs = std::filesystem;
-
+#ifndef CLOCKWORK_GUEST
 InterfaceTable gInterfaceTable;
 PrintFunc gPrint = nullptr;
 
 extern HashTable<struct UnitDef, Malloc>* gUnitDefLib;
 extern HashTable<struct BufGen, Malloc>* gBufGenLib;
 extern HashTable<PlugInCmd, Malloc>* gPlugInCmds;
+#endif
 
 extern "C" {
-
-#ifdef CLOCKWORK_GUEST
-// scsynth_dsp.cpp: the guest's doors to the host (dsp_api.h). The heap the
-// engine's larger allocations come from, the arena the host placed for its
-// hot state, and whether a pointer is a range the client wrote into the assets area
-// — memory /b_allocPtr pointed a buffer at in place, and which no free here
-// may hand to an allocator.
-void*       supersonic_guest_alloc_bytes(size_t bytes);
-void        supersonic_guest_free_bytes(void* ptr);
-const void* supersonic_guest_memory(uint32_t* bytes);
-int         supersonic_assets_contains(const void* ptr);
-#endif
 
 #ifdef NO_LIBSNDFILE
 typedef struct SF_INFO SF_INFO;
@@ -120,46 +104,47 @@ SCBool SendMsgFromEngine(World* inWorld, FifoMsg* inMsg);
 ////////////////////////////////////////////////////////////////////////////////
 
 #ifdef CLOCKWORK_GUEST
-// The guest's bulk memory, through the guest's doors in scsynth_dsp.cpp
-// (DspHost::alloc_bytes / free_bytes, clockwork's allocator over the span):
+// SuperSonic (plural guest): the heap of the World's instance, through the guest's doors (guest_doors.h:
+// DspHost::alloc_bytes / free_bytes, clockwork's allocator over the span):
 // lock-free, so a sequenced command's Stage2 may take from it on the audio
 // thread, and the same on every target. sc_free hands nothing back that the
 // client owns — a buffer bound to the assets area is the client's range, and the
 // door knows so.
-inline void* sc_malloc(size_t size) { return supersonic_guest_alloc_bytes(size); }
-inline void sc_free(void* ptr) { supersonic_guest_free_bytes(ptr); }
+inline void* sc_malloc(World* inWorld, size_t size) { return supersonic_guest_alloc_bytes(inWorld, size); }
+inline void sc_free(World* inWorld, void* ptr) { supersonic_guest_free_bytes(inWorld, ptr); }
 
 // Backing areas for scsynth's real-time AllocPool (world->hw->mAllocPool, the
 // per-block-hot graph state: Nodes, Graphs, per-synth wire buffers, Units).
-// The initial area is pre-sized at World_New: the guest's fast memory
-// (DspConfig::memory) when it holds the pool, so the hot state lives in the
-// memory the host placed for exactly that, else the bulk memory. Growth areas
+// SuperSonic (plural guest): the pool asks with its World as the context. The first area is pre-sized at
+// World_New (hw->mRtPoolFirstArea): the guest's fast memory (DspConfig::memory)
+// when it holds the pool, so the hot state lives in the memory the host placed
+// for exactly that, else the instance's heap. Growth areas
 // (SCSYNTH_RT_POOL_GROWTH_SIZE; 0 on desktop, web and the NIF) come from the
-// bulk memory. A fast-memory area is the host's and is never freed.
-static void* g_rt_pool_pending = nullptr;
-static void* g_rt_pool_memory   = nullptr;
-static void* supersonic_rt_pool_area_alloc(size_t size) {
-    if (g_rt_pool_pending) {
-        void* p = g_rt_pool_pending;
-        g_rt_pool_pending = nullptr;
-        return p;
+// heap. A fast-memory area (hw->mRtPoolArenaArea) is the host's and is never
+// freed.
+static void* rt_pool_area_alloc(void* ctx, size_t size) {
+    World* world = static_cast<World*>(ctx);
+    if (void* first = world->hw->mRtPoolFirstArea) {
+        world->hw->mRtPoolFirstArea = nullptr;
+        return first;
     }
-    return supersonic_guest_alloc_bytes(size);
+    return supersonic_guest_alloc_bytes(world, size);
 }
-static void supersonic_rt_pool_area_free(void* ptr) {
-    if (ptr && ptr == g_rt_pool_memory) {
-        g_rt_pool_memory = nullptr;
+static void rt_pool_area_free(void* ctx, void* ptr) {
+    World* world = static_cast<World*>(ctx);
+    if (ptr && ptr == world->hw->mRtPoolArenaArea) {
+        world->hw->mRtPoolArenaArea = nullptr;
         return;
     }
-    supersonic_guest_free_bytes(ptr);
+    supersonic_guest_free_bytes(world, ptr);
 }
 #else
-inline void* sc_malloc(size_t size) { return nova::malloc_aligned(size); }
-inline void sc_free(void* ptr) { nova::free_aligned(ptr); }
+inline void* sc_malloc(World*, size_t size) { return nova::malloc_aligned(size); }
+inline void sc_free(World*, void* ptr) { nova::free_aligned(ptr); }
 #endif
 
-void* sc_dbg_malloc(size_t size, const char* tag, int line) {
-    void* ptr = sc_malloc(size);
+void* sc_dbg_malloc(World* inWorld, size_t size, const char* tag, int line) {
+    void* ptr = sc_malloc(inWorld, size);
     fprintf(stderr, "sc_dbg_malloc [%s:%d] %p %zu\n", tag, line, ptr, size);
 #if SC_MEMORY_ALIGNMENT > 1
     if (((intptr_t)ptr % SC_MEMORY_ALIGNMENT) != 0) {
@@ -170,15 +155,15 @@ void* sc_dbg_malloc(size_t size, const char* tag, int line) {
     return ptr;
 }
 
-void sc_dbg_free(void* ptr, const char* tag, int line) {
+void sc_dbg_free(World* inWorld, void* ptr, const char* tag, int line) {
     fprintf(stderr, "sc_dbg_free [%s:%d]: %p\n", tag, line, ptr);
-    sc_free(ptr);
+    sc_free(inWorld, ptr);
 }
 
-inline void* sc_zalloc(size_t n, size_t size) {
+inline void* sc_zalloc(World* inWorld, size_t n, size_t size) {
     size *= n;
     if (size) {
-        void* ptr = sc_malloc(size);
+        void* ptr = sc_malloc(inWorld, size);
         if (ptr) {
             memset(ptr, 0, size);
             return ptr;
@@ -187,25 +172,25 @@ inline void* sc_zalloc(size_t n, size_t size) {
     return nullptr;
 }
 
-void* sc_dbg_zalloc(size_t n, size_t size, const char* tag, int line) {
-    void* ptr = sc_zalloc(n, size);
+void* sc_dbg_zalloc(World* inWorld, size_t n, size_t size, const char* tag, int line) {
+    void* ptr = sc_zalloc(inWorld, n, size);
     fprintf(stderr, "sc_dbg_zalloc [%s:%d]: %p %zu %zu\n", tag, line, ptr, n, size);
     return ptr;
 }
 
 #if SC_DEBUG_MEMORY
-#    define malloc_alig(size) sc_dbg_malloc((size), __FUNCTION__, __LINE__)
-#    define free_alig(ptr) sc_dbg_free((ptr), __FUNCTION__, __LINE__)
-#    define zalloc_(n, size) sc_dbg_zalloc((n), (size), __FUNCTION__, __LINE__)
+#    define malloc_alig(world, size) sc_dbg_malloc((world), (size), __FUNCTION__, __LINE__)
+#    define free_alig(world, ptr) sc_dbg_free((world), (ptr), __FUNCTION__, __LINE__)
+#    define zalloc_(world, n, size) sc_dbg_zalloc((world), (n), (size), __FUNCTION__, __LINE__)
 #else
-#    define malloc_alig(size) sc_malloc((size))
-#    define free_alig(ptr) sc_free((ptr))
-#    define zalloc_(n, size) sc_zalloc((n), (size))
+#    define malloc_alig(world, size) sc_malloc((world), (size))
+#    define free_alig(world, ptr) sc_free((world), (ptr))
+#    define zalloc_(world, n, size) sc_zalloc((world), (n), (size))
 #endif // SC_DEBUG_MEMORY
 
-void* zalloc(size_t n, size_t size) { return zalloc_(n, size); }
+void* zalloc(World* inWorld, size_t n, size_t size) { return zalloc_(inWorld, n, size); }
 
-void zfree(void* ptr) { return free_alig(ptr); }
+void zfree(World* inWorld, void* ptr) { return free_alig(inWorld, ptr); }
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -254,7 +239,6 @@ void sc_SetDenormalFlags() {
 
 // Scope publishing goes through the guest's doors to the host (scsynth_scope.h).
 #include "scsynth_scope.h"
-#include "scsynth_tables.h"
 #include "scsynth_options.h"
 
 // C API version that takes the SF_INFO by pointer
@@ -267,6 +251,57 @@ SCErr sndfileFormatInfoFromStrings(SF_INFO* info, const char* headerFormat, cons
 #endif
 }
 
+#ifdef CLOCKWORK_GUEST
+// SuperSonic (plural guest): the table is a constant, the same entries
+// upstream's InterfaceTable_Init (below) assigns at load; a World takes a
+// copy and names itself in it (World_New). An entry upstream adds goes here
+// too, in declaration order.
+const InterfaceTable gInterfaceTable = {
+    .mSineSize = kSineSize,
+    .mSineWavetable = gSineWavetable,
+    .mSine = gSine,
+    .mCosecant = gInvSine,
+    .fPrint = &scprintf,
+    .fRanSeed = &server_timeseed,
+    .fDefineUnit = &UnitDef_Create,
+    .fDefinePlugInCmd = &PlugIn_DefineCmd,
+    .fDefineUnitCmd = &UnitDef_AddCmd,
+    .fDefineUnitCmdEx = &UnitDef_AddCmdEx,
+    .fDefineBufGen = &BufGen_Create,
+    .fClearUnitOutputs = &Unit_ZeroOutputs,
+    .fNRTAlloc = &malloc,
+    .fNRTRealloc = &realloc,
+    .fNRTFree = &free,
+    .fRTAlloc = &World_Alloc,
+    .fRTRealloc = &World_Realloc,
+    .fRTFree = &World_Free,
+    .fNodeRun = &Node_SetRun,
+    .fNodeEnd = &Node_End,
+    .fSendTrigger = &Node_SendTrigger,
+    .fSendNodeReply = &Node_SendReply,
+    .fSendMsgFromRT = &SendMsgFromEngine,
+    .fSendMsgToRT = &SendMsgToEngine,
+    .fSndFileFormatInfoFromStrings = &sndfileFormatInfoFromStrings,
+    .fGetNode = &World_GetNode,
+    .fGetGraph = &World_GetGraph,
+    .fNRTLock = &World_NRTLock,
+    .fNRTUnlock = &World_NRTUnlock,
+    .fGroup_DeleteAll = &Group_DeleteAll,
+    .fDoneAction = &Unit_DoneAction,
+    .fDoAsynchronousCommand = &PerformAsynchronousCommand,
+    .fDoAsynchronousCommandEx = &PerformAsynchronousCommandEx,
+    .fDoAsyncUnitCommand = &PerformAsyncUnitCommand,
+    .fBufAlloc = &bufAlloc,
+    .fSCfftCreate = &scfft_create,
+    .fSCfftDoFFT = &scfft_dofft,
+    .fSCfftDoIFFT = &scfft_doifft,
+    .fSCfftDestroy = &scfft_destroy,
+    .fGetScopeBuffer = &supersonic_scope_get,
+    .fPushScopeBuffer = &supersonic_scope_push,
+    .fReleaseScopeBuffer = &supersonic_scope_release,
+    .mWorld = nullptr,
+};
+#else
 void InterfaceTable_Init() {
     InterfaceTable* ft = &gInterfaceTable;
     ft->mSine = gSine;
@@ -329,31 +364,9 @@ void InterfaceTable_Init() {
     ft->fPushScopeBuffer = &supersonic_scope_push;
     ft->fReleaseScopeBuffer = &supersonic_scope_release;
 }
+#endif // CLOCKWORK_GUEST
 
-void initialize_library(const char* mUGensPluginPath);
 void initializeScheduler();
-
-static void World_LoadGraphDefs(World* world);
-void World_LoadGraphDefs(World* world) {
-#ifndef SC_LEAN_TARGET
-    GraphDef* list = nullptr;
-    using DirName = SC_Filesystem::DirName;
-
-    if (getenv("SC_SYNTHDEF_PATH")) {
-        SC_StringParser sp(getenv("SC_SYNTHDEF_PATH"), SC_STRPARSE_PATHDELIMITER);
-        while (!sp.AtEnd()) {
-            GraphDef* list = nullptr;
-            char* path = const_cast<char*>(sp.NextToken());
-            list = GraphDef_LoadDir(world, path, list);
-            GraphDef_Define(world, list);
-        }
-    } else {
-        fs::path path = SC_Filesystem::instance().getDirectory(DirName::UserAppSupport) / "synthdefs";
-        list = GraphDef_LoadDir(world, path, list);
-        GraphDef_Define(world, list);
-    }
-#endif // !SC_LEAN_TARGET
-}
 
 namespace scsynth {
 void startAsioThread();
@@ -361,23 +374,18 @@ void stopAsioThread();
 bool asioThreadStarted();
 }
 
-// WHY THE LAST World_New RETURNED NULL, for the host to pass on: without it the
-// caller has "World_New returned null" and nothing to act on. Kept in a fixed
-// buffer and written where the failure is known — before the throw, since
-// what() does not survive the catch-all the wasm build lands in, and in the
-// typed handler where it can be asked. The first reason wins.
-static char g_world_new_error[256] = {0};
-
-static void world_new_failed(const char* why) {
-    if (!g_world_new_error[0] && why)
-        snprintf(g_world_new_error, sizeof(g_world_new_error), "%s", why);
-}
-
-const char* World_NewError() { return g_world_new_error[0] ? g_world_new_error : nullptr; }
-
-
-World* World_New(WorldOptions* inOptions) {
-    g_world_new_error[0] = '\0';
+World* World_New(WorldOptions* inOptions, SupersonicGuest* inGuest, char* outReason, size_t reasonBytes) {
+    // SuperSonic (plural guest): why this World_New returned null, for the host to pass on: without it the
+    // caller has "World_New returned null" and nothing to act on. Written into
+    // the caller's buffer where the failure is known — before the throw, since
+    // what() does not survive the catch-all the wasm build lands in, and in
+    // the typed handler where it can be asked. The first reason wins.
+    if (outReason && reasonBytes)
+        outReason[0] = '\0';
+    const auto world_new_failed = [outReason, reasonBytes](const char* why) {
+        if (outReason && reasonBytes && !outReason[0] && why)
+            snprintf(outReason, reasonBytes, "%s", why);
+    };
 #if (_POSIX_MEMLOCK - 0) >= 200112L
     if (inOptions->mMemoryLocking && inOptions->mRealTime) {
         bool lock_memory = false;
@@ -408,56 +416,47 @@ World* World_New(WorldOptions* inOptions) {
 #endif
 
     try {
+        // SuperSonic (plural guest): the World and its HiddenWorld first, from the instance's heap: the
+        // World names its instance (hw->mGuest), and everything else it owns
+        // is allocated through the World (guest_doors.h). A shell that cannot
+        // be had is no World at all: given back, and nothing to clean up.
+        world = (World*)supersonic_guest_alloc_bytes_for(inGuest, sizeof(World));
+        if (!world) {
+            const char* msg = "World_New: no memory for the World";
+            world_new_failed(msg);
+            return nullptr;
+        }
+        memset(world, 0, sizeof(World));
+        world->hw = (HiddenWorld*)supersonic_guest_alloc_bytes_for(inGuest, sizeof(HiddenWorld));
+        if (!world->hw) {
+            supersonic_guest_free_bytes_for(inGuest, world);
+            world = nullptr;
+            const char* msg = "World_New: no memory for the World's tables";
+            world_new_failed(msg);
+            return nullptr;
+        }
+        memset(world->hw, 0, sizeof(HiddenWorld));
+        world->hw->mGuest = inGuest;
+        world->hw->mGuestMalloc.mWorld = world;
 #if defined(CLOCKWORK_GUEST)
-        {
-            // THE TABLES FIRST, from the working memory: the sine tables, the
-            // polar LUTs, the FFT windows (scsynth_tables.h), built on every
-            // World_New since the memory is zeroed for each — and before the
-            // library is initialised, since the interface table hands plugins
-            // the sine tables' addresses. A host whose working memory is too
-            // small for them (it sized it from dsp_memory_bytes, so only a
-            // host that did not ask) gets them from its heap, and a line says
-            // so.
-            guestArena = const_cast<void*>(supersonic_guest_memory(&guestArenaBytes));
-            void* tables = nullptr;
-            if (guestArena && (size_t)guestArenaBytes >= SCSYNTH_TABLES_BYTES) {
-                tables = guestArena;
-                guestArena = static_cast<char*>(guestArena) + SCSYNTH_TABLES_BYTES;
-                guestArenaBytes -= SCSYNTH_TABLES_BYTES;
-            } else {
-                tables = supersonic_guest_alloc_bytes(SCSYNTH_TABLES_BYTES);
-                scprintf("World_New: the working memory holds no room for the tables (%u bytes); they come from the host's heap\n", (unsigned)SCSYNTH_TABLES_BYTES);
-            }
-            if (!tables) {
-                const char* msg = "World_New: no memory for the lookup tables";
-                scprintf("%s\n", msg);
-                world_new_failed(msg);
-                throw std::runtime_error(msg);
-            }
-            scsynth_tables_place(tables);
-            // The interface table's view of them, every World_New: the first
-            // InterfaceTable_Init copies them, and a later placement may move them.
-            gInterfaceTable.mSine = gSine;
-            gInterfaceTable.mCosecant = gInvSine;
-            gInterfaceTable.mSineWavetable = gSineWavetable;
-        }
+        // SuperSonic (plural guest): the working memory the host gave this guest: the real-time pool's.
+        guestArena = const_cast<void*>(supersonic_guest_memory(world, &guestArenaBytes));
 #endif
-        static bool gLibInitted = false;
-        if (!gLibInitted) {
-            InterfaceTable_Init();
-            initialize_library(inOptions->mUGensPluginPath);
-            initializeScheduler();
-            gLibInitted = true;
-        }
+        // SuperSonic (plural guest): the World's own copy of the interface table, naming it, and its own
+        // registries from the plugins' loads (SuperSonic, plural guest: upstream
+        // does this once per process).
+        world->hw->mInterfaceTable = gInterfaceTable;
+        world->hw->mInterfaceTable.mWorld = world;
+        world->ft = &world->hw->mInterfaceTable;
+        initialize_library(world);
+        initializeScheduler();
 
-        world = (World*)zalloc(1, sizeof(World));
-        world->hw = (HiddenWorld*)zalloc(1, sizeof(HiddenWorld));
 #if defined(CLOCKWORK_GUEST)
         {
             /*
              * The pool's first area, pre-sized here and handed over through
-             * supersonic_rt_pool_area_alloc: the guest's arena when it holds
-             * the whole pool, else the host's heap.
+             * rt_pool_area_alloc: the guest's arena when it holds the whole
+             * pool, else the instance's heap.
              *
              * A POOL THAT CANNOT GROW MUST NOT BE QUIETLY SHRUNK. With growth
              * at 0 — desktop, the NIF and web — a pool that cannot be had at
@@ -474,9 +473,9 @@ World* World_New(WorldOptions* inOptions) {
             void* area = nullptr;
             if (arena && (size_t)arenaBytes >= total) {
                 area = arena;
-                g_rt_pool_memory = arena;
+                world->hw->mRtPoolArenaArea = arena;
             } else {
-                area = supersonic_guest_alloc_bytes(total);
+                area = supersonic_guest_alloc_bytes(world, total);
             }
             if (!area) {
                 char msg[200];
@@ -489,16 +488,18 @@ World* World_New(WorldOptions* inOptions) {
                 // survive the trip. Catch-by-type needs RTTI the wasm build
                 // does not carry, so this lands in World_New's catch-all, which
                 // has an exception it cannot ask anything of.
-                scprintf("%s\n", msg);
+                scprintf(world, "%s\n", msg);
                 world_new_failed(msg);
                 throw std::runtime_error(msg);
             }
-            g_rt_pool_pending = area;
-            world->hw->mAllocPool = guest_new<AllocPool>(supersonic_rt_pool_area_alloc, supersonic_rt_pool_area_free,
-                                                         want, SCSYNTH_RT_POOL_GROWTH_SIZE);
+            world->hw->mRtPoolFirstArea = area;
+            world->hw->mAllocPool = guest_new<AllocPool>(world, rt_pool_area_alloc, rt_pool_area_free, world, want,
+                                                         SCSYNTH_RT_POOL_GROWTH_SIZE);
         }
 #else
-        world->hw->mAllocPool = guest_new<AllocPool>(malloc, free, inOptions->mRealTimeMemorySize * 1024, 0);
+        world->hw->mAllocPool = guest_new<AllocPool>(
+            world, [](void*, size_t size) { return malloc(size); }, [](void*, void* ptr) { free(ptr); }, nullptr,
+            inOptions->mRealTimeMemorySize * 1024, 0);
 #endif
 #ifndef SC_LEAN_TARGET
         world->hw->mQuitProgram = new sc::sync::semaphore(0);
@@ -508,17 +509,19 @@ World* World_New(WorldOptions* inOptions) {
         HiddenWorld* hw = world->hw;
         // The instance's own, in the guest's memory (guest_heap.h; upstream:
         // new, on the system allocator).
-        hw->mGraphDefLib = guest_new<GrafDefTable>(&gGuestMalloc, inOptions->mMaxGraphDefs, false);
-        hw->mNodeLib = guest_new<IntHashTable<Node, AllocPool>>(hw->mAllocPool, inOptions->mMaxNodes, false);
-        hw->mUsers = guest_new<Clients>();
+        hw->mGraphDefLib = guest_new<GrafDefTable>(world, &hw->mGuestMalloc, inOptions->mMaxGraphDefs, false);
+        hw->mNodeLib = guest_new<IntHashTable<Node, AllocPool>>(world, hw->mAllocPool, inOptions->mMaxNodes, false);
+        hw->mUsers = guest_new<Clients>(world, std::less<ReplyAddress>(), GuestAllocator<ReplyAddress>(world));
         hw->mMaxUsers = inOptions->mMaxLogins;
-        hw->mAvailableClientIDs = guest_new<ClientIDs>();
+        hw->mAvailableClientIDs = guest_new<ClientIDs>(world, GuestAllocator<int>(world));
         for (int i = 0; i < hw->mMaxUsers; i++) {
             hw->mAvailableClientIDs->push_back(i);
         }
-        hw->mClientIDdict = guest_new<ClientIDDict>();
+        hw->mClientIDdict = guest_new<ClientIDDict>(world, std::less<ReplyAddress>(),
+                                                     GuestAllocator<std::pair<const ReplyAddress, uint32>>(world));
         hw->mHiddenID = -8;
         hw->mRecentID = -8;
+        hw->mSeedBase = inOptions->mDeterministicSeed;
 
 
         world->mNumUnits = 0;
@@ -541,23 +544,23 @@ World* World_New(WorldOptions* inOptions) {
         // Control busses are process-local on every runtime: the host owns
         // whatever shared segment there is, and the engine publishes nothing
         // of its own into one.
-        world->mControlBus = (float*)zalloc(world->mNumControlBusChannels, sizeof(float));
+        world->mControlBus = (float*)zalloc(world, world->mNumControlBusChannels, sizeof(float));
 
         world->mNumSharedControls = 0;
         world->mSharedControls = inOptions->mSharedControls;
 
         int numsamples = world->mBufLength * world->mNumAudioBusChannels;
-        world->mAudioBus = (float*)zalloc(numsamples, sizeof(float));
+        world->mAudioBus = (float*)zalloc(world, numsamples, sizeof(float));
 
-        world->mAudioBusTouched = (int32*)zalloc(inOptions->mNumAudioBusChannels, sizeof(int32));
-        world->mControlBusTouched = (int32*)zalloc(inOptions->mNumControlBusChannels, sizeof(int32));
+        world->mAudioBusTouched = (int32*)zalloc(world, inOptions->mNumAudioBusChannels, sizeof(int32));
+        world->mControlBusTouched = (int32*)zalloc(world, inOptions->mNumControlBusChannels, sizeof(int32));
 
         world->mNumSndBufs = inOptions->mNumBuffers;
-        world->mSndBufs = (SndBuf*)zalloc(world->mNumSndBufs, sizeof(SndBuf));
-        world->mSndBufsNonRealTimeMirror = (SndBuf*)zalloc(world->mNumSndBufs, sizeof(SndBuf));
-        world->mSndBufUpdates = (SndBufUpdates*)zalloc(world->mNumSndBufs, sizeof(SndBufUpdates));
+        world->mSndBufs = (SndBuf*)zalloc(world, world->mNumSndBufs, sizeof(SndBuf));
+        world->mSndBufsNonRealTimeMirror = (SndBuf*)zalloc(world, world->mNumSndBufs, sizeof(SndBuf));
+        world->mSndBufUpdates = (SndBufUpdates*)zalloc(world, world->mNumSndBufs, sizeof(SndBufUpdates));
 
-        GroupNodeDef_Init();
+        GroupNodeDef_Init(world);
 
         int err = Group_New(world, 0, &world->mTopGroup);
         if (err)
@@ -565,16 +568,14 @@ World* World_New(WorldOptions* inOptions) {
 
         world->mRealTime = inOptions->mRealTime;
 
-        world->ft = &gInterfaceTable;
-
         world->mNumRGens = inOptions->mNumRGens;
-        world->mRGen = guest_new_array<RGen>(world->mNumRGens);
+        world->mRGen = guest_new_array<RGen>(world, world->mNumRGens);
         for (uint32 i = 0; i < world->mNumRGens; ++i) {
-            world->mRGen[i].init(server_timeseed());
+            world->mRGen[i].init(server_timeseed(world));
         }
 
-        world->mNRTLock = guest_new<SC_Lock>();
-        world->mDriverLock = guest_new<SC_Lock>();
+        world->mNRTLock = guest_new<SC_Lock>(world);
+        world->mDriverLock = guest_new<SC_Lock>(world);
 
         if (inOptions->mPassword) {
             strncpy(world->hw->mPassword, inOptions->mPassword, 31);
@@ -619,10 +620,6 @@ World* World_New(WorldOptions* inOptions) {
 #ifdef __APPLE__
             hw->mAudioDriver->SetSafetyClipThreshold(inOptions->mSafetyClipThreshold);
 #endif
-
-            if (inOptions->mLoadGraphDefs) {
-                World_LoadGraphDefs(world);
-            }
 
             if (!hw->mAudioDriver->Setup()) {
                 return nullptr;
@@ -689,8 +686,8 @@ int World_CopySndBuf(World* world, uint32 index, SndBuf* outBuf, bool onlyIfChan
         if (buf->data && buf->samples) {
             uint32 bufSize = buf->samples * sizeof(float);
             if (buf->samples != outBuf->samples) {
-                free_alig(outBuf->data);
-                outBuf->data = (float*)malloc_alig(bufSize);
+                free_alig(world, outBuf->data);
+                outBuf->data = (float*)malloc_alig(world, bufSize);
             }
             memcpy(outBuf->data, buf->data, bufSize);
             outBuf->channels = buf->channels;
@@ -699,7 +696,7 @@ int World_CopySndBuf(World* world, uint32 index, SndBuf* outBuf, bool onlyIfChan
             outBuf->mask = buf->mask;
             outBuf->mask1 = buf->mask1;
         } else {
-            free_alig(outBuf->data);
+            free_alig(world, outBuf->data);
             outBuf->data = nullptr;
             outBuf->channels = 0;
             outBuf->samples = 0;
@@ -757,9 +754,6 @@ bool nextOSCPacket(FILE* file, OSC_Packet* packet, int64& outTime) {
 
 
 void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) noexcept(false) {
-    if (inOptions->mLoadGraphDefs) {
-        World_LoadGraphDefs(world);
-    }
     int bufLength = world->mBufLength;
     int fileBufFrames = inOptions->mPreferredHardwareBufferFrameSize;
     if (fileBufFrames <= 0)
@@ -898,7 +892,7 @@ void World_NonRealTimeSynthesis(struct World* world, WorldOptions* inOptions) no
                     printf("nextOSCPacket %g\n", schedTime * oscToSeconds);
                 }
                 if (schedTime < prevTime) {
-                    scprintf("ERROR: Packet time stamps out-of-order.\n");
+                    scprintf(world, "ERROR: Packet time stamps out-of-order.\n");
                     run = false;
                     goto Bail;
                 }
@@ -1000,14 +994,14 @@ int32 GetHash(GraphDef* inGraphDef) { return inGraphDef->mNodeDef.mHash; }
 void World_AddGraphDef(World* inWorld, GraphDef* inGraphDef) {
     bool added = inWorld->hw->mGraphDefLib->Add(inGraphDef);
     if (!added)
-        scprintf(
+        scprintf(inWorld,
             "ERROR: Could not add SynthDef %s.\nTry adjusting ServerOptions:maxSynthDefs or the -d cmdline flag.\n",
             (char*)inGraphDef->mNodeDef.mName);
     for (uint32 i = 0; i < inGraphDef->mNumVariants; ++i) {
         GraphDef* var = inGraphDef->mVariants + i;
         added = inWorld->hw->mGraphDefLib->Add(var);
         if (!added)
-            scprintf(
+            scprintf(inWorld,
                 "ERROR: Could not add SynthDef %s.\nTry adjusting ServerOptions:maxSynthDefs or the -d cmdline flag.\n",
                 (char*)var->mNodeDef.mName);
     }
@@ -1059,12 +1053,12 @@ int32* GetKey(UnitDef* inUnitDef) { return inUnitDef->mUnitDefName; }
 
 int32 GetHash(UnitDef* inUnitDef) { return inUnitDef->mHash; }
 
-bool AddUnitDef(UnitDef* inUnitDef) { return gUnitDefLib->Add(inUnitDef); }
+bool AddUnitDef(World* inWorld, UnitDef* inUnitDef) { return inWorld->hw->mUnitDefLib->Add(inUnitDef); }
 
-bool RemoveUnitDef(UnitDef* inUnitDef) { return gUnitDefLib->Remove(inUnitDef); }
+bool RemoveUnitDef(World* inWorld, UnitDef* inUnitDef) { return inWorld->hw->mUnitDefLib->Remove(inUnitDef); }
 
-UnitDef* GetUnitDef(int32* inKey) {
-    return gUnitDefLib->Get(inKey);
+UnitDef* GetUnitDef(World* inWorld, int32* inKey) {
+    return inWorld->hw->mUnitDefLib->Get(inKey);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1073,11 +1067,11 @@ int32* GetKey(BufGen* inBufGen) { return inBufGen->mBufGenName; }
 
 int32 GetHash(BufGen* inBufGen) { return inBufGen->mHash; }
 
-bool AddBufGen(BufGen* inBufGen) { return gBufGenLib->Add(inBufGen); }
+bool AddBufGen(World* inWorld, BufGen* inBufGen) { return inWorld->hw->mBufGenLib->Add(inBufGen); }
 
-bool RemoveBufGen(BufGen* inBufGen) { return gBufGenLib->Remove(inBufGen); }
+bool RemoveBufGen(World* inWorld, BufGen* inBufGen) { return inWorld->hw->mBufGenLib->Remove(inBufGen); }
 
-BufGen* GetBufGen(int32* inKey) { return gBufGenLib->Get(inKey); }
+BufGen* GetBufGen(World* inWorld, int32* inKey) { return inWorld->hw->mBufGenLib->Get(inKey); }
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1085,11 +1079,13 @@ int32* GetKey(PlugInCmd* inPlugInCmd) { return inPlugInCmd->mCmdName; }
 
 int32 GetHash(PlugInCmd* inPlugInCmd) { return inPlugInCmd->mHash; }
 
-bool AddPlugInCmd(PlugInCmd* inPlugInCmd) { return gPlugInCmds->Add(inPlugInCmd); }
+bool AddPlugInCmd(World* inWorld, PlugInCmd* inPlugInCmd) { return inWorld->hw->mPlugInCmds->Add(inPlugInCmd); }
 
-bool RemovePlugInCmd(PlugInCmd* inPlugInCmd) { return gPlugInCmds->Remove(inPlugInCmd); }
+bool RemovePlugInCmd(World* inWorld, PlugInCmd* inPlugInCmd) {
+    return inWorld->hw->mPlugInCmds->Remove(inPlugInCmd);
+}
 
-PlugInCmd* GetPlugInCmd(int32* inKey) { return gPlugInCmds->Get(inKey); }
+PlugInCmd* GetPlugInCmd(World* inWorld, int32* inKey) { return inWorld->hw->mPlugInCmds->Get(inKey); }
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -1129,18 +1125,18 @@ Group* World_GetGroup(World* inWorld, int32 inID) {
 void World_Run(World* inWorld) {
     // Validate world before running
     if (!inWorld) {
-        scprintf("ERROR: World_Run called with null World");
+        scprintf(inWorld, "ERROR: World_Run called with null World");
         return;
     }
     if (!inWorld->mTopGroup) {
-        scprintf("ERROR: World_Run: mTopGroup is null");
+        scprintf(inWorld, "ERROR: World_Run: mTopGroup is null");
         return;
     }
 
     // run top group
     Node* node = (Node*)inWorld->mTopGroup;
     if (!node->mCalcFunc) {
-        scprintf("ERROR: World_Run: TopGroup has null mCalcFunc");
+        scprintf(inWorld, "ERROR: World_Run: TopGroup has null mCalcFunc");
         return;
     }
 
@@ -1154,19 +1150,20 @@ void World_Start(World* inWorld) {
     for (uint32 i = 0; i < inWorld->mNumControlBusChannels; ++i)
         inWorld->mControlBusTouched[i] = -1;
 
-    inWorld->hw->mWireBufSpace = (float*)malloc_alig(inWorld->hw->mMaxWireBufs * inWorld->mBufLength * sizeof(float));
+    inWorld->hw->mWireBufSpace =
+        (float*)malloc_alig(inWorld, inWorld->hw->mMaxWireBufs * inWorld->mBufLength * sizeof(float));
 
     // A graph's block is at most the whole wire buffer space (Graph_Ctor).
     const size_t portBufferSize = (size_t)inWorld->hw->mMaxWireBufs * inWorld->mBufLength * sizeof(float);
     Wire& missingInput = inWorld->hw->mMissingInputWire;
     missingInput.mFromUnit = nullptr;
     missingInput.mCalcRate = calc_ScalarRate;
-    missingInput.mBuffer = (float*)malloc_alig(portBufferSize);
+    missingInput.mBuffer = (float*)malloc_alig(inWorld, portBufferSize);
     missingInput.mScalarValue = 0.f;
     if (missingInput.mBuffer)
         memset(missingInput.mBuffer, 0, portBufferSize);
     inWorld->mMissingInput = &missingInput;
-    inWorld->mMissingOutput = (float*)malloc_alig(portBufferSize);
+    inWorld->mMissingOutput = (float*)malloc_alig(inWorld, portBufferSize);
 
     inWorld->hw->mTriggers.MakeEmpty();
     inWorld->hw->mNodeMsgs.MakeEmpty();
@@ -1197,24 +1194,25 @@ void World_Cleanup(World* world, bool unload_plugins) {
 
     // Unload plugins after all nodes are destroyed, so that unit commands
     // and destructor functions are still available during node cleanup.
-    if (unload_plugins)
-        deinitialize_library();
+    // The registries are this World's (SuperSonic, plural guest): freed with
+    // it, whatever unload_plugins says.
+    deinitialize_library(world);
 
     // Guard against partially-constructed World (e.g. World_New catch block)
     if (world->mDriverLock)
         reinterpret_cast<SC_Lock*>(world->mDriverLock)->lock();
     if (hw) {
-        sc_free(hw->mWireBufSpace);
-        sc_free(hw->mMissingInputWire.mBuffer);
-        sc_free(world->mMissingOutput);
+        sc_free(world, hw->mWireBufSpace);
+        sc_free(world, hw->mMissingInputWire.mBuffer);
+        sc_free(world, world->mMissingOutput);
         delete hw->mAudioDriver;
         hw->mAudioDriver = nullptr;
     }
     if (world->mNRTLock)
-        guest_delete(reinterpret_cast<SC_Lock*>(world->mNRTLock));
+        guest_delete(world, reinterpret_cast<SC_Lock*>(world->mNRTLock));
     if (world->mDriverLock) {
         reinterpret_cast<SC_Lock*>(world->mDriverLock)->unlock();
-        guest_delete(reinterpret_cast<SC_Lock*>(world->mDriverLock));
+        guest_delete(world, reinterpret_cast<SC_Lock*>(world->mDriverLock));
     }
     // A World_New that threw before the top group was made — a real-time
     // pool the heap could not hold, say — has no group to free, and no pool
@@ -1229,10 +1227,10 @@ void World_Cleanup(World* world, bool unload_plugins) {
         // Bytes in the assets area are the client's (an asset, or a /b_allocPtr
         // region): clockwork releases every asset when the instance goes,
         // and the client reclaims. Only heap memory is ours to free.
-        if (nrtbuf->data && !supersonic_assets_contains(nrtbuf->data))
-            free_alig(nrtbuf->data);
-        if (rtbuf->data && rtbuf->data != nrtbuf->data && !supersonic_assets_contains(rtbuf->data))
-            free_alig(rtbuf->data);
+        if (nrtbuf->data && !supersonic_assets_contains(world, nrtbuf->data))
+            free_alig(world, nrtbuf->data);
+        if (rtbuf->data && rtbuf->data != nrtbuf->data && !supersonic_assets_contains(world, rtbuf->data))
+            free_alig(world, rtbuf->data);
 
 #ifndef NO_LIBSNDFILE
         if (nrtbuf->sndfile)
@@ -1242,14 +1240,17 @@ void World_Cleanup(World* world, bool unload_plugins) {
 #endif
     }
 
-    free_alig(world->mSndBufsNonRealTimeMirror);
-    free_alig(world->mSndBufs);
+    free_alig(world, world->mSndBufsNonRealTimeMirror);
+    free_alig(world, world->mSndBufs);
 
-    free_alig(world->mControlBusTouched);
-    free_alig(world->mAudioBusTouched);
-    free_alig(world->mControlBus);
-    free_alig(world->mAudioBus);
-    guest_delete_array(world->mRGen);
+    free_alig(world, world->mControlBusTouched);
+    free_alig(world, world->mAudioBusTouched);
+    free_alig(world, world->mControlBus);
+    free_alig(world, world->mAudioBus);
+    guest_delete_array(world, world->mRGen);
+    // SuperSonic (plural guest): the shell goes last, through the instance it names: the World's own
+    // doors need hw until then.
+    SupersonicGuest* guest = hw ? hw->mGuest : nullptr;
     if (hw) {
 #ifndef NO_LIBSNDFILE
         if (hw->mNRTInputFile)
@@ -1259,18 +1260,18 @@ void World_Cleanup(World* world, bool unload_plugins) {
         if (hw->mNRTCmdFile)
             fclose(hw->mNRTCmdFile);
 #endif
-        guest_delete(hw->mUsers);
-        guest_delete(hw->mAvailableClientIDs);
-        guest_delete(hw->mClientIDdict);
-        guest_delete(hw->mNodeLib);
-        guest_delete(hw->mGraphDefLib);
+        guest_delete(world, hw->mUsers);
+        guest_delete(world, hw->mAvailableClientIDs);
+        guest_delete(world, hw->mClientIDdict);
+        guest_delete(world, hw->mNodeLib);
+        guest_delete(world, hw->mGraphDefLib);
 #ifndef SC_LEAN_TARGET
         delete hw->mQuitProgram;
 #endif
-        guest_delete(hw->mAllocPool);
-        free_alig(hw);
+        guest_delete(world, hw->mAllocPool);
+        supersonic_guest_free_bytes_for(guest, hw);
     }
-    free_alig(world);
+    supersonic_guest_free_bytes_for(guest, world);
 }
 
 
@@ -1282,7 +1283,7 @@ void World_NRTUnlock(World* world) { reinterpret_cast<SC_Lock*>(world->mNRTLock)
 
 inline int32 BUFMASK(int32 x) { return (1 << (31 - CLZ(x))) - 1; }
 
-SCErr bufAlloc(SndBuf* buf, int numChannels, int numFrames, double sampleRate) {
+SCErr bufAlloc(World* inWorld, SndBuf* buf, int numChannels, int numFrames, double sampleRate) {
     // numChannels/numFrames arrive straight from OSC (/b_alloc, /b_allocRead,
     // …). Their product must be computed in 64-bit: a 32-bit numFrames *
     // numChannels can overflow to a small or negative value, under-allocating
@@ -1297,7 +1298,7 @@ SCErr bufAlloc(SndBuf* buf, int numChannels, int numFrames, double sampleRate) {
         return kSCErr_Failed;
     // A request that cannot be met leaves the buffer as it was, its samples and
     // the counts that describe them together.
-    float* data = (float*)zalloc((size_t)numSamples, sizeof(float));
+    float* data = (float*)zalloc(inWorld, (size_t)numSamples, sizeof(float));
     if (!data)
         return kSCErr_Failed;
 
@@ -1439,7 +1440,7 @@ void DeleteGraphDefMsg::Perform() {
             SendReply(const_cast<ReplyAddress*>(&addr), packet.data(), packet.size());
         }
 
-        GraphDef_Free(def);
+        GraphDef_Free(mWorld, def);
 
         def = next;
     }
@@ -1464,4 +1465,6 @@ SCBool SendMsgFromEngine(World* inWorld, FifoMsg* inMsg) {
     return inWorld->hw->mAudioDriver->SendMsgFromEngine(*inMsg);
 }
 
+#ifndef CLOCKWORK_GUEST
 void SetPrintFunc(PrintFunc func) { gPrint = func; }
+#endif

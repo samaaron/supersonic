@@ -86,7 +86,7 @@ ring buffers in its own workflow.
 ## Third-party code and SBOMs
 
 Besides our own code and Clockwork, SuperSonic includes a few third-party
-libraries: nova-simd, TLSF and two files from sc3-plugins.
+libraries: nova-simd and two files from sc3-plugins.
 [docs/components.cdx.json](docs/components.cdx.json) lists each one and the
 upstream commit it came from. It also records SuperCollider, which we forked
 SuperSonic's synthesis engine from, as SuperSonic's ancestor.

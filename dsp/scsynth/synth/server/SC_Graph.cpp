@@ -69,7 +69,7 @@ void Graph_FirstCalc(Graph* inGraph);
 void Graph_NullFirstCalc(Graph* inGraph);
 
 static void Graph_Dtor(Graph* inGraph) {
-    // scprintf("->Graph_Dtor %d\n", inGraph->mNode.mID);
+    // scprintf(inGraph->mNode.mWorld, "->Graph_Dtor %d\n", inGraph->mNode.mID);
     World* world = inGraph->mNode.mWorld;
     uint32 numUnits = inGraph->mNumUnits;
     Unit** graphUnits = inGraph->mUnits;
@@ -103,7 +103,7 @@ static void Graph_Dtor(Graph* inGraph) {
     GraphDef_Release(world, GRAPHDEF(inGraph));
 
     Node_Dtor(&inGraph->mNode);
-    // scprintf("<-Graph_Dtor\n");
+    // scprintf(inGraph->mNode.mWorld, "<-Graph_Dtor\n");
 }
 
 // This is called by asynchronous unit commands to prevent the Graph
@@ -159,7 +159,7 @@ int Graph_New(World* inWorld, GraphDef* inGraphDef, int32 inID, sc_msg_iter* arg
     Graph* graph;
     int err = Node_New(inWorld, &inGraphDef->mNodeDef, inID, (Node**)&graph);
     if (err) {
-        scprintf("[Graph_New] ERROR: Node_New failed with error code %d", err);
+        scprintf(inWorld, "[Graph_New] ERROR: Node_New failed with error code %d", err);
         return err;
     }
 
@@ -170,7 +170,7 @@ int Graph_New(World* inWorld, GraphDef* inGraphDef, int32 inID, sc_msg_iter* arg
 
 // 'argtype' is true for normal args, false for setn type args
 static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_msg_iter* msg, bool argtype) {
-    // scprintf("->Graph_Ctor\n");
+    // scprintf(inWorld, "->Graph_Ctor\n");
 
     // hit the memory allocator only once.
     char* memory = (char*)graph + kSCGraphHeaderSize;
@@ -460,7 +460,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         if (index < graph->mNumControls) {
             blockSize = sc_float_to_int32(graph->mMapControls[index][0]);
         } else {
-            scprintf("ERROR: block size control index %d out of range!\n", index);
+            scprintf(inWorld, "ERROR: block size control index %d out of range!\n", index);
             blockSize = 0;
         }
     }
@@ -473,7 +473,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         if (index < graph->mNumControls) {
             upsample = graph->mMapControls[index][0];
         } else {
-            scprintf("ERROR: resample control index %d out of range!\n", index);
+            scprintf(inWorld, "ERROR: resample control index %d out of range!\n", index);
             upsample = 1.0;
         }
     }
@@ -483,7 +483,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
     }
     // A factor can come from a control, so it can be anything.
     if (!std::isfinite(upsample)) {
-        scprintf("WARNING: Synth: bad resample factor (%f)\n", upsample);
+        scprintf(inWorld, "WARNING: Synth: bad resample factor (%f)\n", upsample);
         upsample = 1.0;
     }
 
@@ -501,26 +501,26 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
             if (ISPOWEROFTWO(sc_float_to_int32(upsample))) {
                 upsample = sc_float_to_int32(upsample);
                 if (upsample > kMaxResampleFactor) {
-                    scprintf("WARNING: Synth: upsample factor (%f) above %d, using %d\n", upsample,
+                    scprintf(inWorld, "WARNING: Synth: upsample factor (%f) above %d, using %d\n", upsample,
                              kMaxResampleFactor, kMaxResampleFactor);
                     upsample = kMaxResampleFactor;
                 }
                 graph->mFlags |= kGraph_Resample; // ok
             } else {
-                scprintf("WARNING: Synth: upsample factor (%f) not a power of two\n", upsample);
+                scprintf(inWorld, "WARNING: Synth: upsample factor (%f) not a power of two\n", upsample);
                 upsample = 1.0;
             }
         } else if (upsample < 0.0) {
-            scprintf("WARNING: Synth: bad resample factor (%f)\n", upsample);
+            scprintf(inWorld, "WARNING: Synth: bad resample factor (%f)\n", upsample);
             upsample = 1.0;
         } else if (upsample < 1.0) {
-            scprintf("WARNING: Synth: downsampling (%f) not supported (yet)\n", upsample);
+            scprintf(inWorld, "WARNING: Synth: downsampling (%f) not supported (yet)\n", upsample);
             upsample = 1.0;
         }
 
         if (blockSize != 0) {
             if (!ISPOWEROFTWO(blockSize)) {
-                scprintf("WARNING: Synth: block size (%d) not a power of two\n", blockSize);
+                scprintf(inWorld, "WARNING: Synth: block size (%d) not a power of two\n", blockSize);
                 // use Server block size
                 blockSize = inWorld->mBufLength;
             }
@@ -531,7 +531,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                 // For now, let's keep the upsample factor and adjust the block size accordingly.
                 const int32_t originalBlockSize = blockSize;
                 blockSize = inWorld->mBufLength * sc_float_to_int32(upsample);
-                scprintf("WARNING: Synth: block size (%d) too large for resample factor (%f). "
+                scprintf(inWorld, "WARNING: Synth: block size (%d) too large for resample factor (%f). "
                          "Adjusting block size to %d samples.\n",
                          originalBlockSize, upsample, blockSize);
             }
@@ -546,7 +546,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                     blockSize = availableBufferSpace / inGraphDef->mNumWireBufs;
                     assert(blockSize >= inWorld->mBufLength);
                     const int32_t minNumWireBufs = requiredBufferSpace / inWorld->mBufLength;
-                    scprintf("WARNING: Synth: too little wire buffer space for block size (%d) and "
+                    scprintf(inWorld, "WARNING: Synth: too little wire buffer space for block size (%d) and "
                              "resample factor (%f). Adjusting block size to %d samples. Please increase "
                              "the number of wire buffers in the Server Options to at least %d. \n",
                              originalBlockSize, upsample, blockSize, minNumWireBufs);
@@ -578,7 +578,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
         Rate_Init(graph->mBufRate, sampleRate / blockSize, 1);
     }
 
-    //  scprintf("Graph_Ctor: block size: %d, upsample: %f, ticks: %d\n",
+    //  scprintf(inWorld, "Graph_Ctor: block size: %d, upsample: %f, ticks: %d\n",
     //           blockSize, upsample, graph->mNumTicks);
 
     // so far mPrivate is only used for queued unit commands,
@@ -586,7 +586,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
     graph->mPrivate = nullptr;
 
     // initialize units
-    // scprintf("initialize units\n");
+    // scprintf(inWorld, "initialize units\n");
     Unit** calcUnits = graph->mCalcUnits;
     Unit** graphUnits = graph->mUnits;
     int calcCtr = 0;
@@ -606,7 +606,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
 
         {
             // hook up unit inputs
-            // scprintf("hook up unit inputs\n");
+            // scprintf(inWorld, "hook up unit inputs\n");
             InputSpec* inputSpec = unitSpec->mInputSpec;
             Wire** unitInput = unit->mInput;
             float** unitInBuf = unit->mInBuf;
@@ -620,7 +620,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
 
         {
             // hook up unit outputs
-            // scprintf("hook up unit outputs\n");
+            // scprintf(inWorld, "hook up unit outputs\n");
             Wire** unitOutput = unit->mOutput;
             float** unitOutBuf = unit->mOutBuf;
             uint32 numOutputs = unitSpec->mNumOutputs;
@@ -665,7 +665,7 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
 void Graph_QueueUnitCmd(Graph* inGraph, int inSize, const char* inData, const ReplyAddress* inReplyAddress) {
     // put the unit command on a queue and dispatch it right after the first
     // calc function, i.e. after calling the unit constructors.
-    // scprintf("->Graph_QueueUnitCmd\n");
+    // scprintf(inGraph->mNode.mWorld, "->Graph_QueueUnitCmd\n");
     QueuedCmd* cmd = (QueuedCmd*)World_Alloc(inGraph->mNode.mWorld, sizeof(QueuedCmd) + inSize);
     cmd->mNext = nullptr;
     if (inReplyAddress)
@@ -780,7 +780,7 @@ void Graph_FirstCalc(Graph* inGraph) {
 void Node_NullCalc(struct Node* /*inNode*/);
 
 void Graph_NullFirstCalc(Graph* inGraph) {
-    // scprintf("->Graph_FirstCalc\n");
+    // scprintf(inGraph->mNode.mWorld, "->Graph_FirstCalc\n");
     uint32 numUnits = inGraph->mNumUnits;
     Unit** units = inGraph->mUnits;
     for (uint32 i = 0; i < numUnits; ++i) {
@@ -788,7 +788,7 @@ void Graph_NullFirstCalc(Graph* inGraph) {
         // call constructor
         (*unit->mUnitDef->mUnitCtorFunc)(unit);
     }
-    // scprintf("<-Graph_FirstCalc\n");
+    // scprintf(inGraph->mNode.mWorld, "<-Graph_FirstCalc\n");
 
     inGraph->mNode.mCalcFunc = &Node_NullCalc;
     // after setting the calc function!
@@ -798,7 +798,7 @@ void Graph_NullFirstCalc(Graph* inGraph) {
 inline void Graph_Calc_unit(Unit* unit) { (unit->mCalcFunc)(unit, unit->mBufLength); }
 
 void Graph_Calc(Graph* inGraph) {
-    // scprintf("->Graph_Calc\n");
+    // scprintf(inGraph->mNode.mWorld, "->Graph_Calc\n");
     uint32 numCalcUnits = inGraph->mNumCalcUnits;
     Unit** calcUnits = inGraph->mCalcUnits;
 
@@ -846,7 +846,7 @@ void Graph_Calc(Graph* inGraph) {
             Graph_Calc_unit(calcUnits[i]);
     }
 
-    // scprintf("<-Graph_Calc\n");
+    // scprintf(inGraph->mNode.mWorld, "<-Graph_Calc\n");
 }
 
 void Graph_CalcTrace(Graph* inGraph);
@@ -855,34 +855,34 @@ void Graph_CalcTrace(Graph* inGraph) {
     Unit** calcUnits = inGraph->mCalcUnits;
 
     if (inGraph->mFlags & kGraph_ReblockOrResample) {
-        scprintf("\nTRACE %d  %s    #units: %d, block size: %d, sr: %d\n", inGraph->mNode.mID,
+        scprintf(inGraph->mNode.mWorld, "\nTRACE %d  %s    #units: %d, block size: %d, sr: %d\n", inGraph->mNode.mID,
                       inGraph->mNode.mDef->mName, numCalcUnits, inGraph->mFullRate->mBufLength,
                       sc_float_to_int32(inGraph->mFullRate->mSampleRate));
     } else {
-        scprintf("\nTRACE %d  %s    #units: %d\n", inGraph->mNode.mID, inGraph->mNode.mDef->mName, numCalcUnits);
+        scprintf(inGraph->mNode.mWorld, "\nTRACE %d  %s    #units: %d\n", inGraph->mNode.mID, inGraph->mNode.mDef->mName, numCalcUnits);
     }
 
     int numTicks = inGraph->mNumTicks;
 
     for (int k = 0; k < numTicks; ++k) {
         if (numTicks > 1)
-            scprintf("tick %d of %d:\n", k + 1, numTicks);
+            scprintf(inGraph->mNode.mWorld, "tick %d of %d:\n", k + 1, numTicks);
 
         inGraph->mTickCounter = k;
 
         for (uint32 i = 0; i < numCalcUnits; ++i) {
             Unit* unit = calcUnits[i];
-            scprintf("  unit %d %s\n    in ", i, (char*)unit->mUnitDef->mUnitDefName);
+            scprintf(inGraph->mNode.mWorld, "  unit %d %s\n    in ", i, (char*)unit->mUnitDef->mUnitDefName);
             for (uint32 j = 0; j < unit->mNumInputs; ++j) {
-                scprintf(" %g", ZIN0(j));
+                scprintf(inGraph->mNode.mWorld, " %g", ZIN0(j));
             }
-            scprintf("\n");
+            scprintf(inGraph->mNode.mWorld, "\n");
             (unit->mCalcFunc)(unit, unit->mBufLength);
-            scprintf("    out");
+            scprintf(inGraph->mNode.mWorld, "    out");
             for (uint32 j = 0; j < unit->mNumOutputs; ++j) {
-                scprintf(" %g", ZOUT0(j));
+                scprintf(inGraph->mNode.mWorld, " %g", ZOUT0(j));
             }
-            scprintf("\n");
+            scprintf(inGraph->mNode.mWorld, "\n");
         }
     }
 

@@ -26,7 +26,7 @@ static constexpr int MAX_BUNDLE_DEPTH = 8;
 static bool UnrollOSCPacketWithDepth(World* inWorld, int inSize, char* inData, OSC_Packet* inPacket, int depth) {
     // Depth limit check - prevents stack overflow from deeply nested bundles
     if (depth > MAX_BUNDLE_DEPTH) {
-        scprintf("ERROR: UnrollOSCPacket nesting too deep (%d > %d), skipping",
+        scprintf(inWorld, "ERROR: UnrollOSCPacket nesting too deep (%d > %d), skipping",
                      depth, MAX_BUNDLE_DEPTH);
         return false;
     }

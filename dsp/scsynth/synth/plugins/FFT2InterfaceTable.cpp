@@ -30,7 +30,6 @@ extern void initPV_ThirdParty(InterfaceTable*);
 extern void initFeatureDetectors(InterfaceTable* it);
 
 PluginLoad(PV_ThirdParty) {
-    ft = inTable;
 
     initConvolution(inTable);
     initPV_ThirdParty(inTable);

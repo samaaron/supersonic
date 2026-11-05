@@ -8,7 +8,8 @@
  * natively, a decoded blob through the assets area and /b_allocPtr on the web —
  * and this verb hands the plugin channel 0 of that buffer, converted to the
  * 16-bit integers it reads. One verb, one path, on both platforms; the buffer
- * can be freed afterwards, the plugin keeps its own copy.
+ * can be freed afterwards, the plugin keeps its own copy. The copy is the
+ * instance's (guest_doors.h: supersonic_piano_wavetable) and goes with it.
  *
  * A buffer shorter than the table the plugin reads is refused with /fail. A
  * bufnum of -1 takes the table away again, and the piano falls silent.
@@ -27,15 +28,6 @@ extern "C" {
 
 int supersonic_meth_piano_wavetable(struct World* inWorld, int inSize, const char* inData,
                                     struct ReplyAddress* inReply);
-
-/* Frames in the table the plugin currently plays from; 0 while it has none. */
-size_t supersonic_piano_wavetable_frames(void);
-
-/* The instance is going (dsp_free): forget its table. The table lives in
- * the instance's own memory and goes with it; the pointer kept here must
- * not outlive it, or the next instance's first swap would hand a dead
- * instance's table back to its own heap. */
-void supersonic_piano_wavetable_reset(void);
 
 /* The plugin's own minimum (MdaUGens.cpp): a shorter table is not a table. */
 size_t supersonic_piano_wavetable_min_frames(void);

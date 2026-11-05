@@ -8,6 +8,7 @@
  * have is written nowhere the synth reads.
  */
 #include "SynthDefBytes.h"
+#include "GuestWorld.h"   // the engine's World, whose registries hold the unit types
 
 #include "HashTable.h"
 #include "SC_HiddenWorld.h"
@@ -29,10 +30,11 @@ constexpr int8_t kScalar = 0;
 constexpr int8_t kControl = 1;
 constexpr int8_t kAudio = 2;
 
-std::vector<std::string> everyUnitType() {
+std::vector<std::string> everyUnitType(EngineFixture& fx) {
     std::vector<std::string> names;
-    for (int32 i = 0; i < gUnitDefLib->TableSize(); ++i)
-        if (const UnitDef* def = gUnitDefLib->AtIndex(i))
+    const auto* lib = guestWorld(fx)->hw->mUnitDefLib;
+    for (int32 i = 0; i < lib->TableSize(); ++i)
+        if (const UnitDef* def = lib->AtIndex(i))
             names.emplace_back(reinterpret_cast<const char*>(def->mUnitDefName));
     std::sort(names.begin(), names.end());
     return names;
@@ -106,7 +108,7 @@ TEST_CASE("UGen ports: every unit type given no inputs plays and frees", "[ugen_
     // units that read and write buffers run.
     REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 1024, 1)));
 
-    const auto types = everyUnitType();
+    const auto types = everyUnitType(fx);
     REQUIRE(types.size() > 300);
     for (const auto& ugen : types) {
         for (const int8_t rate : {kScalar, kControl, kAudio}) {
@@ -130,7 +132,7 @@ TEST_CASE("UGen ports: every unit type given extreme inputs plays and frees", "[
 
     const float inf = std::numeric_limits<float>::infinity();
     const float values[] = {std::numeric_limits<float>::quiet_NaN(), inf, -inf, 1e30f, -1e30f, 3e9f, -3e9f, -1.0f};
-    for (const auto& ugen : everyUnitType()) {
+    for (const auto& ugen : everyUnitType(fx)) {
         for (const int8_t rate : {kScalar, kControl, kAudio}) {
             for (const float value : values) {
                 INFO(ugen << " rate " << int(rate) << " inputs " << value);
@@ -149,7 +151,7 @@ TEST_CASE("UGen ports: every unit type given control-rate inputs plays and frees
     EngineFixture fx;
     REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 1024, 1)));
 
-    for (const auto& ugen : everyUnitType()) {
+    for (const auto& ugen : everyUnitType(fx)) {
         for (const int8_t rate : {kScalar, kControl, kAudio}) {
             INFO(ugen << " rate " << int(rate));
             REQUIRE(loads(fx, unitFedByControl("fed", ugen, rate, 16, 2)));

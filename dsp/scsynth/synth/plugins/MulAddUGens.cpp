@@ -22,7 +22,7 @@
 #include "SC_PlugIn.hpp"
 #include "SIMD_Unit.hpp"
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 namespace {
 
@@ -584,9 +584,8 @@ struct Sum4 : SIMD_Unit {
 
 extern "C"
 PluginLoad(MulAdd) {
-    ft = inTable;
 
-    registerUnit<MulAdd>(ft, "MulAdd");
-    registerUnit<Sum3>(ft, "Sum3");
-    registerUnit<Sum4>(ft, "Sum4");
+    registerUnit<MulAdd>(inTable, "MulAdd");
+    registerUnit<Sum3>(inTable, "Sum3");
+    registerUnit<Sum4>(inTable, "Sum4");
 }

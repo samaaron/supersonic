@@ -16,6 +16,8 @@
 #ifndef SC_ENGINECORE_H
 #define SC_ENGINECORE_H
 
+#include <stddef.h>
+
 struct World;
 struct WorldOptions;
 
@@ -36,11 +38,16 @@ extern "C" {
  *     output buffers are null -> the first /s_new stores through a null pointer);
  *   - verifies the bus-touched arrays and wire buffers actually allocated.
  *
- * Returns the World, or null on failure. If outError is non-null it receives a
- * static human-readable reason (and is cleared to null on success). Idempotent
- * w.r.t. World_Start: a realtime world that already started is not started again.
+ * `guest` is the instance of the guest the World belongs to (guest_doors.h):
+ * the World and all it owns come from that instance's heap, and every door
+ * to the host finds the instance through the World.
+ *
+ * Returns the World, or null on failure with the reason in `outError` (cut to
+ * `errorBytes`; empty on success). Idempotent w.r.t. World_Start: a realtime
+ * world that already started is not started again.
  */
-World* EngineCore_New(const WorldOptions* options, const char** outError);
+World* EngineCore_New(const WorldOptions* options, struct SupersonicGuest* guest, char* outError,
+                      size_t errorBytes);
 
 /* Begin one control block: zero the output buses (so output channels nothing
  * writes this block come out silent) and advance the block counter (which makes

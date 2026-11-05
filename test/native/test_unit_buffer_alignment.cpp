@@ -12,11 +12,13 @@
  * have from two to five units.
  */
 #include "SynthDefBytes.h"
+#include "GuestWorld.h"   // the engine's World: the probe registers in its unit table
 
 #include "SC_Prototypes.h"
 #include "SC_Unit.h"
 #include "SC_UnitDef.h"
 #include "SC_Wire.h"
+#include "SC_World.h"
 
 #include <algorithm>
 #include <array>
@@ -53,12 +55,15 @@ void AlignmentProbe_Ctor(AlignmentProbe* unit) {
     AlignmentProbe_next(unit, 1);
 }
 
-// The probe joins the unit table the way a plugin's DefineUnit does.
-void defineProbe() {
-    UnitDef_Create("AlignmentProbe", sizeof(AlignmentProbe), (UnitCtorFunc)&AlignmentProbe_Ctor, nullptr, 0);
+// The probe joins the engine's unit table the way a plugin's DefineUnit does:
+// through the World's own interface table.
+void defineProbe(EngineFixture& fx) {
+    World* world = guestWorld(fx);
+    UnitDef_Create(world->ft, "AlignmentProbe", sizeof(AlignmentProbe), (UnitCtorFunc)&AlignmentProbe_Ctor, nullptr,
+                   0);
     int32 key[kSCNameLen];
     str4cpy(key, "AlignmentProbe");
-    REQUIRE(GetUnitDef(key) != nullptr);
+    REQUIRE(GetUnitDef(world, key) != nullptr);
 }
 
 // A control and `fillers` DC.kr units, then the probe at `rate`, given a
@@ -93,7 +98,7 @@ std::vector<uint8_t> probeDef(const char* name, int8_t rate, int32_t fillers) {
 TEST_CASE("Unit buffers: every input and output a unit is handed starts on the widest vector load",
           "[unit_buffers]") {
     EngineFixture fx;
-    defineProbe();
+    defineProbe(fx);
 
     for (const int8_t rate : {kControl, kAudio}) {
         for (int32_t fillers = 0; fillers < 4; ++fillers) {

@@ -30,7 +30,7 @@
 // NaNs are not equal to any floating point number
 static const float uninitializedControl = std::numeric_limits<float>::quiet_NaN();
 
-static InterfaceTable* ft;
+static const InterfaceTable* const ft = &gInterfaceTable;   // SuperSonic (plural guest): the one constant table
 
 struct Vibrato : public Unit {
     double mPhase, m_attackSlope, m_attackLevel;
@@ -3490,7 +3490,6 @@ void IEnvGen_next_k(IEnvGen* unit, int inNumSamples) {
 
 extern "C"
 PluginLoad(LF) {
-    ft = inTable;
 
     DefineSimpleUnit(Vibrato);
     DefineSimpleUnit(LFPulse);
@@ -3502,11 +3501,11 @@ PluginLoad(LF) {
     DefineSimpleUnit(Impulse);
     DefineSimpleUnit(VarSaw);
     DefineSimpleUnit(SyncSaw);
-    registerUnit<K2A>(ft, "K2A");
+    registerUnit<K2A>(inTable, "K2A");
     DefineSimpleUnit(A2K);
     DefineSimpleUnit(T2K);
     DefineSimpleUnit(T2A);
-    registerUnit<DC>(ft, "DC");
+    registerUnit<DC>(inTable, "DC");
     DefineSimpleUnit(Line);
     DefineSimpleUnit(XLine);
 

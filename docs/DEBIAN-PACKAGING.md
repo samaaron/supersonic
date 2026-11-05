@@ -58,7 +58,7 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 | CLAP / VST3 SDKs (plugin hosting) | installed headers, else fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
 | Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built offline (`-DCLOCKWORK_CARGO_OFFLINE=ON`) |
 | midir (patched fork) | `clockwork/external/midir` (cargo path dep) | same — path deps need no vendoring |
-| tlsf / oscpack / nova-simd | in-tree (as in Debian's own supercollider package) | same |
+| oscpack / nova-simd | in-tree (as in Debian's own supercollider package) | same |
 
 The switch the Debian build turns on, `CLOCKWORK_CARGO_OFFLINE`, defaults
 OFF, so macOS, Windows and developer builds are untouched by it.
