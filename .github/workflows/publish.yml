@@ -11,6 +11,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      actions: write   # to queue a job again that no runner took
       attestations: write
 
     steps:
@@ -74,15 +75,39 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
+          reruns=""
           for attempt in $(seq 1 240); do
-            if ! all=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" --paginate \
-                         --jq '.check_runs[] | select(.name != "publish") | [.status, (.conclusion // "-"), .name] | @tsv'); then
+            if ! all_with_ids=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" --paginate \
+                         --jq '.check_runs[] | select(.name != "publish") | [.status, (.conclusion // "-"), .name, .id] | @tsv'); then
               echo "check-runs API error; retrying"
               sleep 30
               continue
             fi
+            all=$(printf '%s\n' "$all_with_ids" | cut -f1-3)
             bad=$(printf '%s\n' "$all" | awk -F'\t' '$1=="completed" && $2!="success" && $2!="neutral" && $2!="skipped"')
             pending=$(printf '%s\n' "$all" | awk -F'\t' '$1!="completed"')
+            # A job GitHub cancelled before it ran a step is one no runner
+            # took (macOS capacity), not a verdict on the code: queue it
+            # again, three times at most, and keep waiting for it.
+            requeued=""
+            while IFS=$'\t' read -r status conclusion name id; do
+              [ "$conclusion" = "cancelled" ] || continue
+              steps=$(gh api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}" --jq '.steps | length' 2>/dev/null || echo "?")
+              [ "$steps" = "0" ] || continue
+              tries=$(printf '%s\n' $reruns | grep -c "^${id}$")
+              if [ "$tries" -ge 3 ]; then
+                echo "${name} was never given a runner, three times: giving up"
+                continue
+              fi
+              echo "${name} was never given a runner; queuing it again"
+              gh api -X POST "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/rerun" >/dev/null 2>&1 || true
+              reruns="${reruns} ${id}"
+              requeued="${requeued}${name} "
+            done < <(printf '%s\n' "$all_with_ids" | awk -F'\t' '$1=="completed" && $2=="cancelled"')
+            if [ -n "$requeued" ]; then
+              sleep 30
+              continue
+            fi
             if [ -n "$bad" ]; then
               echo "Not publishing — non-green check runs on ${GITHUB_SHA}:"
               printf '%s\n' "$bad"
