@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth-core",
-  "version": "0.95.0",
+  "version": "0.95.1",
   "description": "The WebAssembly synth and AudioWorklet of SuperSonic, a scsynth-compatible synth powered by Clockwork",
   "type": "module",
   "main": "index.js",

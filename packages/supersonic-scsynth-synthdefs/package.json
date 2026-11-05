@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth-synthdefs",
-  "version": "0.95.0",
+  "version": "0.95.1",
   "description": "All Sonic Pi synthdefs for SuperSonic",
   "main": "index.js",
   "exports": {
