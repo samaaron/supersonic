@@ -131,7 +131,10 @@ TEST_CASE("UGen ports: every unit type given extreme inputs plays and frees", "[
     REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 1024, 1)));
 
     const float inf = std::numeric_limits<float>::infinity();
-    const float values[] = {std::numeric_limits<float>::quiet_NaN(), inf, -inf, 1e30f, -1e30f, 3e9f, -3e9f, -1.0f};
+    const float values[] = {std::numeric_limits<float>::quiet_NaN(), inf, -inf, 1e30f, -1e30f, 3e9f, -3e9f, -1.0f,
+                            // Small and positive: a rate or frequency this low makes a period or a
+                            // buffer that an int cannot hold twice over.
+                            1e-30f, 1e-9f, 2.5e-7f, 3.2e-5f, 1e-3f};
     for (const auto& ugen : everyUnitType(fx)) {
         for (const int8_t rate : {kScalar, kControl, kAudio}) {
             for (const float value : values) {
@@ -145,6 +148,36 @@ TEST_CASE("UGen ports: every unit type given extreme inputs plays and frees", "[
         }
     }
     poolStillSound(fx);
+}
+
+// Pitch sizes its analysis buffer as twice its longest period, and that
+// period is the sample rate over the minimum frequency it is given. A
+// frequency low enough makes a period an int cannot hold twice over; the
+// buffer must still hold every sample the analysis reads. Inputs: in,
+// initFreq, minFreq, maxFreq, execFreq, maxBinsPerOctave, median,
+// ampThreshold, peakThreshold, downSample, clar.
+TEST_CASE("UGen ports: Pitch given a minimum frequency its period cannot double plays and frees", "[ugen_ports]") {
+    EngineFixture fx;
+    SECTION("control-rate input: one sample a block, a period of 1.5e9 of them") {
+        REQUIRE(loads(fx, graphDef("pitchk", {0.0f, 440.0f, 2.5e-7f, 4000.0f, 1000.0f, 16.0f, 1.0f, 0.01f, 0.5f, 1.0f, 0.0f},
+                                   {{"Pitch", kControl, constants(0, 11), 2}})));
+        startNode(fx, "pitchk");
+        fx.pumpBlock(260);   // past the first full buffer, so the analysis runs
+    }
+    SECTION("audio-rate input: a period of 1.5e9 samples") {
+        REQUIRE(loads(fx, graphDef("pitcha", {440.0f, 3.2e-5f, 4000.0f, 1000.0f, 16.0f, 1.0f, 0.01f, 0.5f, 1.0f, 0.0f},
+                                   {{"WhiteNoise", kAudio, {}, 1},
+                                    {"Pitch", kControl, [] {
+                                         std::vector<std::pair<int32_t, int32_t>> in = {{0, 0}};
+                                         for (int32_t k = 0; k < 10; ++k) in.emplace_back(-1, k);
+                                         return in;
+                                     }(), 2}})));
+        startNode(fx, "pitcha");
+        fx.pumpBlock(8);
+    }
+    fx.send(osc_test::message("/n_free", 2000));
+    fx.pumpBlock(2);
+    stillRunning(fx);
 }
 
 TEST_CASE("UGen ports: every unit type given control-rate inputs plays and frees", "[ugen_ports]") {

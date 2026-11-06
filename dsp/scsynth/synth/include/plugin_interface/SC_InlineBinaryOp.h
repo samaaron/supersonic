@@ -24,6 +24,9 @@
 #include "SC_BoundsMacros.h"
 #include "SC_InlineUnaryOp.h"
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <type_traits>
 
 /// Modulo
 inline float sc_mod(float in, float hi) {
@@ -375,108 +378,80 @@ inline int sc_fold(int in, int lo, int hi) {
     return c + lo;
 }
 
-/// Greatest common divisor
-inline int sc_gcd(int a, int b) {
-    if (a == 0)
-        return b;
+// gcd and lcm, on int and on int64, with the sign rules upstream gives them:
+// gcd is negative only when neither argument is positive, lcm whenever one is
+// negative. Defined for every pair of arguments. A SynthDef reaches them
+// with any float, held to the integer's range by sc_float_to, so the most
+// negative integer and the largest are ordinary inputs: the divisor is taken
+// on magnitudes, which every signed value has as an unsigned one, and a
+// multiple the integer cannot hold is held to its range as the float
+// conversion holds its own.
+namespace detail_gcd {
 
-    if (b == 0)
-        return a;
+template <typename Int> using Mag = typename std::make_unsigned<Int>::type;
 
-    const bool negative = (a <= 0 && b <= 0);
+template <typename Int> inline Mag<Int> magnitude(Int x) {
+    return x < 0 ? Mag<Int>(0) - static_cast<Mag<Int>>(x) : static_cast<Mag<Int>>(x);
+}
 
-    a = sc_abs(a);
-    b = sc_abs(b);
-
-    if (a == 1 || b == 1) {
-        if (negative) {
-            return -1;
-        } else {
-            return 1;
-        }
-    }
-
-    if (a < b) {
-        int t = a;
-        a = b;
-        b = t;
-    }
-
+// Euclid on magnitudes. Zero when both are zero.
+template <typename Int> inline Mag<Int> gcd_magnitude(Mag<Int> a, Mag<Int> b) {
     while (b > 0) {
-        int t = a % b;
+        const Mag<Int> t = a % b;
         a = b;
         b = t;
     }
-
-    if (negative) {
-        a = 0 - a;
-    }
-
     return a;
 }
 
-/// Least common multiple
-inline int sc_lcm(int a, int b) {
+template <typename Int> inline Int gcd(Int a, Int b) {
+    if (a == 0)
+        return b;
+    if (b == 0)
+        return a;
+    const bool negative = (a <= 0 && b <= 0);
+    // A divisor of |a| and |b| fits Int, unless both are the most negative
+    // value: then it is their magnitude, and the result is negative, which
+    // is that value again.
+    const Mag<Int> g = gcd_magnitude<Int>(magnitude(a), magnitude(b));
+    return negative ? static_cast<Int>(Mag<Int>(0) - g) : static_cast<Int>(g);
+}
+
+template <typename Int> inline Int lcm(Int a, Int b) {
     if (a == 0 || b == 0)
         return 0;
-    else
-        return (a * b) / sc_gcd(a, b);
+    const bool negative = (a < 0 || b < 0);
+    const Mag<Int> g = gcd_magnitude<Int>(magnitude(a), magnitude(b));
+    const Mag<Int> ua = magnitude(a) / g;   // exact: g divides |a|
+    const Mag<Int> ub = magnitude(b);
+    // The largest magnitude the sign allows.
+    const Mag<Int> limit = negative ? magnitude(std::numeric_limits<Int>::min())
+                                    : static_cast<Mag<Int>>(std::numeric_limits<Int>::max());
+    if (ub > limit / ua)
+        return negative ? std::numeric_limits<Int>::min() : std::numeric_limits<Int>::max();
+    const Mag<Int> m = ua * ub;
+    return negative ? static_cast<Int>(Mag<Int>(0) - m) : static_cast<Int>(m);
 }
 
+} // namespace detail_gcd
 
 /// Greatest common divisor
-inline long sc_gcd(long a, long b) {
-    if (a == 0)
-        return b;
+inline int sc_gcd(int a, int b) { return detail_gcd::gcd(a, b); }
+inline std::int64_t sc_gcd(std::int64_t a, std::int64_t b) { return detail_gcd::gcd(a, b); }
 
-    if (b == 0)
-        return a;
+/// Least common multiple
+inline int sc_lcm(int a, int b) { return detail_gcd::lcm(a, b); }
+inline std::int64_t sc_lcm(std::int64_t a, std::int64_t b) { return detail_gcd::lcm(a, b); }
 
-    const bool negative = (a <= 0 && b <= 0);
-
-    a = sc_abs(a);
-    b = sc_abs(b);
-
-    if (a == 1 || b == 1) {
-        if (negative) {
-            return (long)-1;
-        } else {
-            return (long)1;
-        }
-    }
-
-    if (a < b) {
-        long t = a;
-        a = b;
-        b = t;
-    }
-
-    while (b > 0) {
-        long t = a % b;
-        a = b;
-        b = t;
-    }
-
-    if (negative) {
-        a = 0 - a;
-    }
-
-    return a;
+/// Greatest common divisor
+inline float sc_gcd(float u, float v) {
+    return (float)sc_gcd(sc_float_to<std::int64_t>(std::trunc(u)), sc_float_to<std::int64_t>(std::trunc(v)));
 }
 
 /// Least common multiple
-inline long sc_lcm(long a, long b) {
-    if (a == 0 || b == 0)
-        return (long)0;
-    else
-        return (a * b) / sc_gcd(a, b);
+inline float sc_lcm(float u, float v) {
+    return (float)sc_lcm(sc_float_to<std::int64_t>(std::trunc(u)), sc_float_to<std::int64_t>(std::trunc(v)));
 }
-
-/// Greatest common divisor
-inline float sc_gcd(float u, float v) { return (float)sc_gcd(sc_float_to<long>(std::trunc(u)), sc_float_to<long>(std::trunc(v))); }
-
-/// Least common multiple
-inline float sc_lcm(float u, float v) { return (float)sc_lcm(sc_float_to<long>(std::trunc(u)), sc_float_to<long>(std::trunc(v))); }
 
 /// Performs a bitwise and with the number b
 inline int sc_bitAnd(int a, int b) { return a & b; }

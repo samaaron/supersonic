@@ -1670,6 +1670,9 @@ enum {
     kPitchGetClarity
 };
 
+// The longest period Pitch analyses, in samples: 21 s at 48 kHz, an 8 MB buffer.
+constexpr int kPitchMaxPeriod = 1 << 20;
+
 void Pitch_Ctor(Pitch* unit) {
     unit->m_freq = ZIN0(kPitchInitFreq);
     unit->m_minfreq = ZIN0(kPitchMinFreq);
@@ -1697,13 +1700,20 @@ void Pitch_Ctor(Pitch* unit) {
         unit->m_srate = FULLRATE / ((float)FULLBUFLENGTH * unit->m_downsamp);
     }
 
-    unit->m_minperiod = sc_float_to<long>(unit->m_srate / unit->m_maxfreq);
-    unit->m_maxperiod = sc_float_to<long>(unit->m_srate / unit->m_minfreq);
+    // The periods, in samples, held to what the analysis buffer can be: the
+    // buffer is twice the longest period, and the analysis reads up to that
+    // far, so a period an int cannot hold twice over would leave the loops
+    // reading past it. The frequencies are any float, so each period is
+    // formed in 64 bits and held to the range.
+    const auto period = [](double samples) {
+        return static_cast<int>(sc_clip(sc_float_to<std::int64_t>(samples), std::int64_t(0), std::int64_t(kPitchMaxPeriod)));
+    };
+    unit->m_minperiod = period(unit->m_srate / unit->m_maxfreq);
+    unit->m_maxperiod = period(unit->m_srate / unit->m_minfreq);
+    unit->m_execPeriod = static_cast<int>(
+        sc_clip(sc_float_to<std::int64_t>(unit->m_srate / execfreq), std::int64_t(FULLBUFLENGTH), std::int64_t(2 * kPitchMaxPeriod)));
 
-    unit->m_execPeriod = sc_float_to_int32(unit->m_srate / execfreq);
-    unit->m_execPeriod = sc_max(unit->m_execPeriod, FULLBUFLENGTH);
-
-    unit->m_size = sc_max(unit->m_maxperiod << 1, unit->m_execPeriod);
+    unit->m_size = sc_max(unit->m_maxperiod * 2, unit->m_execPeriod);
 
     unit->m_buffer = (float*)RTAlloc(unit->mWorld, unit->m_size * sizeof(float));
     ClearUnitIfMemFailed(unit->m_buffer);

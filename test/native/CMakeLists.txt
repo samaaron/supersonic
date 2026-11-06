@@ -119,6 +119,7 @@ add_executable(SuperSonicNativeTests
     test_ugen_controls.cpp
     test_ugen_counts.cpp
     test_ugen_ports.cpp
+    test_inline_binary_ops.cpp
     test_unit_buffer_alignment.cpp
     test_alloc_pool.cpp
     test_clear_sched.cpp

@@ -187,6 +187,7 @@ jobs:
       - name: Fuzz ${{ matrix.target }} for two hours
         env:
           ASAN_OPTIONS: "detect_leaks=0:allocator_may_return_null=1"
+          UBSAN_OPTIONS: "print_stacktrace=1"   # a report without the stack names the std header, not the unit
         run: |
           mkdir -p corpus artifacts
           build/fuzz/test/fuzz/${{ matrix.target }} corpus ${{ matrix.seeds }} \

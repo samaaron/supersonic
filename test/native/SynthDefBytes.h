@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace synthdef_bytes {
@@ -29,6 +30,43 @@ public:
 private:
     std::vector<uint8_t> mBytes;
 };
+
+// A unit in a graph: its name, rate (1 control, 2 audio, 3 demand), inputs
+// as (unit, output) pairs, with (-1, k) the k-th constant, and output count.
+struct UnitSpec {
+    const char* ugen;
+    int8_t rate;
+    std::vector<std::pair<int32_t, int32_t>> inputs;
+    int32_t outputs;
+};
+
+// Constants first through first + n - 1, as inputs.
+inline std::vector<std::pair<int32_t, int32_t>> constants(int32_t first, int32_t n) {
+    std::vector<std::pair<int32_t, int32_t>> in;
+    for (int32_t i = 0; i < n; ++i)
+        in.emplace_back(-1, first + i);
+    return in;
+}
+
+// One def named `name` with these constants and units, no controls.
+inline std::vector<uint8_t> graphDef(const char* name, const std::vector<float>& consts,
+                                     const std::vector<UnitSpec>& units) {
+    Def d;
+    d.i32(0x53436766).i32(2).i16(1);
+    d.str(name);
+    d.i32(static_cast<int32_t>(consts.size()));
+    for (const float c : consts) d.f32(c);
+    d.i32(0);                                  // no controls
+    d.i32(0);                                  // no control names
+    d.i32(static_cast<int32_t>(units.size()));
+    for (const auto& u : units) {
+        d.str(u.ugen).i8(u.rate).i32(static_cast<int32_t>(u.inputs.size())).i32(u.outputs).i16(0);
+        for (const auto& [unit, index] : u.inputs) d.i32(unit).i32(index);
+        for (int32_t o = 0; o < u.outputs; ++o) d.i8(u.rate);
+    }
+    d.i16(0);                                  // no variants
+    return d.bytes();
+}
 
 // Sends `def` with /d_recv: true when it is answered with /done, false when
 // with /fail.
