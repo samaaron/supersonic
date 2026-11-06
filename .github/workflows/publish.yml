@@ -102,12 +102,12 @@ jobs:
           # because main moved on, or one that failed, stops the release
           # with a reason; nothing is guessed about which run to believe,
           # since there is one run per workflow. Within a run, a job GitHub
-          # cancelled before it ran a step is one no runner took (macOS
-          # capacity), not a verdict on the code: it is queued again, three
-          # times at most, and waited for.
+          # cancelled before it ran a step is one no runner took, not a
+          # verdict on the code: clockwork's requeue-unstarted action queues
+          # it again, three times at most, and this waits for it.
           repo="repos/${GITHUB_REPOSITORY}"
           required="Native Build & Test|Debian Package|Build-Test-Deploy|security"
-          reruns=""
+          requeue="clockwork/.github/actions/requeue-unstarted/requeue.mjs"
           for attempt in $(seq 1 240); do
             if ! runs=$(gh api "${repo}/actions/runs?head_sha=${GITHUB_SHA}&event=push&branch=main&per_page=100" --paginate \
                           --jq '.workflow_runs[] | [.name, .id, .status, (.conclusion // "-")] | @tsv'); then
@@ -120,21 +120,10 @@ jobs:
             requeued=""
             while IFS=$'\t' read -r name id status conclusion; do
               [ -n "$id" ] || continue
-              [ "$status" = "completed" ] && [ "$conclusion" = "success" ] && continue
-              while IFS=$'\t' read -r job_id job_name steps; do
-                [ -n "$job_id" ] || continue
-                [ "$steps" = "0" ] || continue
-                tries=$(printf '%s\n' $reruns | grep -c "^${job_id}$")
-                if [ "$tries" -ge 3 ]; then
-                  echo "${name} / ${job_name} was never given a runner, three times: giving up"
-                  continue
-                fi
-                echo "${name} / ${job_name} was never given a runner; queuing it again"
-                gh api -X POST "${repo}/actions/jobs/${job_id}/rerun" >/dev/null 2>&1 || true
-                reruns="${reruns} ${job_id}"
-                requeued="${requeued}${job_name} "
-              done < <(gh api "${repo}/actions/runs/${id}/jobs?per_page=100" --paginate \
-                         --jq '.jobs[] | select(.conclusion == "cancelled") | [.id, .name, (.steps | length)] | @tsv' 2>/dev/null)
+              [ "$status" = "completed" ] && [ "$conclusion" = "failure" ] || continue
+              out=$(node "$requeue" --run "$id") || true
+              printf '%s\n' "$out"
+              printf '%s\n' "$out" | grep -q "queued .* again" && requeued="${requeued}${name}; "
             done <<< "$runs"
             if [ -n "$requeued" ]; then
               sleep 30
