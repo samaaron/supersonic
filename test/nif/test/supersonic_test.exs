@@ -349,6 +349,51 @@ defmodule TauTest do
     assert {:ok, <<"RIFF", _::binary>>} = File.read(path)
   end
 
+  # An OSC bundle: the timetag, then each message with its size.
+  defp osc_bundle(timetag, messages) do
+    osc_string("#bundle") <> <<timetag::unsigned-big-64>> <>
+      Enum.map_join(messages, fn m -> <<byte_size(m)::unsigned-big-32>> <> m end)
+  end
+
+  # NTP for a moment `seconds` from now: seconds since 1900, 32.32 fixed point.
+  defp ntp_ahead(seconds) do
+    now = System.os_time(:nanosecond) / 1.0e9 + 2_208_988_800 + seconds
+    trunc(now * 4_294_967_296)
+  end
+
+  # /s_new name node addAction target.
+  defp s_new(name, node) do
+    osc_string("/s_new") <> osc_string(",siii") <> osc_string(name) <>
+      <<node::signed-big-32, 0::signed-big-32, 0::signed-big-32>>
+  end
+
+  # A beep a second ahead, as a sequencer sends its notes.
+  defp beep_ahead(node) do
+    path = Path.join(@synthdefs, "sonic-pi-beep.scsyndef")
+    assert :ok = :clockwork.send_osc(osc_message_s("/d_load", path))
+    assert {:ok, _} = wait_for_reply_matching("/done", 5000)
+    assert :ok = :clockwork.send_osc(osc_message("/notify", 1))
+    assert :ok = :clockwork.send_osc(osc_bundle(ntp_ahead(1.0), [s_new("sonic-pi-beep", node)]))
+  end
+
+  test "a bundle scheduled ahead plays when nothing clears it" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    beep_ahead(1001)
+    assert {:ok, _} = wait_for_reply_matching("/n_go", 3000)
+  end
+
+  # /clearSched goes down the same ring as the bundles before it, and still
+  # drops them: the ring is drained whole each block, and a bundle for later
+  # waits in the schedule the clear empties (supersonic #11).
+  test "/clearSched drops the bundles scheduled ahead" do
+    assert :ok = start_sync(start_config())
+    :ok = :clockwork.set_notification_pid()
+    beep_ahead(1002)
+    assert :ok = :clockwork.send_osc(osc_message("/clearSched"))
+    assert :timeout = wait_for_reply_matching("/n_go", 2500)
+  end
+
   test "/quit is refused: the NIF's engine is stopped with stop/0" do
     assert :ok = start_sync(start_config())
     :ok = :clockwork.set_notification_pid()
