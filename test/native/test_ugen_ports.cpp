@@ -100,6 +100,14 @@ void startNode(EngineFixture& fx, const char* def) {
     fx.send(b.end());
 }
 
+// The k-th constant as an input at `rate`: the constant itself at scalar rate,
+// otherwise a DC unit added to `units`.
+std::pair<int32_t, int32_t> constantAt(std::vector<UnitSpec>& units, int8_t rate, int32_t k) {
+    if (rate == kScalar) return {-1, k};
+    units.push_back({"DC", rate, {{-1, k}}, 1});
+    return {static_cast<int32_t>(units.size()) - 1, 0};
+}
+
 } // namespace
 
 TEST_CASE("UGen ports: every unit type given no inputs plays and frees", "[ugen_ports]") {
@@ -146,6 +154,95 @@ TEST_CASE("UGen ports: every unit type given extreme inputs plays and frees", "[
                 fx.pumpBlock(1);
             }
         }
+    }
+    poolStillSound(fx);
+}
+
+// BinaryOpUGen and UnaryOpUGen hold every operator behind one unit name, and
+// the special index picks the operator. Each operator has its own code for each
+// rate of its inputs, and the sweep above only reaches operator 0. The loops run
+// one past the last operator, which has no code of its own.
+TEST_CASE("UGen ports: every operator given extreme inputs at every input rate plays and frees", "[ugen_ports]") {
+    constexpr int16_t kBinaryOperators = 49;   // opNumBinarySelectors
+    constexpr int16_t kUnaryOperators = 54;    // opNumUnarySelectors
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    EngineFixture fx;
+
+    const auto play = [&](const std::vector<float>& consts, const std::vector<UnitSpec>& units) {
+        REQUIRE(loads(fx, graphDef("operator", consts, units)));
+        startNode(fx, "operator");
+        fx.pumpBlock(4);
+        fx.send(osc_test::message("/n_free", 2000));
+        fx.pumpBlock(1);
+    };
+
+    const std::vector<float> lefts = {1.0f, -1.0f, nan, 1e30f, -1e30f};
+    const std::vector<float> rights = {33.0f, -1.0f, nan, inf, 1e30f, -1e30f};
+    std::vector<float> pairs = lefts;
+    pairs.insert(pairs.end(), rights.begin(), rights.end());
+    for (int16_t op = 0; op <= kBinaryOperators; ++op) {
+        for (const int8_t rateA : {kScalar, kControl, kAudio}) {
+            for (const int8_t rateB : {kScalar, kControl, kAudio}) {
+                INFO("binary operator " << op << " input rates " << int(rateA) << " " << int(rateB));
+                std::vector<UnitSpec> units;
+                for (size_t i = 0; i < lefts.size(); ++i) {
+                    for (size_t j = 0; j < rights.size(); ++j) {
+                        const auto a = constantAt(units, rateA, static_cast<int32_t>(i));
+                        const auto b = constantAt(units, rateB, static_cast<int32_t>(lefts.size() + j));
+                        units.push_back({"BinaryOpUGen", std::max(rateA, rateB), {a, b}, 1, op});
+                    }
+                }
+                play(pairs, units);
+            }
+        }
+    }
+
+    const std::vector<float> values = {nan, inf, -inf, 1e30f, -1e30f, 3e9f, -3e9f, -1.0f, 1e-30f};
+    for (int16_t op = 0; op <= kUnaryOperators; ++op) {
+        for (const int8_t rate : {kScalar, kControl, kAudio}) {
+            INFO("unary operator " << op << " input rate " << int(rate));
+            std::vector<UnitSpec> units;
+            for (size_t k = 0; k < values.size(); ++k) {
+                const auto in = constantAt(units, rate, static_cast<int32_t>(k));
+                units.push_back({"UnaryOpUGen", rate, {in}, 1, op});
+            }
+            play(values, units);
+        }
+    }
+    poolStillSound(fx);
+}
+
+// A shift count outside 0 to 31 is undefined in C++, and a float input can hold
+// any count. The operators take the count modulo 32, on every target.
+TEST_CASE("UGen ports: the shift operators take their count modulo 32", "[ugen_ports]") {
+    constexpr int16_t kShiftLeft = 26;    // opShiftLeft
+    constexpr int16_t kShiftRight = 27;   // opShiftRight
+    struct Shift {
+        int16_t op;
+        float value, count, expected;
+    };
+    const Shift shifts[] = {
+        {kShiftRight, 64.0f, 2.0f, 16.0f},
+        {kShiftRight, 64.0f, 33.0f, 32.0f},
+        {kShiftRight, 64.0f, -31.0f, 32.0f},
+        {kShiftRight, -8.0f, 1.0f, -4.0f},
+        {kShiftRight, -8.0f, 33.0f, -4.0f},
+        {kShiftLeft, 1.0f, 3.0f, 8.0f},
+        {kShiftLeft, 1.0f, 33.0f, 2.0f},
+        {kShiftLeft, 1.0f, -1.0f, -2147483648.0f},
+    };
+    EngineFixture fx;
+    for (const auto& s : shifts) {
+        INFO("operator " << s.op << " value " << s.value << " count " << s.count);
+        REQUIRE(loads(fx, graphDef("shift", {s.value, s.count, 0.0f},
+                                   {{"BinaryOpUGen", kControl, {{-1, 0}, {-1, 1}}, 1, s.op},
+                                    {"Out", kControl, {{-1, 2}, {0, 0}}, 0}})));
+        startNode(fx, "shift");
+        fx.pumpBlock(2);
+        CHECK(controlBus(fx, 0) == s.expected);
+        fx.send(osc_test::message("/n_free", 2000));
+        fx.pumpBlock(1);
     }
     poolStillSound(fx);
 }

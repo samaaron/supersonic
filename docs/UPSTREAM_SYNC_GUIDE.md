@@ -337,6 +337,7 @@ Keep these when merging; each is also a candidate to send upstream.
 - `INBUFLENGTH` of a constant is 1.
 - `BufWriteCmd::mFilename` starts as `nullptr`: a `/b_write` refused before it read a filename freed whatever the memory held.
 - `RecvSynthDefCmd::Init` returns its error for an empty `/d_recv` instead of throwing, which skipped `Delete` and leaked the command from the real-time pool.
+- `sc_rst` and `sc_lst` take the shift count modulo 32, as the instructions do: a count outside 0 to 31 is undefined in C++.
 - Counts from a unit's own inputs: SendReply, SendPeakRMS, Poll, Dpoll, IEnvGen, Dwrand; Demand's outputs against its inputs; the control units against the synth's controls.
 - GVerb: room size 0, room larger than its maximum, room grown after it starts.
 - DelTapRd: every read wraps into the buffer (a delay longer than the buffer read before it).

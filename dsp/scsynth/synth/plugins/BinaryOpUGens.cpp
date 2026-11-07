@@ -268,9 +268,11 @@ inline float sc_ort(float a, float b) { return sc_float_to_int32(a) | sc_float_t
 
 inline float sc_xort(float a, float b) { return sc_float_to_int32(a) ^ sc_float_to_int32(b); }
 
-inline float sc_rst(float a, float b) { return sc_float_to_int32(a) >> sc_float_to_int32(b); }
+// The shift count is taken modulo 32. A count outside 0 to 31 is undefined in
+// C++, and the shift instructions on x86, arm64 and wasm already take it modulo 32.
+inline float sc_rst(float a, float b) { return sc_float_to_int32(a) >> (sc_float_to_int32(b) & 31); }
 
-inline float sc_lst(float a, float b) { return sc_float_to_int32(a) << sc_float_to_int32(b); }
+inline float sc_lst(float a, float b) { return sc_float_to_int32(a) << (sc_float_to_int32(b) & 31); }
 
 struct BinaryOpUGen : public Unit {
     float mPrevA, mPrevB;

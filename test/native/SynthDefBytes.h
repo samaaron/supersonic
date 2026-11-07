@@ -38,6 +38,7 @@ struct UnitSpec {
     int8_t rate;
     std::vector<std::pair<int32_t, int32_t>> inputs;
     int32_t outputs;
+    int16_t special = 0;   // the unit's special index: an operator's number
 };
 
 // Constants first through first + n - 1, as inputs.
@@ -60,7 +61,7 @@ inline std::vector<uint8_t> graphDef(const char* name, const std::vector<float>&
     d.i32(0);                                  // no control names
     d.i32(static_cast<int32_t>(units.size()));
     for (const auto& u : units) {
-        d.str(u.ugen).i8(u.rate).i32(static_cast<int32_t>(u.inputs.size())).i32(u.outputs).i16(0);
+        d.str(u.ugen).i8(u.rate).i32(static_cast<int32_t>(u.inputs.size())).i32(u.outputs).i16(u.special);
         for (const auto& [unit, index] : u.inputs) d.i32(unit).i32(index);
         for (int32_t o = 0; o < u.outputs; ++o) d.i8(u.rate);
     }
