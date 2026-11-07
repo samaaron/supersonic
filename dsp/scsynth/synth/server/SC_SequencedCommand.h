@@ -401,7 +401,7 @@ public:
     void Stage4() override; // non real time
 
 protected:
-    char* mFilename;
+    char* mFilename = nullptr;
 #ifndef NO_LIBSNDFILE
     SF_INFO mFileInfo {}; // zero-initialize
 #else

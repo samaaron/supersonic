@@ -335,6 +335,8 @@ Keep these when merging; each is also a candidate to send upstream.
 - `Unit_New` gives every unit a calc function (zero its outputs) until its constructor sets one.
 - A synth's memory ends a block on from its last byte, so a unit reading a block from an input that is not audio rate stays inside it; GraphDef variants take the reblock settings.
 - `INBUFLENGTH` of a constant is 1.
+- `BufWriteCmd::mFilename` starts as `nullptr`: a `/b_write` refused before it read a filename freed whatever the memory held.
+- `RecvSynthDefCmd::Init` returns its error for an empty `/d_recv` instead of throwing, which skipped `Delete` and leaked the command from the real-time pool.
 - Counts from a unit's own inputs: SendReply, SendPeakRMS, Poll, Dpoll, IEnvGen, Dwrand; Demand's outputs against its inputs; the control units against the synth's controls.
 - GVerb: room size 0, room larger than its maximum, room grown after it starts.
 - DelTapRd: every read wraps into the buffer (a delay longer than the buffer read before it).

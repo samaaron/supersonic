@@ -1022,7 +1022,7 @@ int RecvSynthDefCmd::Init(const char* inData, int inSize) {
     mSize = msg.getbsize();
     if (!mSize) {
         scprintf(mWorld, "ERROR /d_recv: synthdef data is empty");
-        throw kSCErr_WrongArgType;
+        return kSCErr_WrongArgType;
     }
 
     mBuffer = (char*)World_Alloc(mWorld, mSize);
