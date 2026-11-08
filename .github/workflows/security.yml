@@ -19,7 +19,11 @@
 #              crasher is sealed to Clockwork's .github/fuzz-crasher.pub
 #              (clockwork/scripts/encrypt-crasher.sh) before it is uploaded,
 #              since an artifact on a public repository is readable by anyone
-#              signed in. A crasher, once fixed, is committed to the target's
+#              signed in. Its log is public too, and libFuzzer prints a short
+#              input into it, so the fuzzer runs through
+#              clockwork/scripts/run-fuzzer.sh: the whole output is sealed
+#              with the crasher and the log shows it without the inputs. A
+#              crasher, once fixed, is committed to the target's
 #              corpus/regressions and replayed on every push from then on.
 #
 # Clockwork's own fuzz targets (its OSC, sample, Link and ring readers) run in
@@ -190,7 +194,8 @@ jobs:
           UBSAN_OPTIONS: "print_stacktrace=1"   # a report without the stack names the std header, not the unit
         run: |
           mkdir -p corpus artifacts
-          build/fuzz/test/fuzz/${{ matrix.target }} corpus ${{ matrix.seeds }} \
+          clockwork/scripts/run-fuzzer.sh artifacts \
+            build/fuzz/test/fuzz/${{ matrix.target }} corpus ${{ matrix.seeds }} \
             -max_total_time=7200 -rss_limit_mb=4096 -malloc_limit_mb=256 -artifact_prefix=artifacts/
       - name: Seal the crasher
         if: failure()
