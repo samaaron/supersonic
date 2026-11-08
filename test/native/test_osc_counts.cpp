@@ -9,6 +9,11 @@
  * the fixture's 30 s guard ends the case. The getn handlers reserve their
  * reply's type tags from the counts, so a negative count is refused before
  * any tag is reserved.
+ *
+ * /n_set, /n_setn, /s_getn, /s_new and /s_newargs take a run of controls from
+ * an index the client sends, so they reach index + i. Past INT32_MAX that sum
+ * is undefined in C++, and only a UBSan build that halts on its first report
+ * sees it. CI's sanitizer job runs that way.
  */
 #include "EngineFixture.h"
 
@@ -158,4 +163,53 @@ TEST_CASE("OSC counts: fill and setn ranges past int32 write nothing", "[osc][co
     }
     refused(fx, osc_test::message("/c_setn", big, big), "/c_setn");
     stillRunning(fx);
+}
+
+TEST_CASE("OSC counts: a run of controls from an index near int32's end sets nothing",
+          "[osc][counts]") {
+    EngineFixture fx;
+    REQUIRE(fx.loadSynthDef("sonic-pi-beep"));
+    fx.send(sNew(1000));
+    const float amp = controlOf(fx, 1000, "amp");
+
+    // Each run starts at INT32_MAX, so its second value is one past it.
+    {
+        osc_test::Builder b;
+        b.begin("/n_set") << 1000 << kHuge << osc::BeginArray << 0.1f << 0.2f << osc::EndArray;
+        fx.send(b.end());
+    }
+    {
+        osc_test::Builder b;
+        b.begin("/n_setn") << 1000 << kHuge << 2 << 0.1f << 0.2f;
+        fx.send(b.end());
+    }
+    {
+        osc_test::Builder b;
+        b.begin("/s_new") << "sonic-pi-beep" << 1001 << 0 << 0
+                          << kHuge << osc::BeginArray << 0.1f << 0.2f << osc::EndArray;
+        fx.send(b.end());
+    }
+    {
+        osc_test::Builder b;
+        b.begin("/s_newargs") << "sonic-pi-beep" << 1002 << 0 << 0 << kHuge << 2 << 0.1f << 0.2f;
+        fx.send(b.end());
+    }
+    stillRunning(fx);
+    CHECK(controlOf(fx, 1000, "amp") == amp);
+    CHECK(controlOf(fx, 1001, "amp") == amp);
+    CHECK(controlOf(fx, 1002, "amp") == amp);
+
+    osc_test::Builder get;
+    get.begin("/s_getn") << 1000 << kHuge << 2;
+    fx.clearReplies();
+    fx.send(get.end());
+    OscReply r;
+    REQUIRE(fx.waitForReply("/n_setn", r));
+    const auto values = r.parsed();
+    CHECK(values.argInt(2) == 2);
+    CHECK(values.argFloat(3) == 0.0f);
+    CHECK(values.argFloat(4) == 0.0f);
+
+    stillRunning(fx);
+    fx.send(osc_test::message("/g_freeAll", 0));
 }

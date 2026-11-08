@@ -116,6 +116,15 @@ int Graph_GetControl(Graph* inGraph, uint32 inIndex, float& outValue);
 int Graph_GetControl(Graph* inGraph, int32 inHash, int32* inName, uint32 inIndex, float& outValue);
 void Graph_SetControl(Graph* inGraph, uint32 inIndex, float inValue);
 void Graph_SetControl(Graph* inGraph, int32 inHash, int32* inName, uint32 inIndex, float inValue);
+
+// SuperSonic: a control index from a client plus a position in its run, held
+// to int32's range. Unchecked, a sum past INT32_MAX is undefined in C++. Held,
+// it stays at INT32_MAX, past every synth's controls, so the control setters
+// and getters refuse it as they refuse any index past their controls.
+inline int32 IndexPlus(int32 index, int32 i) {
+    const int64 sum = (int64)index + i;
+    return sum > INT32_MAX ? INT32_MAX : sum < INT32_MIN ? INT32_MIN : (int32)sum;
+}
 void Graph_MapControl(Graph* inGraph, uint32 inIndex, uint32 inBus);
 void Graph_MapControl(Graph* inGraph, int32 inHash, int32* inName, uint32 inIndex, uint32 inBus);
 void Graph_MapAudioControl(Graph* inGraph, uint32 inIndex, uint32 inBus);

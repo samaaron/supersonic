@@ -279,18 +279,18 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                     case 'f':
                     case 'i': {
                         float32 value = msg->getf();
-                        Graph_SetControl(graph, index + i, value);
+                        Graph_SetControl(graph, IndexPlus(index, i), value);
                         break;
                     }
                     case 's': {
                         const char* string = msg->gets();
                         if (*string == 'c') {
                             int bus = sc_atoi(string + 1);
-                            Graph_MapControl(graph, index + i, bus);
+                            Graph_MapControl(graph, IndexPlus(index, i), bus);
                         } else {
                             if (*string == 'a') {
                                 int bus = sc_atoi(string + 1);
-                                Graph_MapAudioControl(graph, index + i, bus);
+                                Graph_MapAudioControl(graph, IndexPlus(index, i), bus);
                             }
                         }
                         break;
@@ -408,17 +408,17 @@ static void Graph_Ctor(World* inWorld, GraphDef* inGraphDef, Graph* graph, sc_ms
                         const char* string = msg->gets();
                         if (*string == 'c') {
                             int bus = sc_atoi(string + 1);
-                            Graph_MapControl(graph, index + i, bus);
+                            Graph_MapControl(graph, IndexPlus(index, i), bus);
                             // Node_MapControl(node, index+i, bus);
                         } else {
                             if (*string == 'a') {
                                 int bus = sc_atoi(string + 1);
-                                Graph_MapAudioControl(graph, index + i, bus);
+                                Graph_MapAudioControl(graph, IndexPlus(index, i), bus);
                             }
                         }
                     } else {
                         float32 value = msg->getf();
-                        Graph_SetControl(graph, index + i, value);
+                        Graph_SetControl(graph, IndexPlus(index, i), value);
                         // Node_SetControl(node, index+i, value);
                     }
                 }

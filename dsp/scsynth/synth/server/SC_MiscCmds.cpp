@@ -460,12 +460,7 @@ static int32 LastIndex(int32 start, int32 n) {
 
 // bus + i for consecutive mappings: -1 (unmap) stays -1, and a bus past
 // int32's range becomes INT32_MAX, which no World has.
-static int32 BusPlus(int32 bus, int32 i) {
-    if (bus == -1)
-        return -1;
-    const int64 b = (int64)bus + i;
-    return b > INT32_MAX ? INT32_MAX : (int32)b;
-}
+static int32 BusPlus(int32 bus, int32 i) { return bus == -1 ? -1 : IndexPlus(bus, i); }
 
 // The most controls any synth at or under inNode has: a control index or a
 // channel past it sets and maps nothing.
@@ -628,7 +623,7 @@ SCErr meth_n_set(World* inWorld, int inSize, const char* inData, ReplyAddress* /
                 case 'f':
                 case 'i': {
                     float32 value = msg.getf();
-                    Node_SetControl(node, index + i, value);
+                    Node_SetControl(node, IndexPlus(index, i), value);
                     ++i;
                     break;
                 }
@@ -636,12 +631,12 @@ SCErr meth_n_set(World* inWorld, int inSize, const char* inData, ReplyAddress* /
                     const char* string = msg.gets();
                     if (*string == 'c') {
                         int bus = sc_atoi(string + 1);
-                        Node_MapControl(node, index + i, bus);
+                        Node_MapControl(node, IndexPlus(index, i), bus);
                         ++i;
                     }
                     if (*string == 'a') {
                         int bus = sc_atoi(string + 1);
-                        Node_MapAudioControl(node, index + i, bus);
+                        Node_MapAudioControl(node, IndexPlus(index, i), bus);
                         ++i;
                     }
                     break;
@@ -756,15 +751,15 @@ SCErr meth_n_setn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
                     const char* string = msg.gets();
                     if (*string == 'c') {
                         int bus = sc_atoi(string + 1);
-                        Node_MapControl(node, index + i, bus);
+                        Node_MapControl(node, IndexPlus(index, i), bus);
                     }
                     if (*string == 'a') {
                         int bus = sc_atoi(string + 1);
-                        Node_MapAudioControl(node, index + i, bus);
+                        Node_MapAudioControl(node, IndexPlus(index, i), bus);
                     }
                 } else {
                     float32 value = msg.getf();
-                    Node_SetControl(node, index + i, value);
+                    Node_SetControl(node, IndexPlus(index, i), value);
                 }
             }
         }
@@ -1993,7 +1988,7 @@ SCErr meth_s_getn(World* inWorld, int inSize, const char* inData, ReplyAddress* 
             packet.addi(n);
             for (int i = 0; i < n; ++i) {
                 float32 value = 0.f;
-                Graph_GetControl(graph, index + i, value);
+                Graph_GetControl(graph, IndexPlus(index, i), value);
                 packet.addtag('f');
                 packet.addf(value);
             }
