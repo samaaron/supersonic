@@ -121,6 +121,8 @@ void printUsage() {
         "                             resumes stamped at the present. The file is removed.\n"
         "  --report <path>            Keep at <path> this peer's own timing, in 10 ms slots\n"
         "                             (see Timing), rewritten every 100 ms.\n"
+        "  --view <path>              Keep at <path> what this peer sees: its Link peers\n"
+        "                             and the session's channels, rewritten every 100 ms.\n"
         "  --channel <name>:<numCh>:<gen>\n"
         "                             Add a channel (repeatable). Generators:\n"
         "                               silence, sine440, sine440-880, dc:<value>\n"
@@ -134,6 +136,19 @@ void printUsage() {
 // Link's thread, which sends what is published, kept a task waiting, and how
 // many blocks found the queue to it full. Each slot has one writer: the
 // publishing thread, or Link's thread for the waits.
+// `text` to `path` whole: written aside and renamed over it, so a reader
+// never sees half. A rename refused (Windows, while the test has it open)
+// leaves the last whole one, and the next write tries again.
+void writeWhole(const std::string& path, const std::string& text) {
+    const std::string aside = path + ".tmp";
+    if (FILE* f = std::fopen(aside.c_str(), "wb")) {
+        std::fwrite(text.data(), 1, text.size(), f);
+        std::fclose(f);
+        std::error_code ec;
+        std::filesystem::rename(aside, path, ec);
+    }
+}
+
 struct Timing {
     static constexpr auto   kSlot  = std::chrono::milliseconds(10);
     static constexpr size_t kSlots = 6000;   // a minute: these peers live for seconds
@@ -153,9 +168,7 @@ struct Timing {
         if (us > slot.load(std::memory_order_relaxed)) slot.store(us, std::memory_order_relaxed);
     }
 
-    // The slots so far, to `path` whole: written aside and renamed over it,
-    // so a reader never sees half. A rename refused (Windows, while the test
-    // has it open) waits for the next.
+    // The slots so far, to `path` whole.
     void write(const std::string& path) const {
         const auto now = std::chrono::steady_clock::now();
         const size_t n = slotOf(now) + 1;
@@ -172,13 +185,7 @@ struct Timing {
         row("late_us", lateUs);
         row("wait_us", waitUs);
         row("skipped", skipped);
-        const std::string aside = path + ".tmp";
-        if (FILE* f = std::fopen(aside.c_str(), "wb")) {
-            std::fwrite(out.data(), 1, out.size(), f);
-            std::fclose(f);
-            std::error_code ec;
-            std::filesystem::rename(aside, path, ec);
-        }
+        writeWhole(path, out);
     }
 };
 
@@ -209,6 +216,7 @@ int main(int argc, char** argv) {
     int         stallForMs   = 0;   // --stall: the callback stops for this long...
     std::string stallFlag;          // ...when this file appears
     std::string reportPath;         // --report: where Timing is kept
+    std::string viewPath;           // --view: where what this peer sees is kept
     std::vector<ChannelSpec> channels;
 
     for (int i = 1; i < argc; ++i) {
@@ -232,6 +240,7 @@ int main(int argc, char** argv) {
             stallFlag = v.substr(colon + 1);
         }
         else if (a == "--report"      && i + 1 < argc) { reportPath = argv[++i]; }
+        else if (a == "--view"        && i + 1 < argc) { viewPath = argv[++i]; }
         else if (a == "--channel"     && i + 1 < argc) {
             ChannelSpec c;
             if (!parseChannelArg(argv[++i], c)) { printUsage(); return 1; }
@@ -306,6 +315,23 @@ int main(int argc, char** argv) {
             return 1;
         }
         sinks.push_back({c, ableton::LinkAudioSink{link, c.name, kSinkMaxSamples}});
+    }
+
+    // For --view: what this peer sees of the session, so a test that never
+    // sees this peer can say whether this peer saw it. An ordinary thread:
+    // a file write, which nothing the publishing does waits on.
+    std::atomic<bool> viewing{!viewPath.empty()};
+    std::thread viewer;
+    if (viewing.load(std::memory_order_relaxed)) {
+        viewer = std::thread([&] {
+            while (viewing.load(std::memory_order_relaxed)) {
+                std::string out = "peers " + std::to_string(link.numPeers()) + "\n";
+                for (const auto& c : link.channels())
+                    out += "channel " + c.peerName + "/" + c.name + "\n";
+                writeWhole(viewPath, out);
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
     }
 
     // Ready signal: write to stdout + flush so a parent test fixture
@@ -420,6 +446,8 @@ int main(int argc, char** argv) {
 
     watching.store(false, std::memory_order_relaxed);
     if (watcher.joinable()) watcher.join();
+    viewing.store(false, std::memory_order_relaxed);
+    if (viewer.joinable()) viewer.join();
     link.enableLinkAudio(false);
     link.enable(false);
     return 0;

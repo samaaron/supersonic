@@ -28,7 +28,8 @@ namespace {
 // platform-native argv / command-line form.
 std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts,
                                       const std::string& stallFlag,
-                                      const std::string& report) {
+                                      const std::string& report,
+                                      const std::string& view) {
     std::vector<std::string> args;
     args.emplace_back(CLOCKWORK_TEST_LINK_PEER_BINARY);
     args.emplace_back("--name");        args.push_back(opts.name);
@@ -43,6 +44,7 @@ std::vector<std::string> buildArgList(const FakeLinkPeerProcess::Options& opts,
     if (opts.reportTiming) {
         args.emplace_back("--report");  args.push_back(report);
     }
+    args.emplace_back("--view");        args.push_back(view);
     for (const auto& c : opts.channels) {
         args.emplace_back("--channel");
         args.push_back(c.name + ":" + std::to_string(c.numChannels) + ":" + c.generator);
@@ -61,11 +63,25 @@ std::string freshPath(const char* what) {
                    + std::to_string(serial.fetch_add(1)))).string();
 }
 
-void removePeerFiles(const std::string& stallFlag, const std::string& report) {
+void removePeerFiles(const std::string& stallFlag, const std::string& report, const std::string& view) {
     std::error_code ec;
     std::filesystem::remove(stallFlag, ec);
     std::filesystem::remove(report, ec);
     std::filesystem::remove(report + ".tmp", ec);
+    std::filesystem::remove(view, ec);
+    std::filesystem::remove(view + ".tmp", ec);
+}
+
+// What the peer last wrote of what it sees (--view), in a sentence.
+std::string peerView(const std::string& view) {
+    std::ifstream in(view);
+    std::string line, peers, channels;
+    while (std::getline(in, line)) {
+        if (line.rfind("peers ", 0) == 0) peers = line.substr(6);
+        else if (line.rfind("channel ", 0) == 0) channels += (channels.empty() ? "" : ", ") + line.substr(8);
+    }
+    if (peers.empty()) return "It never wrote what it sees.";
+    return "It last saw " + peers + " Link peers and " + (channels.empty() ? "no channels" : "the channels " + channels) + ".";
 }
 
 std::chrono::steady_clock::time_point steadyAt(int64_t ns) {
@@ -142,7 +158,8 @@ bool waitForReadyLine(int fd, std::chrono::steady_clock::time_point deadline) {
 }  // namespace
 
 FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
-    : mOptions(opts), mStallFlag(freshPath("stall")), mReport(freshPath("timing")) {
+    : mOptions(opts), mStallFlag(freshPath("stall")), mReport(freshPath("timing")),
+      mView(freshPath("view")) {
     int pipefd[2] = {-1, -1};
     if (::pipe(pipefd) != 0) {
         std::fprintf(stderr, "FakeLinkPeerProcess: pipe() failed: %s\n",
@@ -164,7 +181,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
         ::dup2(pipefd[1], STDOUT_FILENO);
         ::close(pipefd[1]);
 
-        const auto args = buildArgList(mOptions, mStallFlag, mReport);
+        const auto args = buildArgList(mOptions, mStallFlag, mReport, mView);
         std::vector<char*> argv;
         argv.reserve(args.size() + 1);
         for (const auto& s : args) argv.push_back(const_cast<char*>(s.c_str()));
@@ -189,9 +206,29 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
     }
 }
 
+std::string FakeLinkPeerProcess::account() const {
+    std::string state;
+    if (mProcess <= 0) {
+        state = "never started";
+    } else {
+        if (!mReaped) {
+            int status = 0;
+            if (::waitpid(static_cast<pid_t>(mProcess), &status, WNOHANG) == static_cast<pid_t>(mProcess)) {
+                mReaped     = true;
+                mWaitStatus = status;
+            }
+        }
+        if (!mReaped)                     state = "running";
+        else if (WIFEXITED(mWaitStatus))  state = "exited with status " + std::to_string(WEXITSTATUS(mWaitStatus));
+        else if (WIFSIGNALED(mWaitStatus)) state = "killed by signal " + std::to_string(WTERMSIG(mWaitStatus));
+        else                              state = "gone";
+    }
+    return "Peer process " + mOptions.name + ": " + state + ". " + peerView(mView);
+}
+
 // Once the peer is gone: it writes its timing a last time as it stops.
 FakeLinkPeerProcess::~FakeLinkPeerProcess() {
-    if (mProcess > 0) {
+    if (mProcess > 0 && !mReaped) {
         const pid_t pid = static_cast<pid_t>(mProcess);
         ::kill(pid, SIGTERM);
         int status = 0;
@@ -208,7 +245,7 @@ FakeLinkPeerProcess::~FakeLinkPeerProcess() {
             ::waitpid(pid, &status, 0);
         }
     }
-    removePeerFiles(mStallFlag, mReport);
+    removePeerFiles(mStallFlag, mReport, mView);
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -280,7 +317,8 @@ bool waitForReadyHandle(HANDLE readEnd,
 }  // namespace
 
 FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
-    : mOptions(opts), mStallFlag(freshPath("stall")), mReport(freshPath("timing")) {
+    : mOptions(opts), mStallFlag(freshPath("stall")), mReport(freshPath("timing")),
+      mView(freshPath("view")) {
     SECURITY_ATTRIBUTES sa = {sizeof(sa), nullptr, TRUE};
     HANDLE readEnd = nullptr, writeEnd = nullptr;
     if (!CreatePipe(&readEnd, &writeEnd, &sa, 0)) {
@@ -292,7 +330,7 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
     // Parent's read end isn't inherited by the child.
     SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
 
-    const auto args = buildArgList(mOptions, mStallFlag, mReport);
+    const auto args = buildArgList(mOptions, mStallFlag, mReport, mView);
     const std::string cmdline = buildCommandLine(args);
     std::vector<char> cmdBuf(cmdline.begin(), cmdline.end());
     cmdBuf.push_back('\0');
@@ -336,6 +374,17 @@ FakeLinkPeerProcess::FakeLinkPeerProcess(const Options& opts)
     }
 }
 
+std::string FakeLinkPeerProcess::account() const {
+    std::string state = "never started";
+    if (mProcess != 0 && mProcess != -1) {
+        DWORD code = 0;
+        if (!GetExitCodeProcess(reinterpret_cast<HANDLE>(mProcess), &code)) state = "unknown";
+        else if (code == STILL_ACTIVE)                                     state = "running";
+        else                                                               state = "exited with status " + std::to_string(code);
+    }
+    return "Peer process " + mOptions.name + ": " + state + ". " + peerView(mView);
+}
+
 // Once the peer is gone, which may have been writing its timing.
 FakeLinkPeerProcess::~FakeLinkPeerProcess() {
     if (mProcess != 0 && mProcess != -1) {
@@ -350,7 +399,7 @@ FakeLinkPeerProcess::~FakeLinkPeerProcess() {
         CloseHandle(process);
         if (mWinThread) CloseHandle(reinterpret_cast<HANDLE>(mWinThread));
     }
-    removePeerFiles(mStallFlag, mReport);
+    removePeerFiles(mStallFlag, mReport, mView);
 }
 
 #endif  // _WIN32

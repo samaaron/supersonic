@@ -78,10 +78,16 @@ public:
     // not within a second.
     std::optional<Timing> timing(std::chrono::steady_clock::time_point after) const;
 
+    // The peer process, for a failure to say: running, exited (with its
+    // status) or killed (with the signal), and the Link peers and the
+    // session's channels it last saw, which it writes every 100 ms.
+    std::string account() const;
+
 private:
     Options     mOptions;
     std::string mStallFlag;   // the file that says stall
     std::string mReport;      // the file the peer keeps its timing in
+    std::string mView;        // the file the peer keeps what it sees in
     // Opaque process handle. On POSIX this is a pid_t; on Windows a
     // HANDLE cast to intptr_t (-1 / 0 = invalid). The .cpp casts back
     // as needed under platform #ifdefs.
@@ -90,6 +96,10 @@ private:
                                  // returned by CreateProcess; needs its
                                  // own CloseHandle.
     bool    mReady        = false;
+    // POSIX: the child's wait status once account() has reaped it. A reaped
+    // pid can be reused, so the destructor signals only an unreaped child.
+    mutable bool mReaped     = false;
+    mutable int  mWaitStatus = 0;
 };
 
 #endif  // CLOCKWORK_LINK
