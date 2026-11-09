@@ -72,13 +72,19 @@ inline void str4cpy(int32* dst, const int32* src) {
     } while (c & kLASTCHAR);
 }
 
+// The digits as an int (/n_set's "c<bus>" and "a<bus>"). A number past an int's range stops at INT_MAX: a bus past
+// any bus, ignored as any out-of-range bus is. Counted on in an int it overflowed (undefined behaviour, found by
+// fuzz_scsynth_commands) and in practice wrapped, onto a bus that exists ("c4294967297", bus 1) or onto -1, which
+// unmaps.
 inline int sc_atoi(const char* string) {
-    int value = 0;
+    int64 value = 0;
     if (*string == 0)
         return -1;
     uint32 c;
     while ((c = *string++ - '0') <= 9) {
         value = value * 10 + c;
+        if (value > INT_MAX)
+            value = INT_MAX;
     }
-    return value;
+    return static_cast<int>(value);
 }
