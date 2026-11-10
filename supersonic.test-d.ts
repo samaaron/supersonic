@@ -496,6 +496,9 @@ expectType<number>(sonic.nextNodeId());
 
 // Asset loading
 expectType<number | null>(sonic.getScopeActivations(0));
+expectType<{ frames: number; channels: number; writePosition: bigint; interleaved: Float32Array } | null>(sonic.getDeviceScope());
+expectType<{ frames: number; channels: number; writePosition: bigint; interleaved: Float32Array } | null>(sonic.getDeviceScope(1, 512));
+new SuperSonic({ mode: 'copies', copies: { fetch: async (parts: number, wants: Uint32Array) => new ArrayBuffer(parts + wants.length) } });
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef('beep'));
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef('/path/to/beep.scsyndef'));
 expectType<Promise<LoadSynthDefResult>>(sonic.loadSynthDef(new ArrayBuffer(100)));

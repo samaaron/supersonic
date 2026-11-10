@@ -73,6 +73,12 @@ const CPP_TO_JS = {
   clock_anchors:                 'CLOCK_ANCHORS',
   scheduler_late_dropped: 'SCHEDULER_LATE_DROPPED',
   cues_dropped:           'CUES_DROPPED',
+  device_missed_cycles:     'DEVICE_MISSED_CYCLES',
+  device_clock_jumps:       'DEVICE_CLOCK_JUMPS',
+  device_clock_jump_frames: 'DEVICE_CLOCK_JUMP_FRAMES',
+  silent_callbacks:         'SILENT_CALLBACKS',
+  callback_gap_recent_us:   'CALLBACK_GAP_RECENT_US',
+  callback_gap_max_us:      'CALLBACK_GAP_MAX_US',
 };
 
 // Pure padding slots — asserted in C++ for alignment but have no JS counterpart.

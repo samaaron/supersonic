@@ -192,6 +192,17 @@ Both modes support the same metrics, but collection differs:
 
 In both modes, calling `getMetrics()` is cheap and safe for high-frequency use (e.g., in `requestAnimationFrame`).
 
+### Scopes
+
+Both modes read the scope streams (`getScope`, `getScopeActivations`, `getScopes`) and the device's own scope (`getDeviceScope`: what left for the audio output, every block, whatever is playing):
+
+- **SAB mode**: each read copies its window out of shared memory.
+- **postMessage mode**: the page has no view of the engine's memory, so the worklet sends copies (Clockwork's `clockwork_client_copy`, the same bytes every host hands over). A read returns the newest copy's window and asks for the next copies to hold that stream, about sixty a second; a stream no one has read for a second is no longer copied. The first read of a stream returns null, until a copy holds it.
+
+### Copies mode
+
+When the engine runs outside the page — a plugin whose editor is this page in a web view — `mode: 'copies'` boots nothing here. The host hands the page the same copies through `copies.fetch(parts, wants)`, and the page reads metrics and scopes exactly as in postMessage mode. Nothing is sent from the page in this mode: what the engine plays is the host's business.
+
 
 ## Troubleshooting
 

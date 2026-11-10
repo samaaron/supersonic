@@ -118,8 +118,24 @@ export type OscBundlePacket =
  *
  * - `'sab'` — SharedArrayBuffer: lowest latency, requires COOP/COEP headers
  * - `'postMessage'` — postMessage: works everywhere including CDN, slightly higher latency
+ * - `'copies'` — the engine runs in this page's host (a plugin whose web view
+ *   this page is): nothing boots here, and the host hands the page copies of
+ *   the engine's memory through `copies.fetch` (docs/MODES.md)
  */
-export type TransportMode = 'sab' | 'postMessage';
+export type TransportMode = 'sab' | 'postMessage' | 'copies';
+
+/**
+ * The host of an engine that runs outside the page (`mode: 'copies'`).
+ */
+export interface CopiesHost {
+  /**
+   * A copy of the engine's memory, as clockwork_client_copy makes it: `parts`
+   * a bit set (1 the arena's tables, 2 the metrics), `wants` the windows the
+   * page is reading, three u32 each (source: 1 a scope slot, 2 the device's
+   * scope; slot; frames).
+   */
+  fetch(parts: number, wants: Uint32Array): Promise<ArrayBuffer>;
+}
 
 /**
  * Engine configuration options controlling resource limits and audio behaviour.
@@ -231,6 +247,9 @@ export interface SuperSonicOptions {
    * See docs/MODES.md for a full comparison of communication modes.
    */
   mode?: TransportMode;
+
+  /** The engine's host, for `mode: 'copies'`. */
+  copies?: CopiesHost;
 
   /** Convenience shorthand when all assets (WASM, worklet, workers, synthdefs, samples) are co-located. */
   baseURL?: string;
@@ -381,6 +400,20 @@ export interface SuperSonicMetrics {
   egressFramesUndelivered: number;
   /** Native only: cues the cue port's rate limit dropped. 0 unless someone floods it. */
   cuesDropped: number;
+
+  // How the device kept time (native only: 0 on the web, whose device is the browser's)
+  /** Native only: cycles the audio driver says the device missed since the engine started (macOS's overload notices, ALSA's xruns). 0 where the driver can't say. */
+  deviceMissedCycles: number;
+  /** Native only: times the device's own sample clock moved by other than the frames played. */
+  deviceClockJumps: number;
+  /** Native only: frames the device's sample clock skipped over in those jumps. */
+  deviceClockJumpFrames: number;
+  /** Native only: audio callbacks played as silence for want of a block, once the engine had rendered its first. */
+  silentCallbacks: number;
+  /** Native only: longest time between the starts of two audio callbacks, this minute and the last (µs). */
+  callbackGapRecentUs: number;
+  /** Native only: longest time between the starts of two audio callbacks since the engine started (µs). */
+  callbackGapMaxUs: number;
 
   // Memory
   /** Bytes in use in the engine's pool now. */
@@ -2228,9 +2261,11 @@ export class SuperSonic {
    * Scope slots are lossless interleaved rings with a monotonic write
    * cursor (see docs/scope-streams-sample-clock.md); this returns the
    * window ending at the current cursor, zero-filled at the start when
-   * fewer frames are available. Allocates the output per call.
-   * SAB mode only; returns null when uninitialised, out of range, the
-   * slot is inactive, or nothing has been written to it yet.
+   * fewer frames are available. Allocates the output per call. Without
+   * shared memory (postMessage, copies) it is the newest copy's window, and
+   * asking is what has the next copies hold it. Returns null when
+   * uninitialised, out of range, the slot is inactive, nothing has been
+   * written to it yet, or no copy has held it yet.
    *
    * @param scopeNum - Scope slot index, from 0
    * @param frames - Window length in frames (default 1024; at most the ring's length)
@@ -2246,17 +2281,37 @@ export class SuperSonic {
    * How many times a scope slot has gone live. A reader polls, and a slot can
    * be claimed and released between two polls (a loop started and stopped in
    * a moment); a reader that noted this and sees another number knows the
-   * slot went live in between. Wraps: compare for change only.
-   * SAB mode only; returns null when uninitialised or out of range.
+   * slot went live in between. Wraps: compare for change only. Without
+   * shared memory, the newest copy's count, as getScope. Returns null when
+   * uninitialised, out of range, or before a copy has held it.
    *
    * @param scopeNum - Scope slot index, from 0
    */
   getScopeActivations(scopeNum: number): number | null;
 
   /**
-   * List the scope slots in use. SAB mode only; empty otherwise.
+   * List the scope slots in use. Without shared memory, those of the slots
+   * read lately that the newest copy holds live.
    */
   getScopes(): Array<{ index: number; channels: number }>;
+
+  /**
+   * The newest `frames` frames of the device's own scope: what left for the
+   * audio output (slot 0) or what arrived from the input (slot 1), written by
+   * the engine every block whatever is playing, so it is how a page draws the
+   * master mix. The shape getScope returns; in every mode, as getScope reads.
+   * Returns null for a direction the device has not got, or before anything
+   * is written.
+   *
+   * @param slot - 0 for the output (default), 1 for the input
+   * @param frames - Window length in frames (default 2048; at most the ring's length)
+   */
+  getDeviceScope(slot?: number, frames?: number): {
+    frames: number;
+    channels: number;
+    writePosition: bigint;
+    interleaved: Float32Array;
+  } | null;
 
   /**
    * Scope geometry: slot count, per-slot ring frames, channels. These are the
