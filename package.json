@@ -1,6 +1,6 @@
 {
   "name": "supersonic-scsynth",
-  "version": "0.96.0",
+  "version": "0.97.0",
   "description": "A scsynth-compatible synth powered by Clockwork, for the browser as an AudioWorklet and natively as a server",
   "main": "dist/supersonic.js",
   "types": "supersonic.d.ts",
