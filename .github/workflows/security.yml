@@ -35,8 +35,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Just after three in the morning in the UK, whichever way its clocks
+  # stand, three hours behind Clockwork's own run (00:17) so the two do not
+  # wait on the same runners. Off the hour: GitHub delays what is scheduled
+  # at the top of one.
   schedule:
-    - cron: "47 4 * * *"
+    - cron: "17 3 * * *"
+      timezone: "Europe/London"
   workflow_dispatch:
     inputs:
       target:
