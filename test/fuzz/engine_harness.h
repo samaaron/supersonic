@@ -39,7 +39,7 @@ inline ClockworkEngine& engine() {
         clockwork::guest_config_text::set(cfg.guestConfig, "maxNodes", "256");
         clockwork::guest_config_text::set(cfg.guestConfig, "maxGraphDefs", "256");
         clockwork::guest_config_text::set(cfg.guestConfig, "maxWireBufs", "64");
-        e->onReply = [](const uint8_t*, uint32_t) {};
+        e->onReply = [](const uint8_t*, uint32_t, uint32_t) {};
         e->onDebug = [](const std::string&) {};
         e->init(cfg);
         return e;
