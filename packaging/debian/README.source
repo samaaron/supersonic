@@ -30,13 +30,22 @@ in .github/workflows/debian.yml, which then builds the package in a
 network-disconnected container, runs lintian and autopkgtest). A maintainer
 can reuse that script or assemble the components by hand as described above.
 
+Upstream's script also assembles this package to build against the archive's
+own crate packages instead of the rust-vendor component
+(SUPERSONIC_DEB_CRATES=system scripts/make-debian-source.sh): no vendor
+tarball, a generated patch reducing clockwork's Cargo manifests to Linux, and
+a librust-<crate>-dev build dependency for each crate clockwork names.
+debian/build-mode.mk, written by the script, records which form a source
+package is. See "Building against the archive's own crates" in
+docs/DEBIAN-PACKAGING.md.
+
 Build dependencies come from the Debian archive: Catch2 is the system
 package. The audio file decoders are Rust crates in the rust-vendor
 component; the audio-device layer is clockwork's in-tree smoothie (an ISC
-fork of four JUCE 7 modules); there is no JUCE build-dependency. The one
-remaining vendored C library, libsamplerate (clockwork/src/vendor), has a
-system switch (-DCLOCKWORK_SYSTEM_SAMPLERATE=ON, libsamplerate0-dev) that
-this package does not yet turn on. Plugin hosting (CLAP/VST3) is compiled
+fork of four JUCE 7 modules); there is no JUCE build-dependency.
+libsamplerate is the archive's (libsamplerate0-dev,
+-DCLOCKWORK_SYSTEM_SAMPLERATE=ON); clockwork's own copy is left out of the
+orig tarball. Plugin hosting (CLAP/VST3) is compiled
 out because the SDKs are fetched at configure time and Debian ships neither.
 See docs/DEBIAN-PACKAGING.md in the upstream tree for the full rationale and
 the mapping table.

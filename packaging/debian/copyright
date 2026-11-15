@@ -3,8 +3,12 @@ Upstream-Name: supersonic
 Upstream-Contact: Sam Aaron <sam@sonic-pi.net>
 Source: https://github.com/samaaron/supersonic
 Files-Excluded: clockwork/external/ASIOSDK2.3.4
+ clockwork/src/vendor/libsamplerate
 Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
  GPL-3) is excluded from the Debian source tarball. It is not used on Linux.
+ .
+ clockwork's copy of libsamplerate is excluded too: the package links the
+ archive's (libsamplerate0-dev, -DCLOCKWORK_SYSTEM_SAMPLERATE=ON).
  .
  SuperSonic's synthesis code (dsp/scsynth, GPL-3+, forked from SuperCollider's
  scsynth) runs on clockwork (clockwork/, AGPL-3+ or a commercial licence). The combined program is
@@ -68,14 +72,6 @@ Files: clockwork/src/vendor/oscpack/*
 Copyright: 2004-2013 Ross Bencina <rossb@audiomulch.com>
 License: Expat
 Comment: The licence text includes non-binding requests regarding use.
-
-Files: clockwork/src/vendor/libsamplerate/*
-Copyright: 2012-2016 Erik de Castro Lopo <erikd@mega-nerd.com>
-License: BSD-2-Clause
-Comment: libsamplerate 0.2.2, the files of the release byte for byte (see
- clockwork/src/vendor/libsamplerate/CLOCKWORK.md); the Link Audio renderer
- reads a peer's stream through its sinc converter. clockwork can take the
- system library instead (-DCLOCKWORK_SYSTEM_SAMPLERATE=ON, libsamplerate0-dev).
 
 Files: clockwork/external/midir/*
 Copyright: 2015-2024 Patrick Reisert and RtMidi contributors
@@ -233,29 +229,6 @@ License: ISC
  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
-
-License: BSD-2-Clause
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions are
- met:
- .
- 1. Redistributions of source code must retain the above copyright notice,
-    this list of conditions and the following disclaimer.
- 2. Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
- .
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
- LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- POSSIBILITY OF SUCH DAMAGE.
 
 License: Apache-2.0
  Licensed under the Apache License, Version 2.0 (the "License"); you may not

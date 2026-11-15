@@ -15,12 +15,21 @@
 #   deps        packaging toolchain (devscripts, lintian, autopkgtest, …)
 #   builddeps   install Build-Depends from packaging/debian/control
 #   source      assemble .dsc + orig/component tarballs (make-debian-source.sh)
+#   crates      (system crates only) name every Build-Depends the archive
+#               cannot supply, and fail if there is one
 #   build       extract the .dsc fresh and dpkg-buildpackage it — OFFLINE;
 #               runs the full Catch2 suite via debian/rules
 #   lintian     lintian on source + binaries, failing on errors AND warnings
 #   autopkgtest run debian/tests (transport harness) against the built debs
 #   smoke       install the .deb in a FRESH container and boot the server
 #               (run this phase in a separate pristine container)
+
+#
+# SUPERSONIC_DEB_CRATES=system builds against the archive's own Rust crate
+# packages instead of the vendored ones (make-debian-source.sh says how; the
+# job is .github/workflows/debian-unstable.yml). The Build-Depends are then
+# written by the source phase, so the order is deps, source, crates,
+# builddeps, and on as above.
 
 set -euo pipefail
 
@@ -47,11 +56,46 @@ phase_deps() {
         git ca-certificates xz-utils
 }
 
+# The control file the Build-Depends are read from: the checked-in one, or,
+# for a system-crates build, the one the source phase wrote the crate
+# packages into.
+control_file() {
+    if [ "${SUPERSONIC_DEB_CRATES:-vendor}" = system ]; then
+        local generated=("$WORK"/supersonic-*/debian/control)
+        [ -f "${generated[0]}" ] || { echo "ERROR: run the source phase first" >&2; exit 1; }
+        echo "${generated[0]}"
+    else
+        echo "$PROJECT_ROOT/packaging/debian/control"
+    fi
+}
+
 phase_builddeps() {
     echo "=== builddeps: install Build-Depends ==="
     mk-build-deps --install --remove \
         --tool 'apt-get -y -o Debug::pkgProblemResolver=yes --no-install-recommends' \
-        "$PROJECT_ROOT/packaging/debian/control"
+        "$(control_file)"
+}
+
+phase_crates() {
+    echo "=== crates: which crate packages the archive has ==="
+    apt-get update -qq
+    local wanted missing=() pkg
+    wanted="$(sed -n 's/^ \(librust-[a-z0-9+.-]*-dev\),\{0,1\}$/\1/p' "$(control_file)")"
+    [ -n "$wanted" ] || { echo "ERROR: no librust-*-dev in Build-Depends: nothing was checked" >&2; exit 1; }
+    for pkg in $wanted; do
+        # A real package or one another provides: either installs.
+        if apt-get install -s --no-install-recommends "$pkg" >/dev/null 2>&1; then
+            echo "  have     $pkg"
+        else
+            echo "  MISSING  $pkg"
+            missing+=("$pkg")
+        fi
+    done
+    echo "$(wc -w <<<"$wanted") crate packages checked, ${#missing[@]} missing"
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "FAIL: the archive cannot supply: ${missing[*]}" >&2
+        exit 1
+    fi
 }
 
 phase_source() {
@@ -127,12 +171,13 @@ case "${1:-}" in
     deps)        phase_deps ;;
     builddeps)   phase_builddeps ;;
     source)      phase_source ;;
+    crates)      phase_crates ;;
     build)       phase_build ;;
     lintian)     phase_lintian ;;
     autopkgtest) phase_autopkgtest ;;
     smoke)       phase_smoke ;;
     *)
-        echo "Usage: $0 {deps|builddeps|source|build|lintian|autopkgtest|smoke}" >&2
+        echo "Usage: $0 {deps|builddeps|source|crates|build|lintian|autopkgtest|smoke}" >&2
         exit 1
         ;;
 esac

@@ -1,8 +1,16 @@
 #!/bin/sh
 # Run upstream's transport harness against the installed /usr/bin/supersonic.
-# The harness builds its OSC probe client with cargo; point cargo at the
-# rust-vendor component shipped in the source package so no network is needed.
+# The harness builds its OSC probe client with cargo, with no network: from
+# the rust-vendor component where the source package carries one, and from the
+# archive's crate packages where it was assembled to build against those
+# (debian/build-mode.mk; the test then depends on the build dependencies).
 set -eu
+
+if [ -d rust-vendor ]; then
+    crates="$(pwd)/rust-vendor"
+else
+    crates=/usr/share/cargo/registry
+fi
 
 export CARGO_HOME="${AUTOPKGTEST_TMP:-/tmp}/cargo-home"
 mkdir -p "$CARGO_HOME"
@@ -11,7 +19,7 @@ cat > "$CARGO_HOME/config.toml" <<EOF
 replace-with = "vendored-sources"
 
 [source.vendored-sources]
-directory = "$(pwd)/rust-vendor"
+directory = "$crates"
 EOF
 export CARGO_NET_OFFLINE=true
 

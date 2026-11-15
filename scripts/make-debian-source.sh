@@ -8,6 +8,9 @@
 #                                           clockwork submodule archived into
 #                                           clockwork/, minus the Files-Excluded
 #                                           set in packaging/debian/copyright
+#                                           (the ASIO SDK, and clockwork's copy
+#                                           of libsamplerate: the package links
+#                                           the archive's)
 #   supersonic_<uv>.orig-link.tar.xz        pristine Ableton Link 4.0 with its
 #                                           asio-standalone submodule (the
 #                                           GitHub tag tarball lacks
@@ -31,6 +34,24 @@
 # the package build itself then proves it needs none. Archives HEAD, so
 # uncommitted changes are not included.
 #
+# Two ways to supply the Rust crates, chosen by SUPERSONIC_DEB_CRATES:
+#
+#   vendor (default)  the orig-rust-vendor component above: every crate in
+#                     the lock file, carried in the source package.
+#   system            no vendor component. The build takes the archive's own
+#                     crate packages (librust-*-dev), which is the form the
+#                     Debian archive accepts. clockwork's manifests are
+#                     reduced to Linux by a generated patch
+#                     (clockwork/scripts/linux-manifests.py: cargo resolves
+#                     every platform's crates otherwise), the lock file goes
+#                     with it, and Build-Depends gains one librust-<crate>-dev
+#                     for each crate clockwork depends on directly.
+#
+# SUPERSONIC_DEB_GAMEPAD=off (system only) also leaves game controller input
+# out: clockwork-gamepad leaves the workspace and the build is configured
+# with -DCLOCKWORK_GAMEPAD=OFF. It exists to build everything else while the
+# archive has no gilrs.
+#
 # Usage: scripts/make-debian-source.sh [workdir]   (default: build/debian)
 
 set -euo pipefail
@@ -38,6 +59,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 WORK="${1:-$PROJECT_ROOT/build/debian}"
+
+CRATES="${SUPERSONIC_DEB_CRATES:-vendor}"
+GAMEPAD="${SUPERSONIC_DEB_GAMEPAD:-on}"
+case "$CRATES" in vendor|system) ;; *) echo "ERROR: SUPERSONIC_DEB_CRATES must be vendor or system" >&2; exit 1 ;; esac
+case "$GAMEPAD" in on|off) ;; *) echo "ERROR: SUPERSONIC_DEB_GAMEPAD must be on or off" >&2; exit 1 ;; esac
+if [ "$GAMEPAD" = off ] && [ "$CRATES" != system ]; then
+    echo "ERROR: SUPERSONIC_DEB_GAMEPAD=off needs SUPERSONIC_DEB_CRATES=system" >&2; exit 1
+fi
 
 LINK_TAG="Link-4.1"
 LINK_REPO="https://github.com/Ableton/link.git"
@@ -89,6 +118,7 @@ git archive --format=tar --prefix="supersonic-$UV/" HEAD | tar -x -C "$WORK"
 git -C clockwork archive --format=tar --prefix="supersonic-$UV/clockwork/" HEAD | tar -x -C "$WORK"
 # Keep in sync with Files-Excluded in packaging/debian/copyright.
 rm -rf "$SRC/clockwork/external/ASIOSDK2.3.4"
+rm -rf "$SRC/clockwork/src/vendor/libsamplerate"
 tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig.tar.xz" "supersonic-$UV"
 
 # ── Link component: pristine upstream incl. submodules ──────────────────────
@@ -99,6 +129,7 @@ find "$WORK/link" -name .git -prune -exec rm -rf {} +
 tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-link.tar.xz" link
 
 # ── Rust vendor component ───────────────────────────────────────────────────
+if [ "$CRATES" = vendor ]; then
 echo "=== orig-rust-vendor tarball ==="
 (cd clockwork/rust && cargo vendor "$WORK/rust-vendor")
 
@@ -151,12 +182,15 @@ for crate in sorted(os.listdir(root)):
         print(f"  sanitised {crate}: dropped {len(removed)} file(s)")
 PY
 tar -C "$WORK" -cJf "$WORK/supersonic_$UV.orig-rust-vendor.tar.xz" rust-vendor
+fi
 
 # ── Assemble the source tree ────────────────────────────────────────────────
 echo "=== source tree ==="
 cp -a "$WORK/link" "$SRC/link"
-cp -a "$WORK/rust-vendor" "$SRC/rust-vendor"
+[ "$CRATES" = vendor ] && cp -a "$WORK/rust-vendor" "$SRC/rust-vendor"
 cp -a packaging/debian "$SRC/debian"
+# What debian/rules builds from: read there as debian/build-mode.mk.
+printf 'CRATES = %s\nGAMEPAD = %s\n' "$CRATES" "$GAMEPAD" > "$SRC/debian/build-mode.mk"
 
 # Path-shift the Link patches under the link/ component.
 mkdir -p "$SRC/debian/patches"
@@ -167,6 +201,62 @@ for p in clockwork/external/link-*.patch; do
         "$p" > "$SRC/debian/patches/$name"
     echo "$name" >> "$SRC/debian/patches/series"
 done
+
+# ── The archive's crates: Linux-only manifests, no lock file ────────────────
+if [ "$CRATES" = system ]; then
+    echo "=== Linux-only manifests (patch) and Build-Depends ==="
+    MF="$WORK/manifests"
+    mkdir -p "$MF/a/clockwork" "$MF/b/clockwork"
+    for side in a b; do
+        cp -a "$SRC/clockwork/rust" "$SRC/clockwork/external" "$MF/$side/clockwork/"
+    done
+    drop=(--drop-member clockwork-guards)
+    [ "$GAMEPAD" = off ] && drop+=(--drop-member clockwork-gamepad)
+    python3 "$SRC/clockwork/scripts/linux-manifests.py" "${drop[@]}" --list-crates \
+        "$MF/b/clockwork" > "$MF/crates"
+    # The archive's versions are not the lock file's: cargo resolves against
+    # what is installed (debian/rules: -DCLOCKWORK_CARGO_LOCKED=OFF).
+    rm "$MF/b/clockwork/rust/Cargo.lock"
+    # diff exits 1 when the trees differ, which is the only acceptable answer.
+    rc=0
+    (cd "$MF" && diff -ruN a b > linux-only-manifests.patch) || rc=$?
+    [ "$rc" = 1 ] || { echo "ERROR: diff of the rewritten manifests exited $rc, expected 1 (they differ)" >&2; exit 1; }
+    cp "$MF/linux-only-manifests.patch" "$SRC/debian/patches/"
+    echo linux-only-manifests.patch >> "$SRC/debian/patches/series"
+
+    # One librust-<crate>-dev per crate clockwork names; apt brings the rest.
+    [ -s "$MF/crates" ] || { echo "ERROR: linux-manifests.py listed no crates" >&2; exit 1; }
+    deps="$(sed -e 's/_/-/g' -e 's/.*/ librust-&-dev,/' "$MF/crates")"
+    python3 - "$SRC/debian/control" "$deps" <<'PY'
+import sys
+path, deps = sys.argv[1], sys.argv[2]
+text = open(path).read()
+anchor = " rustc,\n"
+assert text.count(anchor) == 1, "debian/control: expected one ' rustc,' line in Build-Depends"
+open(path, "w").write(text.replace(anchor, anchor + deps + "\n"))
+PY
+    # The installed-package test builds its probe from the same crates.
+    python3 - "$SRC/debian/tests/control" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path).read()
+anchor = "Depends: supersonic, cargo, rustc\n"
+assert text.count(anchor) == 1, "debian/tests/control: expected the transport-smoke Depends line"
+open(path, "w").write(text.replace(anchor, "Depends: supersonic, cargo, rustc, @builddeps@\n"))
+PY
+    # No vendored crates in this source package: its copyright stanza would
+    # match nothing.
+    python3 - "$SRC/debian/copyright" <<'PY'
+import re, sys
+path = sys.argv[1]
+text = open(path).read()
+stanzas = text.split("\n\n")
+kept = [s for s in stanzas if not s.startswith("Files: rust-vendor/*")]
+assert len(kept) == len(stanzas) - 1, "debian/copyright: expected one 'Files: rust-vendor/*' stanza"
+open(path, "w").write("\n\n".join(kept))
+PY
+    echo "  $(wc -l < "$MF/crates") crate packages added to Build-Depends; gamepad $GAMEPAD"
+fi
 
 # Reconcile the changelog with the computed version. Snapshots always need a
 # new entry; releases need one too whenever the checked-in changelog hasn't

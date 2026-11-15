@@ -1,0 +1,119 @@
+# Builds SuperSonic on Debian unstable against the archive's own Rust crate
+# packages (librust-*-dev) instead of the vendored ones: the form the Debian
+# archive accepts, since a package there may not carry its own copies of
+# crates. The other workflow (debian.yml) proves the package on stable with
+# the crates vendored; this one says what stands between that and an upload.
+#
+# The phases are scripts/ci-debian-package.sh's, in the order a system-crates
+# build needs: the source phase writes the Build-Depends (one librust-<crate>-dev
+# per crate clockwork names, from clockwork's manifests reduced to Linux), the
+# crates phase names every one the archive cannot supply and stops there if
+# any is missing, and the rest is the offline build, the full native test
+# suite, lintian, autopkgtest and the install-and-boot smoke test.
+#
+# Run by hand. Unstable is rolling and breaks itself mid-transition, so it
+# gates nothing, and while the archive lacks a crate the run with every
+# subsystem fails at the crates phase by design: that list is its result.
+# `gamepad: off` leaves game controller input out (the one subsystem whose
+# crate, gilrs, the archive does not have at the time of writing) so that
+# everything else is built and tested against the archive's crates.
+#
+# See docs/DEBIAN-PACKAGING.md.
+
+name: Debian unstable (archive crates)
+
+on:
+  workflow_dispatch:
+    inputs:
+      gamepad:
+        description: Game controller input (off builds without it, while the archive has no gilrs)
+        type: choice
+        options: ['on', 'off']
+        default: 'on'
+
+permissions:
+  contents: read
+
+jobs:
+  deb:
+    name: debian-sid, archive crates, gamepad ${{ inputs.gamepad }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          # make-debian-source.sh reads HEAD's own change to package.json to
+          # tell the release build from a snapshot, so the parent must be here.
+          fetch-depth: 2
+
+      - name: Start sid container
+        run: |
+          docker run -d --name deb \
+            -e SUPERSONIC_DEB_CRATES=system \
+            -e SUPERSONIC_DEB_GAMEPAD=${{ inputs.gamepad }} \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            debian:sid sleep infinity
+
+      - name: Packaging toolchain
+        run: docker exec deb scripts/ci-debian-package.sh deps
+
+      - name: Assemble source package
+        run: docker exec deb scripts/ci-debian-package.sh source
+
+      - name: Crate packages the archive has
+        run: docker exec deb scripts/ci-debian-package.sh crates
+
+      - name: Install Build-Depends
+        run: docker exec deb scripts/ci-debian-package.sh builddeps
+
+      # From here the container has no network: the package build fetching
+      # anything is a bug, and this is what catches it.
+      - name: Disconnect network
+        run: docker network disconnect bridge deb
+
+      - name: Build package (offline, full test suite)
+        run: docker exec deb scripts/ci-debian-package.sh build
+
+      - name: Reconnect network
+        run: docker network connect bridge deb
+
+      - name: lintian
+        run: docker exec deb scripts/ci-debian-package.sh lintian
+
+      - name: autopkgtest
+        run: docker exec deb scripts/ci-debian-package.sh autopkgtest
+
+      - name: Stop container
+        if: ${{ always() }}
+        run: docker rm -f deb || true
+
+      - name: Install + boot smoke test (pristine container)
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            debian:sid \
+            bash scripts/ci-debian-package.sh smoke
+
+      - name: Upload package artifacts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-sid-archive-crates-gamepad-${{ inputs.gamepad }}
+          # warn, not error: this step also runs on early-phase failures
+          # (if: always()), where zero artifacts is expected and an error here
+          # would bury the real failure.
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            build/debian/*.dsc
+            build/debian/*.tar.xz
+            build/debian/manifests/crates
+            build/debian/manifests/linux-only-manifests.patch
+            build/debian/build-area/*.deb
+            build/debian/build-area/*.changes
+            build/debian/build-area/*.buildinfo

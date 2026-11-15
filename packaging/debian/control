@@ -12,6 +12,7 @@ Build-Depends: debhelper-compat (= 13),
  libudev-dev,
  libjack-jackd2-dev | libjack-dev,
  libpipewire-0.3-dev,
+ libsamplerate0-dev,
 Standards-Version: 4.7.2
 Rules-Requires-Root: no
 Homepage: https://github.com/samaaron/supersonic

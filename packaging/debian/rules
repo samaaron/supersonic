@@ -6,6 +6,7 @@
 # crates (the audio decoders among them) from the orig-rust-vendor component
 # tarball via the cargo source replacement written below. clockwork (the
 # substrate SuperSonic runs on) is part of the orig tarball, under clockwork/.
+# libsamplerate is the archive's (clockwork's copy is not in the orig tarball).
 # Plugin hosting is off: the CLAP and VST3 SDKs are fetched at configure time
 # and Debian ships neither. The plugin bridge (the engine's out-of-process
 # plugin host, still needed for tracks) installs under libexec/supersonic,
@@ -15,9 +16,29 @@ include /usr/share/dpkg/default.mk
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
-# Rust: never touch the network; build strictly from the vendored crates.
+# Written by upstream's scripts/make-debian-source.sh when it assembles the
+# source package. CRATES = vendor: the Rust crates are the orig-rust-vendor
+# component, at the versions in clockwork's lock file. CRATES = system: they
+# are the archive's librust-*-dev packages, clockwork's manifests are reduced
+# to Linux by debian/patches/linux-only-manifests.patch, and cargo resolves
+# against what is installed. GAMEPAD = off leaves game controller input out.
+-include debian/build-mode.mk
+CRATES ?= vendor
+GAMEPAD ?= on
+
+# Rust: never touch the network; build strictly from the crates named above.
 export CARGO_HOME = $(CURDIR)/debian/cargo-home
 export CARGO_NET_OFFLINE = true
+ifeq ($(CRATES),system)
+CRATE_DIR = /usr/share/cargo/registry
+CRATE_ARGS = -DCLOCKWORK_CARGO_LOCKED=OFF
+else
+CRATE_DIR = $(CURDIR)/rust-vendor
+CRATE_ARGS =
+endif
+ifeq ($(GAMEPAD),off)
+CRATE_ARGS += -DCLOCKWORK_GAMEPAD=OFF
+endif
 
 BUILDDIR = obj-$(DEB_HOST_GNU_TYPE)
 
@@ -27,7 +48,7 @@ BUILDDIR = obj-$(DEB_HOST_GNU_TYPE)
 override_dh_auto_configure:
 	mkdir -p $(CARGO_HOME)
 	printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "%s"\n' \
-		"$(CURDIR)/rust-vendor" > $(CARGO_HOME)/config.toml
+		"$(CRATE_DIR)" > $(CARGO_HOME)/config.toml
 	# CMAKE_BUILD_TYPE=Release rather than Debian's customary None: this is a
 	# real-time audio server and the engine's DSP inner loops need -O3. The
 	# dpkg-buildflags hardening flags still apply on top.
@@ -35,8 +56,10 @@ override_dh_auto_configure:
 		-DCMAKE_BUILD_TYPE=Release \
 		-DBUILD_TESTS=ON \
 		-DCLOCKWORK_PLUGINS=OFF \
+		-DCLOCKWORK_SYSTEM_SAMPLERATE=ON \
 		-DSUPERSONIC_BRIDGE_INSTALL_DIR=libexec/supersonic \
 		-DCLOCKWORK_CARGO_OFFLINE=ON \
+		$(CRATE_ARGS) \
 		-DFETCHCONTENT_FULLY_DISCONNECTED=ON \
 		-DFETCHCONTENT_SOURCE_DIR_ABLETONLINK=$(CURDIR)/link
 
