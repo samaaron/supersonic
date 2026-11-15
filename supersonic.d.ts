@@ -411,6 +411,16 @@ export interface SuperSonicMetrics {
   /** Parameter defines and sets refused. */
   paramsRefused: number;
 
+  /**
+   * Which subsystems this engine has, one bit each: MIDI (bit 0), game
+   * controller input (1), OSC (2), Link (3), Link Audio (4), the scheduler
+   * (5). The names, in bit order, are
+   * `getMetricsSchema().metrics.engineSubsystems.bits`. Set when the engine
+   * starts. In a browser the MIDI and game controller bits are set while the
+   * page has that subsystem up.
+   */
+  engineSubsystems: number;
+
   // How the device kept time (native only: 0 on the web, whose device is the browser's)
   /** Native only: cycles the audio driver says the device missed since the engine started (macOS's overload notices, ALSA's xruns). 0 where the driver can't say. */
   deviceMissedCycles: number;

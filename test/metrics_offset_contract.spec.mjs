@@ -73,6 +73,7 @@ const CPP_TO_JS = {
   params_generation:             'PARAMS_GENERATION',
   param_moves:                   'PARAM_MOVES',
   params_refused:                'PARAMS_REFUSED',
+  subsystems:                    'SUBSYSTEMS',
   clock_drift_us:                'CLOCK_DRIFT_US',
   clock_anchors:                 'CLOCK_ANCHORS',
   scheduler_late_dropped: 'SCHEDULER_LATE_DROPPED',
