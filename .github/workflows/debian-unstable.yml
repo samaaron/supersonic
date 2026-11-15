@@ -11,32 +11,75 @@
 # any is missing, and the rest is the offline build, the full native test
 # suite, lintian, autopkgtest and the install-and-boot smoke test.
 #
-# Run by hand. Unstable is rolling and breaks itself mid-transition, so it
-# gates nothing, and while the archive lacks a crate the run with every
-# subsystem fails at the crates phase by design: that list is its result.
-# `gamepad: off` leaves game controller input out (the one subsystem whose
-# crate, gilrs, the archive does not have at the time of writing) so that
-# everything else is built and tested against the archive's crates.
+# Runs for a release (the commit that sets package.json's version, which
+# scripts/bump-version.sh makes and tags: scripts/is-release-commit.sh), since
+# that is the version a maintainer would package, and by hand (*Run
+# workflow*). Not on other pushes or on a schedule: unstable is rolling and
+# breaks itself mid-transition, and until the package is in the archive
+# nobody is waiting on a same-day warning.
+#
+# `gamepad: off` leaves game controller input out: the one subsystem whose
+# crate, gilrs, the archive does not have at the time of writing. A release
+# builds that way, so that everything else is built and tested against the
+# archive's crates, and its crates step says whether gilrs has arrived. By
+# hand, `gamepad: on` builds every subsystem, and while the archive lacks a
+# crate fails at the crates step by design: that list is its result.
 #
 # See docs/DEBIAN-PACKAGING.md.
 
 name: Debian unstable (archive crates)
 
 on:
+  # A release changes package.json; the first job says whether this push is one.
+  push:
+    branches: [main]
+    paths: ['package.json']
   workflow_dispatch:
     inputs:
       gamepad:
         description: Game controller input (off builds without it, while the archive has no gilrs)
         type: choice
-        options: ['on', 'off']
-        default: 'on'
+        options: ['off', 'on']
+        default: 'off'
 
 permissions:
   contents: read
 
+env:
+  # A release builds without game controller input; by hand, as asked.
+  GAMEPAD: ${{ inputs.gamepad || 'off' }}
+
 jobs:
+  # A push builds only when it is the release commit; a hand-run always does.
+  release:
+    name: is this a release?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+      - id: decide
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "build=yes" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          status=0
+          scripts/is-release-commit.sh || status=$?
+          case "$status" in
+            0) echo "build=yes" >> "$GITHUB_OUTPUT" ;;
+            1) echo "build=no" >> "$GITHUB_OUTPUT"
+               echo "package.json changed, but not its version: not a release, nothing built" >> "$GITHUB_STEP_SUMMARY" ;;
+            *) exit 1 ;;
+          esac
+
   deb:
-    name: debian-sid, archive crates, gamepad ${{ inputs.gamepad }}
+    needs: release
+    if: needs.release.outputs.build == 'yes'
+    name: debian-sid, archive crates
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -53,7 +96,7 @@ jobs:
         run: |
           docker run -d --name deb \
             -e SUPERSONIC_DEB_CRATES=system \
-            -e SUPERSONIC_DEB_GAMEPAD=${{ inputs.gamepad }} \
+            -e SUPERSONIC_DEB_GAMEPAD="$GAMEPAD" \
             -v "${GITHUB_WORKSPACE}:/src" \
             -w /src \
             debian:sid sleep infinity
@@ -65,7 +108,21 @@ jobs:
         run: docker exec deb scripts/ci-debian-package.sh source
 
       - name: Crate packages the archive has
-        run: docker exec deb scripts/ci-debian-package.sh crates
+        run: |
+          # The summary is written whether or not a crate is missing.
+          status=0
+          docker exec deb scripts/ci-debian-package.sh crates > crates.log 2>&1 || status=$?
+          cat crates.log
+          {
+            echo "Game controller input: $GAMEPAD"
+            echo '```'
+            grep -E 'crate packages checked|MISSING|^gilrs: ' crates.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if grep -q '^gilrs: in the archive' crates.log; then
+            echo "::notice::gilrs is in the Debian archive: the build with game controller input can be tried (Run workflow, gamepad: on)"
+          fi
+          exit "$status"
 
       - name: Install Build-Depends
         run: docker exec deb scripts/ci-debian-package.sh builddeps
@@ -103,7 +160,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: debian-sid-archive-crates-gamepad-${{ inputs.gamepad }}
+          name: debian-sid-archive-crates-gamepad-${{ env.GAMEPAD }}
           # warn, not error: this step also runs on early-phase failures
           # (if: always()), where zero artifacts is expected and an error here
           # would bury the real failure.

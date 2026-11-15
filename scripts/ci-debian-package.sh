@@ -92,6 +92,16 @@ phase_crates() {
         fi
     done
     echo "$(wc -w <<<"$wanted") crate packages checked, ${#missing[@]} missing"
+    # A build that leaves game controller input out does so because the
+    # archive has no gilrs. Say whether that is still true, so the day it
+    # arrives is noticed: the line is fixed text the workflow looks for.
+    if [ "${SUPERSONIC_DEB_GAMEPAD:-on}" = off ]; then
+        if apt-get install -s --no-install-recommends librust-gilrs-dev >/dev/null 2>&1; then
+            echo "gilrs: in the archive (the build with game controller input can be tried)"
+        else
+            echo "gilrs: not in the archive"
+        fi
+    fi
     if [ "${#missing[@]}" -gt 0 ]; then
         echo "FAIL: the archive cannot supply: ${missing[*]}" >&2
         exit 1

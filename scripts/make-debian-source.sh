@@ -80,22 +80,18 @@ V="$(sed -n 's/^  "version": "\([0-9][0-9.]*\)",$/\1/p' package.json | head -1)"
 [ -n "$V" ] || { echo "ERROR: no version in package.json" >&2; exit 1; }
 SHA="$(git rev-parse --short HEAD)"
 
-# HEAD is the version commit when its own change to package.json is the line
-# that names V. A clone cut off at HEAD shows that whole file as added, so
-# the parent must be there (fetch-depth 2 in CI) for the answer to mean anything.
-git rev-parse --verify -q HEAD^ >/dev/null || {
-    echo "ERROR: HEAD has no parent in this clone; fetch at least depth 2 to tell a release from a snapshot" >&2
-    exit 1
-}
-if git show --format= HEAD -- package.json | grep -xF "+  \"version\": \"$V\"," >/dev/null; then
-    UV="$V"
-    DEBV="$V-1"
-    SNAPSHOT=""
-else
-    UV="$V+git$(date -u +%Y%m%d).$SHA"
-    DEBV="$UV-1~ci1"
-    SNAPSHOT="yes"
-fi
+# The release commit (scripts/is-release-commit.sh) or a snapshot of any other.
+release=0
+"$SCRIPT_DIR/is-release-commit.sh" || release=$?
+case "$release" in
+    0)  UV="$V"
+        DEBV="$V-1"
+        SNAPSHOT="" ;;
+    1)  UV="$V+git$(date -u +%Y%m%d).$SHA"
+        DEBV="$UV-1~ci1"
+        SNAPSHOT="yes" ;;
+    *)  exit 1 ;;
+esac
 echo "=== supersonic $DEBV (upstream $UV) ==="
 
 # Refuse to wipe a pre-existing directory this script didn't create (the

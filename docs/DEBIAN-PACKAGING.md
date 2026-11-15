@@ -137,9 +137,13 @@ prefers the archive's `symphonia-bundle-flac` removes the `[patch.crates-io]`
 table in `clockwork/rust/Cargo.toml`, and loses that fix until upstream
 releases it.
 
-`.github/workflows/debian-unstable.yml` builds this on unstable, by hand
-(*Run workflow*). Its `crates` phase names every crate package the archive
-cannot supply and stops there if one is missing.
+`.github/workflows/debian-unstable.yml` builds this on unstable for each
+release (the commit that sets the version, which is what a maintainer would
+package) and by hand (*Run workflow*). Its `crates` phase names every crate
+package the archive cannot supply and stops there if one is missing. A
+release builds without game controller input while the archive has no
+`gilrs`, and that phase says, in the run's summary, whether `gilrs` has
+arrived; by hand either form can be built.
 
 Where it stood on 2026-11-15, run in a `debian:sid` arm64 container on a
 development machine (the workflow itself has not run yet, and the container's
