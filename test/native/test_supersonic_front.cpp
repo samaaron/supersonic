@@ -507,7 +507,7 @@ TEST_CASE("front, measure: what each definition costs the block that parses it",
     EngineFixture fx(cfg);
     auto count = [&](const char* address) {
         size_t n = 0;
-        for (const auto& r : fx.routedReplies()) if (r.origin == kSpider && r.address == address) ++n;
+        for (const auto& r : fx.repliesOf(0)) if (r.token == kSpider && r.address == address) ++n;
         return n;
     };
     auto answered = [&] { return count("/done"); };

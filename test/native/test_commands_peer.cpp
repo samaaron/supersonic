@@ -140,7 +140,7 @@ TEST_CASE("commands peer: the C surface is the same front, for a peer in another
             auto r = osc_test::parseReply(msgs[k].bytes, msgs[k].length);
             if (addr == "/done" && r.argCount() > 1 && r.argString(0) == "/b_allocRead") {
                 CHECK(r.argInt(1) == 5);
-                CHECK(msgs[k].origin == 9);   // answered to the asker's token
+                CHECK(msgs[k].token == 9);   // answered to the asker's token
                 done = true;
                 CHECK(supersonic_commands_send(f, query.ptr(), query.size(), 9) == 0);   // the engine's
             }

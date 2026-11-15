@@ -10,8 +10,6 @@
 #include "TrackControl.h"
 #endif
 
-#include <set>
-
 #ifndef SUPERSONIC_VERSION_STRING
 #define SUPERSONIC_VERSION_STRING "dev"
 #endif
@@ -20,53 +18,19 @@ namespace supersonic {
 
 namespace {
 
-// The one client's token: non-zero, so the engine answers it directly (a
-// reply to the sender, where 0 would be a broadcast to the notify audience).
-constexpr uint32_t kClientToken = 1;
-
-// The engine→application boundary: an IOscTransport whose every send and
-// broadcast lands on one callback. The shape of the NIF's transport: a real
-// peer (so Link, MIDI, gamepad and OSC pushes are delivered once subscribed)
-// with no socket. Only the NRT gateway calls these; the flags are atomics so
-// a shutdown on another thread reads them safely.
-class CallbackPeerTransport final : public IOscTransport {
+// The engine→application boundary: everything the engine says to its one
+// client lands on onMessage, on the engine's control thread. An embedded
+// application sends without tokens, so none is handed on.
+class CallbackClientTransport final : public IOscTransport {
 public:
-    explicit CallbackPeerTransport(EmbeddedHost::Callbacks* cb) : mCb(cb) {}
-
-    // The application is the one peer: a send reaches it or not, and a
-    // broadcast meant for it misses it when there is no callback to take it.
-    bool send(uint32_t, const uint8_t* data, uint32_t size, bool /*networkOnly*/) override { return deliver(data, size); }
-    uint32_t broadcastNotify(const uint8_t* data, uint32_t size) override { return deliver(data, size) ? 0 : 1; }
-    uint32_t broadcastLink(const uint8_t* data, uint32_t size) override { return broadcastIf(mLink, data, size); }
-    bool hasNotifySubscribers() const override { std::lock_guard<std::mutex> lk(mMutex); return !mNotify.empty(); }
-    bool subscribeNotify(uint32_t token) override { std::lock_guard<std::mutex> lk(mMutex); return mNotify.insert(token).second; }
-    void unsubscribeNotify(uint32_t token) override { std::lock_guard<std::mutex> lk(mMutex); mNotify.erase(token); }
-    void clearNotify() override { std::lock_guard<std::mutex> lk(mMutex); mNotify.clear(); }
-    bool subscribeLink(uint32_t) override { mLink = true; return true; }
-    void unsubscribeLink(uint32_t) override { mLink = false; }
-    uint32_t broadcastMidi(const uint8_t* data, uint32_t size) override { return broadcastIf(mMidi, data, size); }
-    bool subscribeMidi(uint32_t) override { mMidi = true; return true; }
-    void unsubscribeMidi(uint32_t) override { mMidi = false; }
-    uint32_t broadcastGamepad(const uint8_t* data, uint32_t size) override { return broadcastIf(mGamepad, data, size); }
-    bool subscribeGamepad(uint32_t) override { mGamepad = true; return true; }
-    void unsubscribeGamepad(uint32_t) override { mGamepad = false; }
-    uint32_t broadcastOsc(const uint8_t* data, uint32_t size) override { return broadcastIf(mOsc, data, size); }
-    bool subscribeOsc(uint32_t) override { mOsc = true; return true; }
-    void unsubscribeOsc(uint32_t) override { mOsc = false; }
-
-private:
-    uint32_t broadcastIf(const std::atomic<bool>& subscribed, const uint8_t* data, uint32_t size) {
-        return subscribed.load() && !deliver(data, size) ? 1u : 0u;
-    }
-    bool deliver(const uint8_t* data, uint32_t size) {
+    explicit CallbackClientTransport(EmbeddedHost::Callbacks* cb) : mCb(cb) {}
+    bool deliver(const uint8_t* data, uint32_t size, uint32_t /*token*/) override {
         if (!mCb || !mCb->onMessage) return false;
         mCb->onMessage(data, size);
         return true;
     }
+private:
     EmbeddedHost::Callbacks* mCb;
-    mutable std::mutex mMutex;
-    std::set<uint32_t> mNotify;
-    std::atomic<bool> mLink { false }, mMidi { false }, mGamepad { false }, mOsc { false };
 };
 
 } // namespace
@@ -75,7 +39,7 @@ struct EmbeddedHost::Impl {
     Callbacks callbacks;
     // Declared in the order SuperSonicMain declares them: the transport
     // outlives the engine's teardown; the front is torn down first.
-    CallbackPeerTransport transport { &callbacks };
+    CallbackClientTransport transport { &callbacks };
     FrontedTransport fronted;
     ClockworkEngine engine;
     std::unique_ptr<Commands> front;
@@ -158,8 +122,8 @@ bool EmbeddedHost::send(const uint8_t* data, uint32_t size) {
     auto& I = *mImpl;
     std::lock_guard<std::mutex> lk(mSendMutex);
     if (!mRunning.load() || !data || !size) return false;
-    if (I.front && I.front->ingress(data, size, kClientToken)) return true;
-    return I.engine.ingest(data, size, kClientToken) == CLOCKWORK_OK;
+    if (I.front && I.front->ingress(data, size, /*token*/ 0)) return true;
+    return I.engine.ingest(data, size, /*token*/ 0) == CLOCKWORK_OK;
 }
 
 bool EmbeddedHost::loadDefinitions(const std::string& dir, std::string* why) {

@@ -43,14 +43,15 @@ In-process, the front stands in the egress path as it does today
 (`FrontedTransport`, `OscFront::egress`): every reply the engine sends is
 offered to the front first, and the front takes the ones that answer what it
 sent (`/clockwork/asset/committed`, `/b_info` for a `/b_write`, the `/done` of
-its own `/b_free`) and lets the rest through. The asker's token travels with
-the command and comes back on the reply, so a front with several askers
-tells them apart.
+its own `/b_free`) and lets the rest through. A message's token travels with
+it to scsynth, which puts it on each answer to that message (Clockwork's
+docs/TRANSPORTS.md, "Tokens"). The front sends on a client's message with the client's token, and
+its own with a token it keeps for itself, so it tells an answer to its own
+`/b_free` from an answer to the client's.
 
 In a peer process there is no transport to stand in: the peer's replies
-arrive by `clockwork_client_poll` on its handle, every one stamped with the
-plane's one token (the engine assigns identity by transport and trusts none
-from shared memory). So the front offers its own poll:
+arrive by `clockwork_client_poll` on its handle, each with the token of the
+message it answers. So the front offers its own poll:
 
 ```
 Commands::poll(out, max)   // polls the handle; keeps what answers the front's own
@@ -58,11 +59,11 @@ Commands::poll(out, max)   // polls the handle; keeps what answers the front's o
                            // to the asker (/done "/b_allocRead" 3 …) in order
 ```
 
-and keys what it is waiting for by **verb and buffer number**, not by token:
-with one token there is nothing else to key by, and `/b_allocRead 3` cannot
-be in flight twice for one buffer anyway. The in-process front keeps the
-token as a second key, which is how a server with several sockets stays
-exact.
+and keys what it is waiting for by token, verb and buffer number, as the
+in-process front does.
+
+Two tokens are the front's own, `0xFFFFFFFF` and `0xFFFFFFFE`: a client must
+not send with them.
 
 `replies` (the `IOscTransport*` the front's own answers leave by) is therefore
 optional: given, the front answers through it; not given, the answers come

@@ -75,7 +75,7 @@ bool readSecret(Options& out, FILE* in, std::string* err);
 // Selected before engine.init and started after it, once the rings exist.
 class CommandTransports {
 public:
-    using Ingest = std::function<void(const uint8_t*, uint32_t, uint32_t)>;
+    using Ingest = std::function<void(const uint8_t*, uint32_t)>;
 
     // The transport the engine's replies leave by, or null with `err`.
     // `peerPlaneSlot` is the engine's, for --shm-commands; null otherwise.
@@ -100,10 +100,9 @@ private:
 
 // The egress pump: the host is the consumer of the engine's two egress
 // rings (Config::hostDrainsEgress). One thread polls the engine's client
-// handle — one read, both rings — and routes each frame to the transport
-// by its route word and origin (clockwork's EgressRouter, the same table the
-// engine's own gateway uses when it is the consumer). /clockwork/debug goes
-// to `log`. Start after the transport starts; stop before it stops.
+// handle — one read, both rings — and delivers each frame to the transport
+// (clockwork's EgressRouter, as the engine's own gateway does when it is the
+// consumer). /clockwork/debug goes to `log`. Start after the transport starts; stop before it stops.
 class EgressPump {
 public:
     EgressPump(ClockworkEngine& engine, IOscTransport& transport,

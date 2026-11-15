@@ -61,6 +61,14 @@ ClockworkEngine::Config recoverConfig() {
     return cfg;
 }
 
+// A recovery's result (/clockwork/devices/reopen.done) is told to a client
+// that asked for the engine's lifecycle, so the case asks first.
+void askForLifecycle(EngineFixture& fix) {
+    fix.send(osc_test::message("/clockwork/notify"));
+    OscReply ack;
+    REQUIRE(fix.waitForReply("/clockwork/notify.reply", ack));
+}
+
 } // namespace
 
 // Sanity/enabler: requestAudioRecovery launches recoverAudio on its worker
@@ -69,6 +77,7 @@ ClockworkEngine::Config recoverConfig() {
 TEST_CASE("Recover: requestAudioRecovery runs recoverAudio and reports reopen.done",
           "[Recover][rt]") {
     EngineFixture fix(recoverConfig());
+    askForLifecycle(fix);
 
     std::string reason;
     REQUIRE(fix.engine().requestAudioRecovery(reason));
@@ -136,6 +145,7 @@ TEST_CASE("Recover: replacing the device session races concurrent device queries
 TEST_CASE("Recover: recovery never strands the engine with no audio source",
           "[Recover][rt]") {
     EngineFixture fix(recoverConfig());
+    askForLifecycle(fix);
     REQUIRE(fix.engine().audioSource() != ClockworkEngine::AudioSource::None);
 
     std::string reason;

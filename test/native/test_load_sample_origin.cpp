@@ -1,15 +1,9 @@
 /*
- * test_load_sample_origin.cpp — a buffer reply answers the client that asked.
+ * test_load_sample_origin.cpp — a buffer's answer carries its asker's token.
  *
- * A client that asks for a buffer has to be the one told the answer. An origin
- * of 0 would not broadcast it: 0 addresses the clients that sent
- * /clockwork/notify, and asking for a buffer does not make a client one of
- * them.
- *
- * onReply cannot see which of those happened — in-process a reply and a
- * notification both arrive through it — so these read onReplyRouted, which
- * carries the origin and the route that decided where the message went — recorded by
- * the fixture (EngineFixture::routedReplies), never by a callback over a test's locals.
+ * A client that asks for a buffer matches the answer to its ask by the token
+ * it sent the ask with. These cases send with a token and read it back off
+ * the answer, as the fixture records it (OscReply::token).
  *
  * TWO WAYS A SAMPLE ARRIVES, ONE PLACE IT IS DECODED. The client decodes the
  * file (clockwork_audio_file.h), lays the frames out in the ASSETS with the
@@ -38,7 +32,7 @@
 
 namespace {
 
-constexpr uint32_t kAsker = 0xA5C1;   // any non-zero token: 0 is the notify audience
+constexpr uint32_t kAsker = 0xA5C1;   // any non-zero token: 0 is no token
 
 std::string samplePath(const char* name) {
     return std::string(CLOCKWORK_SAMPLES_DIR) + "/" + name;
@@ -57,7 +51,7 @@ osc_test::Packet allocRead(int32_t buf, const std::string& path) {
 
 } // namespace
 
-TEST_CASE("asset commit: a range that leaves the assets area is refused, to the asker",
+TEST_CASE("asset commit: a refusal for a range that leaves the assets area carries the asker's token",
           "[load_sample][origin][lane]") {
     // The offset is trusted by nobody. A range past the end of the lane would
     // be read as sample data from whatever lies beyond it, so it is refused —
@@ -76,17 +70,11 @@ TEST_CASE("asset commit: a range that leaves the assets area is refused, to the 
 
     OscReply refused;
     REQUIRE(fx.waitForReply("/clockwork/asset/refused", refused));
-    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
-    const auto seen = fx.routedReplies();
-    const RoutedReply* reply = nullptr;
-    for (const auto& r : seen)
-        if (r.address == "/clockwork/asset/refused") { reply = &r; break; }
-    REQUIRE(reply != nullptr);
-    CHECK(reply->origin == kAsker);
-    CHECK(reply->route  == static_cast<uint32_t>(EGRESS_REPLY));
+    // The answer carries the token its message was sent with.
+    CHECK(refused.token == kAsker);
 }
 
-TEST_CASE("asset commit: /clockwork/asset/committed is addressed to the client that asked",
+TEST_CASE("asset commit: /clockwork/asset/committed carries the asker's token",
           "[load_sample][origin]") {
     if (!haveSample("bd_haus.flac")) SKIP("sample bd_haus.flac not found");
     EngineFixture fx;
@@ -99,17 +87,11 @@ TEST_CASE("asset commit: /clockwork/asset/committed is addressed to the client t
 
     OscReply done;
     REQUIRE(fx.waitForReply("/clockwork/asset/committed", done));
-    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
-    const auto seen = fx.routedReplies();
-    const RoutedReply* reply = nullptr;
-    for (const auto& r : seen)
-        if (r.address == "/clockwork/asset/committed") { reply = &r; break; }
-    REQUIRE(reply != nullptr);
-    CHECK(reply->origin == kAsker);
-    CHECK(reply->route  == static_cast<uint32_t>(EGRESS_REPLY));
+    // The answer carries the token its message was sent with.
+    CHECK(done.token == kAsker);
 }
 
-TEST_CASE("/b_allocRead: the refusal is addressed to the client that asked",
+TEST_CASE("/b_allocRead: the refusal carries the asker's token",
           "[load_sample][origin]") {
     EngineFixture fx;
 
@@ -123,13 +105,6 @@ TEST_CASE("/b_allocRead: the refusal is addressed to the client that asked",
     OscReply fail;
     REQUIRE(fx.waitForReply("/fail", fail));
 
-    // what reached the transport, with its routing (recorded by the fixture: EngineFixture::routedReplies)
-    const auto seen = fx.routedReplies();
-    const RoutedReply* reply = nullptr;
-    for (const auto& r : seen)
-        if (r.address == "/fail") { reply = &r; break; }
-
-    REQUIRE(reply != nullptr);
-    CHECK(reply->origin == kAsker);
-    CHECK(reply->route  == static_cast<uint32_t>(EGRESS_REPLY));
+    // The answer carries the token its message was sent with.
+    CHECK(fail.token == kAsker);
 }

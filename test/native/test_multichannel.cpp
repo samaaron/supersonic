@@ -93,7 +93,7 @@ TEST_CASE("Output bus has correct channel-major layout", "[multichannel]") {
     int inCh  = 2;
 
     ClockworkEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
+    engine.onReply = [](const uint8_t*, uint32_t, uint32_t) {};
 
     ClockworkEngine::Config cfg = channels(outCh, inCh);
     // Manual pump: this test renders blocks on the test thread, so the engine
@@ -140,7 +140,7 @@ TEST_CASE("Input bus has correct channel-major layout", "[multichannel]") {
     int inCh  = 4;
 
     ClockworkEngine engine;
-    engine.onReply = [](const uint8_t*, uint32_t) {};
+    engine.onReply = [](const uint8_t*, uint32_t, uint32_t) {};
 
     ClockworkEngine::Config cfg = channels(outCh, inCh);
     // Manual pump: this test renders blocks on the test thread, so the engine
@@ -209,7 +209,7 @@ TEST_CASE("Prefetch buffer resizes for channel count", "[multichannel]") {
     for (const int outCh : {8, 16}) {
         INFO(outCh << " outputs");
         ClockworkEngine engine;
-        engine.onReply = [](const uint8_t*, uint32_t) {};
+        engine.onReply = [](const uint8_t*, uint32_t, uint32_t) {};
         ClockworkEngine::Config cfg = channels(outCh, 0);
         cfg.manualAudioPump = true;   // pumpDevice's premise, whatever SUPERSONIC_TEST_REALTIME says
         engine.init(cfg);

@@ -86,9 +86,7 @@ public:
     // `replies` is where the front's own answers go: the transport the
     // engine's replies also leave by, so a /done from here and a /b_info
     // from the engine reach the same socket in order. Null for a front that
-    // is polled instead (poll(), a peer): its answers come out of the poll,
-    // and what it waits for is matched by verb and buffer, the handle's
-    // replies all carrying one token.
+    // is polled instead (poll(), a peer): its answers come out of the poll.
     Commands(ClockworkClient* client, IOscTransport* replies, Work work = Work::Own);
     ~Commands() override;
 
@@ -123,7 +121,7 @@ public:
     bool        send(const uint8_t* data, uint32_t size, uint32_t token);
 
     bool        ingress(const uint8_t* data, uint32_t size, uint32_t token) override;
-    bool        egress(uint32_t token, const uint8_t* data, uint32_t size) override;
+    bool        egress(const uint8_t* data, uint32_t size, uint32_t token) override;
 
     // For a front made with no `replies`: the handle's replies, polled
     // (clockwork_client_poll), with the ones that answer the front's own sends
@@ -233,30 +231,24 @@ private:
     // it stops.
     std::unique_ptr<ClockworkClient, void (*)(ClockworkClient*)> mOwner;
     IOscTransport*   mReplies;
-    // The handle's replies carry one token (a polled front's): what the front
-    // waits for is matched by verb and buffer, and answered to the token the
-    // asker used.
-    const bool       mTokenless;
     // A polled front's answers, until its next poll hands them out; and the
     // frames that poll handed out, kept until the next.
-    struct Polled { std::vector<uint8_t> bytes; uint32_t origin, route, sequence; };
+    struct Polled { std::vector<uint8_t> bytes; uint32_t token, sequence; };
     std::mutex                                            mAnswersMut;
     std::deque<std::pair<uint32_t, std::vector<uint8_t>>> mAnswers;
     std::vector<Polled>                                   mPolled;
-    // The front's own /b_free of what a buffer held, when the handle cannot
-    // tell its token from an asker's: so many /done "/b_free" are the front's.
-    std::multiset<int32_t>                                mOwnFrees;
     const Work       mWork;
     Recorder         mRecorder;
     std::string      mSummary;
     std::function<void()> mQuit;
 
-    // loadDefinitions' own asker: a token no transport hands out (theirs are
-    // small and non-zero), so its answer is caught in reply() instead of sent.
+    // loadDefinitions' own asker: a token the front keeps for itself, which a
+    // client must not send with, so its answer is caught in reply() instead
+    // of sent.
     static constexpr uint32_t kOwnToken = 0xFFFFFFFFu;
     // The front's own /b_free of what a buffer held before a load replaces it:
-    // another token no transport hands out, so everything said back to it,
-    // a refusal included, is the front's, and egress() takes it.
+    // another token the front keeps for itself, so everything said back to
+    // it, a refusal included, is the front's, and egress() takes it.
     static constexpr uint32_t kFreeToken = 0xFFFFFFFEu;
     std::mutex              mOwnMut;
     std::condition_variable mOwnCv;

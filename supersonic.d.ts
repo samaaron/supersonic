@@ -401,6 +401,16 @@ export interface SuperSonicMetrics {
   /** Native only: cues the cue port's rate limit dropped. 0 unless someone floods it. */
   cuesDropped: number;
 
+  // The parameter table
+  /** Entries in the parameter table. */
+  paramsLive: number;
+  /** Times the set of parameters changed. */
+  paramsGeneration: number;
+  /** Times a parameter's value moved. */
+  paramMoves: number;
+  /** Parameter defines and sets refused. */
+  paramsRefused: number;
+
   // How the device kept time (native only: 0 on the web, whose device is the browser's)
   /** Native only: cycles the audio driver says the device missed since the engine started (macOS's overload notices, ALSA's xruns). 0 where the driver can't say. */
   deviceMissedCycles: number;

@@ -183,7 +183,7 @@ The AudioWorklet reads the OUT ring buffer directly and sends replies to the mai
 
 **Both modes converge** at the SuperSonic event emitter on the main thread, which decodes the reply and emits `in` and `in:osc` events. On the web every reply rides the OUT ring: the arena also has an NRT-out ring, but the worklet has no second thread to write it. The only consumer is the reply path above (worker → main thread in SAB mode, worklet → main thread in PM mode). There is no per-channel reply delivery — every reply reaches clients through the main-thread event emitter.
 
-Natively, replies written off the audio thread go on the NRT-out ring. The engine's control thread reads both rings, OUT first, and sends each reply to the client it answers, or to every subscriber of a broadcast.
+Natively, replies written off the audio thread go on the NRT-out ring. The engine's control thread reads both rings, OUT first, and hands each message to the one client, with the token of the message it answers beside it.
 
 **The OSC-out log**: the `out:osc` events show what was sent, read from the IN ring. The engine consumes that ring, so the log watches it through a tap: a read cursor of its own that takes nothing (`RingTap` in `clockwork/js/lib/ring.js`). Writers reserve space against the engine's cursor, not the tap's, so a log that falls behind is overwritten. The tap then resyncs to the newest traffic and counts what went past. In SAB mode the log worker (`osc_out_log_sab_worker.js`) runs the tap; in PM mode the worklet does, on its snapshot heartbeat.
 

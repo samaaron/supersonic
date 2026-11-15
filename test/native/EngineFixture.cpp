@@ -119,8 +119,9 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg,
     mSampleRate = cfg.sampleRate;
 
     // Wire reply/debug callbacks before initialising
-    mEngine.onReply = [this](const uint8_t* data, uint32_t size) {
+    mEngine.onReply = [this](const uint8_t* data, uint32_t size, uint32_t token) {
         OscReply r;
+        r.token = token;
         r.address = osc_test::parseAddress(data, size);
         r.raw.assign(data, data + size);
         {
@@ -129,17 +130,6 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg,
             mReplies.push_back(std::move(r));
         }
         mReplyCv.notify_all();
-    };
-
-    // Routed, as the transport decided (before onReply, CallbackTransport::send): recorded here, then handed to
-    // the test's observer, if it has set one
-    mEngine.onReplyRouted = [this](uint32_t origin, uint32_t route, const uint8_t* data, uint32_t size) {
-        {
-            std::lock_guard<std::mutex> lk(mReplyMutex);
-            mRouted.push_back({origin, route, osc_test::parseAddress(data, size)});
-        }
-        std::lock_guard<std::mutex> lk(mObserverMutex);
-        if (mRoutedObserver) mRoutedObserver(origin, route, data, size);
     };
 
     mEngine.onDebug = [this](const std::string& msg) {
@@ -195,7 +185,7 @@ void EngineFixture::bootCompanions(const ClockworkEngine::Config& cfg,
     for (int i = 1; i < engines; ++i) {
         auto c = std::make_unique<Companion>();
         Companion* self = c.get();
-        c->engine.onReply = [self](const uint8_t* data, uint32_t size) {
+        c->engine.onReply = [self](const uint8_t* data, uint32_t size, uint32_t) {
             OscReply r;
             r.address = osc_test::parseAddress(data, size);
             r.raw.assign(data, data + size);
@@ -235,7 +225,6 @@ EngineFixture::~EngineFixture() {
     // shutdown() has stopped the threads that call these; dropping them says so, and leaves nothing holding this
     // fixture while the rest of it goes away.
     mEngine.onReply = nullptr;
-    mEngine.onReplyRouted = nullptr;
     mEngine.onDebug = nullptr;
 }
 
@@ -493,17 +482,6 @@ std::vector<OscReply> EngineFixture::allReplies() const {
 void EngineFixture::clearReplies() {
     std::lock_guard<std::mutex> lk(mReplyMutex);
     mReplies.clear();
-    mRouted.clear();
-}
-
-std::vector<RoutedReply> EngineFixture::routedReplies() const {
-    std::lock_guard<std::mutex> lk(mReplyMutex);
-    return mRouted;
-}
-
-void EngineFixture::setRoutedObserver(RoutedObserver fn) {
-    std::lock_guard<std::mutex> lk(mObserverMutex);
-    mRoutedObserver = std::move(fn);
 }
 
 // ── Debug ────────────────────────────────────────────────────────────────────

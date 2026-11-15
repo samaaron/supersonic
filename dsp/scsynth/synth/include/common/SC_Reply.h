@@ -22,8 +22,8 @@
 #pragma once
 
 // ReplyAddress carries a trivially-copyable placeholder (not a
-// boost::asio::ip::address) on EVERY build: SuperSonic routes replies by the
-// origin token in mReplyData, so scsynth's network address is unused and no
+// boost::asio::ip::address) on EVERY build: every SuperSonic reply goes to
+// Clockwork's one client, so scsynth's network address is unused and no
 // build pulls boost::asio into the reply path.
 #include "SC_Types.h"
 

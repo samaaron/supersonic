@@ -44,7 +44,7 @@
 #include "scsynth_scope.h"
 
 // SC_Reply.h only forward-declares ReplyAddress; the layout — and mReplyData,
-// which is where the origin token rides — is in the Impl header. OSC_Packet is
+// which is where a message's token rides — is in the Impl header. OSC_Packet is
 // the server's own.
 #include "SC_Reply.h"
 #include "SC_ReplyImpl.hpp"
@@ -62,32 +62,28 @@
 /*
  * WHAT SCSYNTH KEEPS IN DspConfig::persistent.
  *
- * /notify registers a client inside the World — mHiddenWorld's user table, via
- * NotifyCmd — and a World does not survive a device switch or a worklet death.
- * The registration therefore dies with it, and every /n_go and /n_end after the
- * rebuild goes nowhere, silently, to a client that has no reason to suspect it
- * needs to ask again.
+ * /notify registers the client inside the World — mHiddenWorld's user table,
+ * via NotifyCmd — and a World does not survive a device switch or a worklet
+ * death. The registration therefore dies with it, and every /n_go and /n_end
+ * after the rebuild goes nowhere, silently, to a client that has no reason to
+ * suspect it needs to ask again.
  *
- * The origins themselves DO survive: an origin token is minted by the transport
- * (internOrigin) and lives in the transport's registry, which a rebuild does not
- * touch. So recording which of them had registered is enough to put the world
- * back the way the client left it.
+ * Clockwork has one client, so recording whether it had registered is enough
+ * to put the world back the way the client left it.
  *
  * This is the guest's own business and it is spelled out here rather than in
  * clockwork on purpose: /notify is scsynth vocabulary, and a host that recognised
  * it would be a host that had learned an engine's verbs.
  */
 struct NotifyPersist {
-    static constexpr uint32_t kMagic = 0x53434E31;  // 'SCN1'
-    static constexpr uint32_t kMaxOrigins = 64;
+    static constexpr uint32_t kMagic = 0x53434E32;  // 'SCN2'
 
     uint32_t magic;
     // Odd WHILE WRITING. The region survives a worklet that was killed without
     // warning, so a reader can arrive at a half-finished update; an even
     // generation is the only evidence the bytes below are whole.
     uint32_t generation;
-    uint32_t count;
-    uint32_t origins[kMaxOrigins];
+    uint32_t registered;   // 1 when the client has asked for notifications
 };
 
 // One instance of the guest (guest_doors.h): what dsp_new makes, in the
@@ -198,16 +194,16 @@ void PerformOSCBundle(World* world, OSC_Packet* packet);
 
 namespace {
 
-// scsynth's reply path, forwarded to clockwork. `origin` came in with the
-// message and goes back out with the answer, which is how clockwork routes a
-// reply to the client that asked rather than broadcasting it. The World the
-// message came to rides on the address too (ReplyAddress::mWorld), and names
-// the instance whose host answers.
+// scsynth's reply path, forwarded to clockwork. The token came in with the
+// message and goes back out with each answer to it, so the client can match
+// the two; a notification's address carries none. The World the message came
+// to rides on the address too (ReplyAddress::mWorld), and names the instance
+// whose host answers.
 void reply_to_host(struct ReplyAddress* addr, char* msg, int size) {
     SupersonicGuest* d = addr ? guestOf(addr->mWorld) : nullptr;
     if (!d || !d->host.emit_osc || size <= 0) return;
-    const uint32_t origin = (uint32_t)(uintptr_t)addr->mReplyData;
-    d->host.emit_osc(d->host.ctx, origin, reinterpret_cast<const uint8_t*>(msg), (uint32_t)size);
+    const uint32_t token = (uint32_t)(uintptr_t)addr->mReplyData;
+    d->host.emit_osc(d->host.ctx, token, reinterpret_cast<const uint8_t*>(msg), (uint32_t)size);
 }
 
 // Place a timestamped message at its exact sample within the current block.
@@ -276,17 +272,13 @@ bool parse_notify(const uint8_t* b, uint32_t len, int32_t* flag) {
     return osc_int32_at(b, len, tags + 4, flag);
 }
 
-/* Add or drop an origin, wrapped in the generation stamp a torn read looks for. */
-void notify_record(NotifyPersist* n, uint32_t origin, bool on) {
+/* Record the registration, wrapped in the generation stamp a torn read looks for. */
+void notify_record(NotifyPersist* n, bool on) {
     if (!n) return;
     n->generation |= 1u;                       // odd: mid-write
     std::atomic_signal_fence(std::memory_order_seq_cst);
 
-    uint32_t w = 0;
-    for (uint32_t r = 0; r < n->count && r < NotifyPersist::kMaxOrigins; ++r)
-        if (n->origins[r] != origin) n->origins[w++] = n->origins[r];
-    if (on && w < NotifyPersist::kMaxOrigins) n->origins[w++] = origin;
-    n->count = w;
+    n->registered = on ? 1u : 0u;
     n->magic = NotifyPersist::kMagic;
 
     std::atomic_signal_fence(std::memory_order_seq_cst);
@@ -660,22 +652,21 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
     if (d->world->mTopGroup) NodeTree_Add(&d->tree, &d->world->mTopGroup->mNode);
 
     /*
-     * PUT THE CLIENTS' /notify REGISTRATIONS BACK.
+     * PUT THE CLIENT'S /notify REGISTRATION BACK.
      *
      * Last, because it replays real commands into the engine and everything
      * they touch has to exist first. The generation stamp is the whole check:
      * an odd one means the previous instance was killed part-way through an
-     * update and these bytes are not a table, so it is discarded rather than
+     * update and these bytes are not a record, so it is discarded rather than
      * half-believed. A wrong magic means nobody has ever written here.
      */
     if (config->persistent && config->persistent_bytes >= sizeof(NotifyPersist)) {
         d->notify = reinterpret_cast<NotifyPersist*>(config->persistent);
         NotifyPersist* n = d->notify;
         const bool intact = n->magic == NotifyPersist::kMagic
-                         && (n->generation & 1u) == 0u
-                         && n->count <= NotifyPersist::kMaxOrigins;
+                         && (n->generation & 1u) == 0u;
         if (intact) {
-            for (uint32_t i = 0; i < n->count; ++i) {
+            if (n->registered) {
                 // Rebuild the command the client sent rather than reaching into
                 // NotifyCmd: replaying the message is what makes this identical
                 // to the client having asked again, reply and all.
@@ -687,18 +678,16 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
                 ReplyAddress reply = {};
                 reply.mWorld = d->world;
                 reply.mReplyFunc = reply_to_host;
-                reply.mReplyData =
-                    reinterpret_cast<void*>(static_cast<uintptr_t>(n->origins[i]));
                 PerformOSCMessage(d->world, (int)sizeof(kNotifyOn),
                                   reinterpret_cast<char*>(
                                       const_cast<uint8_t*>(kNotifyOn)),
                                   &reply);
             }
         } else {
-            // Start a fresh table rather than carrying forward a torn one.
+            // Start a fresh record rather than carrying forward a torn one.
             n->magic = NotifyPersist::kMagic;
             n->generation = 0;
-            n->count = 0;
+            n->registered = 0;
         }
     }
 
@@ -795,37 +784,30 @@ void dsp_process(struct Dsp* dsp,
 /*
  * Hand one OSC message or bundle to the engine.
  *
- * `origin` is carried on the ReplyAddress rather than anywhere else because
- * that is the only channel scsynth gives a command for saying who asked; it
- * comes back out through reply_to_host and clockwork routes the answer.
+ * `token` is carried on the ReplyAddress because that is what scsynth keeps
+ * with a command, through any work it defers; it comes back out through
+ * reply_to_host with each answer, the late ones included.
  *
  * `when` becomes a sample offset within the current block. A DSP that declared
  * holds_schedule=0, as this one does, is handed messages by clockwork when
  * they are due — so `when` is not "later", it is "where in this block".
  */
 void dsp_osc(struct Dsp* dsp, const uint8_t* bytes, uint32_t len,
-             ClockworkTimetag when, uint32_t origin, ClockworkTimetag block_time) {
+             ClockworkTimetag when, uint32_t token, ClockworkTimetag block_time) {
     auto* d = reinterpret_cast<SupersonicGuest*>(dsp);
     if (!d || !d->world || !bytes || len == 0) return;
 
     ReplyAddress reply = {};
     reply.mWorld = d->world;
     reply.mReplyFunc = reply_to_host;
-    reply.mReplyData = reinterpret_cast<void*>(static_cast<uintptr_t>(origin));
+    reply.mReplyData = reinterpret_cast<void*>(static_cast<uintptr_t>(token));
 
-    // Note who is listening, BEFORE the engine acts on it. The table is what
-    // survives this instance; see NotifyPersist.
-    //
-    // Origin 0 IS recorded, though it looks like it should not be. It is not a
-    // missing sender — dsp_api.h gives it a meaning, "broadcast to whoever
-    // listens", which is what an in-process or embedded caller gets
-    // (ClockworkEngine::sendOSC assigns it). Such a caller receives /n_go like any
-    // other, so its registration is as real as a socket's and is restored the
-    // same way. Skipping it left the whole embedded and NIF surface unrestored.
+    // Note that the client is listening, BEFORE the engine acts on it. The
+    // record is what survives this instance; see NotifyPersist.
     if (d->notify) {
         int32_t flag = 0;
         if (parse_notify(bytes, len, &flag))
-            notify_record(d->notify, origin, flag != 0);
+            notify_record(d->notify, flag != 0);
     }
 
     apply_offset(d, when, block_time);

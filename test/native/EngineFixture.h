@@ -52,17 +52,10 @@ inline void tickBlock(ClockworkCore* core, double& ntp) {
 }
 #include <functional>
 
-// A reply or notification with the routing that decided where it went (ClockworkEngine::onReplyRouted): the
-// token it is addressed to, and its EgressRoute.
-struct RoutedReply {
-    uint32_t    origin;
-    uint32_t    route;
-    std::string address;
-};
-
 struct OscReply {
     std::string          address;
     std::vector<uint8_t> raw;
+    uint32_t             token = 0;   // the token of the message it answers; 0 for a notification
 
     // Parse typed arguments from the raw OSC data
     osc_test::ParsedReply parsed() const {
@@ -184,18 +177,6 @@ public:
     // Get all collected replies so far
     std::vector<OscReply> allReplies() const;
     void clearReplies();
-
-    // ── Routed replies: the same traffic, with its origin and route ────
-    // Recorded by the fixture from before the engine starts, as onReply's are. A test reads these rather than
-    // setting the engine's onReplyRouted itself: a callback over the test's locals outlives them (the engine is
-    // destroyed after them, and a notification it delivers in between writes into freed memory: the heap
-    // corruption test_load_sample_origin aborted on), and swapping the callback while a reply thread runs it is a
-    // race of its own. A reply's routed record is in before waitForReply() sees it (CallbackTransport::send).
-    std::vector<RoutedReply> routedReplies() const;
-    // A live observer of that traffic, for a test that wires something to it (a front's egress). Swapped under a
-    // lock: once setRoutedObserver(nullptr) returns no call is running, and none will start.
-    using RoutedObserver = std::function<void(uint32_t origin, uint32_t route, const uint8_t*, uint32_t)>;
-    void setRoutedObserver(RoutedObserver fn);
 
     // ── Debug output ───────────────────────────────────────────────────
     std::vector<std::string> debugMessages() const;
@@ -420,10 +401,7 @@ private:
     std::condition_variable  mReplyCv;
     std::vector<OscReply>    mReplies;
     std::vector<OscReply>    mLog;           // every reply since boot (repliesOf(0)); mReplies is what waits take from
-    std::vector<RoutedReply> mRouted;       // under mReplyMutex
 
-    std::mutex               mObserverMutex;
-    RoutedObserver           mRoutedObserver;
 
     mutable std::mutex       mDebugMutex;
     std::vector<std::string> mDebugMessages;

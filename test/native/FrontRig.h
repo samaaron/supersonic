@@ -31,31 +31,23 @@
 #include <thread>
 #include <vector>
 
-// The socket, as the front sees it: every send is kept, by token.
+// The socket: everything delivered to the client is kept, in order, each with
+// its token. That is the front's own answers and what the engine said that
+// the front let pass.
 struct RecordingSink final : IOscTransport {
     struct Sent { uint32_t token; OscReply reply; };
     std::mutex        mu;
     std::vector<Sent> sent;
+    // Where a delivery goes on to: the fixture's own reply log.
+    IOscTransport*    next = nullptr;
 
-    bool send(uint32_t token, const uint8_t* d, uint32_t n, bool) override {
-        std::lock_guard<std::mutex> lock(mu);
-        sent.push_back({ token, OscReply{ osc_test::parseAddress(d, n), std::vector<uint8_t>(d, d + n) } });
-        return true;
+    bool deliver(const uint8_t* d, uint32_t n, uint32_t token) override {
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            sent.push_back({ token, OscReply{ osc_test::parseAddress(d, n), std::vector<uint8_t>(d, d + n), token } });
+        }
+        return next ? next->deliver(d, n, token) : true;
     }
-    uint32_t broadcastNotify(const uint8_t*, uint32_t) override { return 0; }
-    uint32_t broadcastLink(const uint8_t*, uint32_t) override { return 0; }
-    bool hasNotifySubscribers() const override { return false; }
-    bool subscribeNotify(uint32_t) override { return false; }
-    void unsubscribeNotify(uint32_t) override {}
-    void clearNotify() override {}
-    bool subscribeLink(uint32_t) override { return false; }
-    void unsubscribeLink(uint32_t) override {}
-    uint32_t broadcastMidi(const uint8_t*, uint32_t) override { return 0; }
-    bool subscribeMidi(uint32_t) override { return false; }
-    void unsubscribeMidi(uint32_t) override {}
-    uint32_t broadcastGamepad(const uint8_t*, uint32_t) override { return 0; }
-    bool subscribeGamepad(uint32_t) override { return false; }
-    void unsubscribeGamepad(uint32_t) override {}
 
     // The first reply at `addr` for `token`, and with `cmd`, the first whose
     // first string argument is `cmd` (scsynth's /done and /fail name the
@@ -92,7 +84,7 @@ private:
     // The transport the engine's replies leave by is in place before it
     // boots, as the server's is; the front is made after, over the handle the
     // booted engine hands out, as the server makes it.
-    std::unique_ptr<CallbackTransport>    mSocket;   // what passes the front: the fixture's own callbacks
+    std::unique_ptr<CallbackTransport>    mSocket;   // after the sink: the fixture's own reply log
 public:
     EngineFixture         fx;
 private:
@@ -108,22 +100,19 @@ public:
     FrontRig(const ClockworkEngine::Config& cfg, Work w)
         : work(w),
           fx(cfg, [this](ClockworkEngine& engine) {
-              mSocket = std::make_unique<CallbackTransport>(&engine.onReply, &engine.onReplyRouted);
-              fronted.attach(mSocket.get(), nullptr);
+              mSocket = std::make_unique<CallbackTransport>(&engine.onReply);
+              sink.next = mSocket.get();
+              fronted.attach(&sink, nullptr);
               engine.setTransport(&fronted);
           }),
           mFront(std::make_unique<supersonic::Commands>(fx.engine().newClient(), &sink, work)),
           front(*mFront) {
-        fronted.attach(mSocket.get(), mFront.get());
-        // What passes the front reaches the socket, as the front's own answers do.
-        fx.setRoutedObserver([this](uint32_t origin, uint32_t, const uint8_t* d, uint32_t n) {
-            sink.send(origin, d, n, false);
-        });
+        // What passes the front reaches the sink, as the front's own answers do.
+        fronted.attach(&sink, mFront.get());
         if (work == Work::Host) fx.setHostWork([this] { front.runPending(); });
     }
     ~FrontRig() {
         fx.setHostWork(nullptr);
-        fx.setRoutedObserver(nullptr);   // under the fixture's lock: no call runs after this
         // The engine stops calling into the front, then the front goes, then
         // the engine (the fixture's own shutdown): a client goes before its
         // core, as EmbeddedHost::shutdown orders them, so a recording in

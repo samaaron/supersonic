@@ -137,7 +137,7 @@ bool decodeFor(const std::string& path, int32_t start, int32_t want, const std::
 namespace supersonic {
 
 Commands::Commands(ClockworkClient* client, IOscTransport* replies, Work work)
-    : mClient(client), mOwner(client, &clockwork_client_close), mReplies(replies), mTokenless(replies == nullptr),
+    : mClient(client), mOwner(client, &clockwork_client_close), mReplies(replies),
       mWork(work), mRecorder(client, work == Work::Own),
       mWorker(work == Work::Own ? std::thread([this] { run(); }) : std::thread()) {}
 
@@ -312,7 +312,7 @@ bool Commands::ensurePools() {
 
 bool Commands::takePending(Pending::What what, uint32_t token, int32_t bufnum, Pending* out) {
     for (auto it = mPending.begin(); it != mPending.end(); ++it) {
-        if (it->what != what || (!mTokenless && it->token != token) || it->bufnum != bufnum) continue;
+        if (it->what != what || it->token != token || it->bufnum != bufnum) continue;
         *out = std::move(*it);
         mPending.erase(it);
         return true;
@@ -377,10 +377,6 @@ void Commands::loadSample(const Job& job) {
             // it held goes first, and the guest lets its asset go with it. Sent
             // as the front's own, so whatever is said back is the front's.
             p << osc::BeginMessage("/b_free") << job.bufnum << osc::EndMessage;
-            if (mTokenless) {
-                std::lock_guard<std::mutex> lock(mMut);
-                mOwnFrees.insert(job.bufnum);
-            }
             sendOn(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), kFreeToken);
         }
         osc::OutboundPacketStream p(buf, sizeof buf);
@@ -507,12 +503,12 @@ void Commands::loadDefs(const Job& job) {
 
 std::deque<Commands::DefLoad>::iterator Commands::defInFlight(uint32_t token) {
     return std::find_if(mDefLoads.begin(), mDefLoads.end(),
-                        [this, token](const DefLoad& load) { return (mTokenless || load.token == token) && load.inFlight > 0; });
+                        [this, token](const DefLoad& load) { return load.token == token && load.inFlight > 0; });
 }
 
 bool Commands::takeNextDefs(uint32_t token, std::vector<std::vector<uint8_t>>& out) {
     for (auto& load : mDefLoads) {
-        if (!mTokenless && load.token != token) continue;
+        if (load.token != token) continue;
         if (load.inFlight) return false;          // the oldest's batch is out: wait for its answers
         if (load.pending.empty()) continue;       // fully handed over, answers outstanding
         // The share: the frames the engine rendered while the last batch was
@@ -555,7 +551,7 @@ void Commands::sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>&
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
 
-bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
+bool Commands::egress(const uint8_t* data, uint32_t size, uint32_t token) {
     if (token == kFreeToken) return true;   // what is said to the front's own frees is the front's, and goes no further
     if (size < 8 || data[0] != '/') return false;
     enum { Committed, Refused, Released, Done, Fail, Info, Published, Error, None } kind = None;
@@ -604,17 +600,6 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         }
     } catch (const osc::Exception&) {
         return false;
-    }
-
-    // With one token for every reply, the front's own /b_free is told from an
-    // asker's by count: so many answers to /b_free are the front's.
-    if (mTokenless && (kind == Done || kind == Fail) && cmd == "/b_free") {
-        std::lock_guard<std::mutex> lock(mMut);
-        auto it = mOwnFrees.find(id);
-        if (it != mOwnFrees.end()) {
-            mOwnFrees.erase(it);
-            return true;
-        }
     }
 
     // A refusal of anything else we had in flight on this token — a sample's
@@ -675,7 +660,7 @@ bool Commands::egress(uint32_t token, const uint8_t* data, uint32_t size) {
         {
             std::lock_guard<std::mutex> lock(mMut);
             auto it = std::find_if(mPending.begin(), mPending.end(),
-                                   [&](const Pending& p) { return (mTokenless || p.token == token) && p.what == what; });
+                                   [&](const Pending& p) { return p.token == token && p.what == what; });
             if (it == mPending.end()) return false;
             if (mPool && (it->what == Pending::Commit || it->what == Pending::ReadInto))
                 clockwork_asset_pool_free(mPool, it->slot);
@@ -890,7 +875,7 @@ void Commands::reply(uint32_t token, const uint8_t* data, uint32_t size) {
         return;
     }
     if (mReplies) {
-        mReplies->send(token, data, size, /*networkOnly*/ false);
+        mReplies->deliver(data, size, token);
         return;
     }
     std::lock_guard<std::mutex> lock(mAnswersMut);
@@ -991,7 +976,7 @@ void Commands::sendOn(const uint8_t* data, uint32_t size, uint32_t token) {
     // would say it, so the asker hears the same refusal either way.
     if (st == CLOCKWORK_E_NO_INSTANCE)
         clockwork_sys_refuse(data, size, CLOCKWORK_REFUSED_NO_INSTANCE, 0,
-                             [this, token](const uint8_t* d, uint32_t n) { egress(token, d, n); });
+                             [this, token](const uint8_t* d, uint32_t n) { egress(d, n, token); });
 }
 
 uint8_t* Commands::assetsLane() {
@@ -1021,13 +1006,13 @@ uint32_t Commands::poll(ClockworkClientMessage* out, uint32_t max) {
     std::vector<Polled> passed;
     for (uint32_t i = 0; i < n; ++i) {
         const auto& m = taken[i];
-        if (egress(m.origin, m.bytes, m.length)) continue;
-        passed.push_back({ std::vector<uint8_t>(m.bytes, m.bytes + m.length), m.origin, m.route, m.sequence });
+        if (egress(m.bytes, m.length, m.token)) continue;
+        passed.push_back({ std::vector<uint8_t>(m.bytes, m.bytes + m.length), m.token, m.sequence });
     }
     {
         std::lock_guard<std::mutex> lock(mAnswersMut);
         while (!mAnswers.empty() && passed.size() < max) {
-            passed.push_back({ std::move(mAnswers.front().second), mAnswers.front().first, CLOCKWORK_ROUTE_REPLY, 0 });
+            passed.push_back({ std::move(mAnswers.front().second), mAnswers.front().first, 0 });
             mAnswers.pop_front();
         }
     }
@@ -1035,8 +1020,7 @@ uint32_t Commands::poll(ClockworkClientMessage* out, uint32_t max) {
     for (size_t i = 0; i < mPolled.size(); ++i) {
         out[i].bytes    = mPolled[i].bytes.data();
         out[i].length   = static_cast<uint32_t>(mPolled[i].bytes.size());
-        out[i].origin   = mPolled[i].origin;
-        out[i].route    = mPolled[i].route;
+        out[i].token    = mPolled[i].token;
         out[i].sequence = mPolled[i].sequence;
     }
     return static_cast<uint32_t>(mPolled.size());

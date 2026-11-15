@@ -281,13 +281,13 @@ namespace {
 
 struct IngestLog {
     std::mutex mu;
-    std::vector<std::pair<uint32_t, std::string>> items;   // token, address
-    void record(const uint8_t* d, uint32_t n, uint32_t token) {
+    std::vector<std::string> items;   // each message's address
+    void record(const uint8_t* d, uint32_t n) {
         std::lock_guard<std::mutex> lk(mu);
-        items.emplace_back(token, osc_test::parseAddress(d, n));
+        items.push_back(osc_test::parseAddress(d, n));
     }
     size_t count() { std::lock_guard<std::mutex> lk(mu); return items.size(); }
-    std::pair<uint32_t, std::string> at(size_t i) { std::lock_guard<std::mutex> lk(mu); return items.at(i); }
+    std::string at(size_t i) { std::lock_guard<std::mutex> lk(mu); return items.at(i); }
 };
 
 bool waitUntil(const std::function<bool()>& f, int ms = 3000) {
@@ -364,18 +364,18 @@ TEST_CASE("host transports: no secret, no transport", "[host][transports]") {
     Options o = parse({ "-u", "0", "--tcp", "4020", "-B", "127.0.0.1" });
     CommandTransports t;
     std::string err;
-    CHECK(t.select(o, nullptr, [](const uint8_t*, uint32_t, uint32_t) {}, &err) == nullptr);
+    CHECK(t.select(o, nullptr, [](const uint8_t*, uint32_t) {}, &err) == nullptr);
     CHECK(err.find("secret") != std::string::npos);
 }
 
-TEST_CASE("host transports: TCP is the command port when asked, and a reply goes back to its sender",
+TEST_CASE("host transports: TCP is the command port when asked, and a reply reaches its client",
           "[host][transports][rt]") {
     const int shmPort = freePort(SOCK_DGRAM), tcpPort = freePort(SOCK_STREAM);
     Options o = withSecret(parse({ "-u", std::to_string(shmPort), "--tcp", std::to_string(tcpPort), "-B", "127.0.0.1" }));
     IngestLog log;
     CommandTransports t;
     std::string err;
-    IOscTransport* transport = t.select(o, nullptr, [&](const uint8_t* d, uint32_t n, uint32_t tok) { log.record(d, n, tok); }, &err);
+    IOscTransport* transport = t.select(o, nullptr, [&](const uint8_t* d, uint32_t n) { log.record(d, n); }, &err);
     REQUIRE(transport != nullptr);
     CHECK(t.description().find("TCP") != std::string::npos);
     REQUIRE(t.start());
@@ -383,12 +383,10 @@ TEST_CASE("host transports: TCP is the command port when asked, and a reply goes
     const int fd = connectTcp(tcpPort);
     writeFramed(fd, osc_test::message("/status"));
     REQUIRE(waitUntil([&] { return log.count() == 1; }));
-    CHECK(log.at(0).second == "/status");
-    const uint32_t token = log.at(0).first;
-    CHECK(token != 0);
+    CHECK(log.at(0) == "/status");
 
     const auto reply = osc_test::message("/status.reply", int32_t{1});
-    REQUIRE(transport->send(token, reply.ptr(), reply.size(), false));
+    REQUIRE(transport->deliver(reply.ptr(), reply.size(), /*token*/ 0));
     const auto got = readFramed(fd);
     REQUIRE_FALSE(got.empty());
     CHECK(osc_test::parseAddress(got.data(), static_cast<uint32_t>(got.size())) == "/status.reply");
@@ -409,13 +407,15 @@ TEST_CASE("host egress pump: the engine's replies reach the socket through the c
     o.cfg.manualAudioPump = false;
     o.cfg.headless = true;
 
-    EngineFixture fx(o.cfg);
+    // Before the engine, so it outlives it: the engine tells its transport
+    // when its core is closing.
     CommandTransports t;
+    EngineFixture fx(o.cfg);
     std::string err;
     IOscTransport* transport = t.select(o, nullptr,
-        [&](const uint8_t* d, uint32_t n, uint32_t tok) { fx.engine().ingest(d, n, tok); }, &err);
+        [&](const uint8_t* d, uint32_t n) { fx.engine().ingest(d, n, /*token*/ 0); }, &err);
     REQUIRE(transport != nullptr);
-    fx.engine().setTransport(transport);   // the token registry is the transport's
+    fx.engine().setTransport(transport);
     REQUIRE(t.start());
 
     std::vector<std::string> debug;

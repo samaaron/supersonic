@@ -944,16 +944,26 @@ int popAvailableClientID(int const id, ClientIDs& availableIDs) {
 bool NotifyCmd::Stage2() {
     HiddenWorld* hw = mWorld->hw;
 
+    // SUPERSONIC: the registered user is the client, not this message. A
+    // reply address carries the token its message was sent with
+    // (mReplyData), and every notification is sent to each registered user:
+    // kept with the token, a client that asked twice with two tokens would
+    // be two users, and each /n_go would go out marked as an answer to a
+    // /notify. So the user is this address without its token; the /done and
+    // /fail below still answer mReplyAddress, token and all.
+    ReplyAddress user = mReplyAddress;
+    user.mReplyData = nullptr;
+
     if (mOnOff) {
         for (auto addr : *hw->mUsers) {
-            if (mReplyAddress == addr) {
+            if (user == addr) {
                 // Already registered — idempotent: reply /done with the existing
                 // clientID rather than failing. DIVERGES FROM UPSTREAM scsynth,
                 // which replies /fail "already registered" here. A redundant
                 // /notify (e.g. a host re-registering after a device rebuild that
                 // already preserved the registration) must succeed, not error.
                 SendDoneWithVarArgs(&mReplyAddress, "/notify", "ii",
-                                    hw->mClientIDdict->at(mReplyAddress), (int)hw->mMaxUsers);
+                                    hw->mClientIDdict->at(user), (int)hw->mMaxUsers);
                 return false;
             }
         }
@@ -966,16 +976,16 @@ bool NotifyCmd::Stage2() {
 
         int const clientID = popAvailableClientID(mID, *hw->mAvailableClientIDs);
 
-        hw->mClientIDdict->emplace(mReplyAddress, clientID);
-        hw->mUsers->insert(mReplyAddress);
+        hw->mClientIDdict->emplace(user, clientID);
+        hw->mUsers->insert(user);
         SendDoneWithVarArgs(&mReplyAddress, "/notify", "ii", clientID, (int)hw->mMaxUsers);
 
     } else {
-        auto const it = std::find(hw->mUsers->begin(), hw->mUsers->end(), mReplyAddress);
+        auto const it = std::find(hw->mUsers->begin(), hw->mUsers->end(), user);
         if (it != hw->mUsers->end()) {
             // remove from list
-            hw->mAvailableClientIDs->push_back(hw->mClientIDdict->at(mReplyAddress)); // push the freed ID
-            hw->mClientIDdict->erase(mReplyAddress);
+            hw->mAvailableClientIDs->push_back(hw->mClientIDdict->at(user)); // push the freed ID
+            hw->mClientIDdict->erase(user);
             hw->mUsers->erase(it);
             SendDone("/notify");
             return false;

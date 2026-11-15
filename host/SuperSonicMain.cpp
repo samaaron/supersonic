@@ -58,7 +58,7 @@ int main(int argc, char* argv[]) {
         if (std::strcmp(argv[i], "--list-devices") == 0) {
             ClockworkEngine engine;
             engine.onDebug = [](const std::string&) {};
-            engine.onReply = [](const uint8_t*, uint32_t) {};
+            engine.onReply = [](const uint8_t*, uint32_t, uint32_t) {};
             ClockworkEngine::Config cfg;
             cfg.headless = false;
             cfg.shmSegment = false;
@@ -101,16 +101,16 @@ int main(int argc, char* argv[]) {
 
     supersonic::Commands* front = nullptr;
     IOscTransport* transport = transports.select(o, engine.peerPlaneSlot(),
-        [&engine, &front](const uint8_t* d, uint32_t n, uint32_t token) {
-            if (front && front->ingress(d, n, token)) return;   // a file verb: the front's
-            engine.ingest(d, n, token);
+        [&engine, &front](const uint8_t* d, uint32_t n) {
+            // A socket's message carries no token.
+            if (front && front->ingress(d, n, /*token*/ 0)) return;   // a file verb: the front's
+            engine.ingest(d, n, /*token*/ 0);
         }, &err);
     if (!transport) { log("ERROR: " + err); return 1; }
 
     // The front answers through the transport the engine's replies leave by,
-    // and sees those replies first. The engine keeps the transport for its
-    // subscriber registry (the notify audiences are the transport's); the
-    // replies themselves are pulled by this process's pump, below.
+    // and sees those replies first. The replies themselves are pulled by
+    // this process's pump, below.
     const Identity identity { CLOCKWORK_PRODUCT_NAME, CLOCKWORK_PRODUCT_BANNER, SUPERSONIC_VERSION_STRING };
     // The front is built on a client handle, which there is once the engine
     // has an arena: made after init, below. Until then replies pass straight

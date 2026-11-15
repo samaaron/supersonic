@@ -1,83 +1,78 @@
 /*
- * test_notify_clients.cpp — /notify must be per-client.
+ * test_notify_clients.cpp — /notify with one client, and tokens.
  *
- * SuperSonic identifies a reply target by the origin token in
- * ReplyAddress::mReplyData; the network address scsynth compares upstream is a
- * zeroed placeholder shared by every client. While the comparison operators
- * ignored the token, hw->mUsers (a std::set<ReplyAddress>) could only ever hold
- * one entry — the first client to register — so every broadcast reply
- * (SendReply, /n_go, /n_end, /tr) went to that client alone, and a second
- * client's /notify was answered "already registered" without being added.
+ * Clockwork has one client. A message may carry a token of the client's
+ * choosing, and an answer to it carries the same token; a notification
+ * answers no message and carries none.
  *
- * Sonic Pi hits this whenever more than one component registers: the studio
- * blocks its cold-swap reinit on a SendReply from sonic-pi-server-info, and a
- * lost registration turns that into a five-second timeout and a dead mixer.
+ * scsynth keeps a command's token on its reply address. /notify stores a reply
+ * address as a registered user, and every /n_go, /n_end and /tr is sent to
+ * each registered user. So the registration is keyed on the client alone:
+ * with the token left in, a client that sent /notify twice with two tokens
+ * would be two users and hear every notification twice, each marked as the
+ * answer to a /notify.
  */
 #include <catch2/catch_test_macros.hpp>
 
-#include <set>
-
-#include "synth/common/SC_ReplyImpl.hpp"
+#include "EngineFixture.h"
+#include "OscTestUtils.h"
 
 namespace {
-// Mirrors audio_processor.cpp's ring_reply(): everything zeroed except the
-// origin token, which is what actually routes the reply.
-ReplyAddress ringReply(uint32_t origin) {
-    ReplyAddress r = {};
-    r.mProtocol = kWeb;
-    r.mReplyFunc = &null_reply_func;
-    r.mReplyData = reinterpret_cast<void*>(static_cast<uintptr_t>(origin));
-    return r;
+
+void sendWith(EngineFixture& fx, const osc_test::Packet& pkt, uint32_t token) {
+    REQUIRE(fx.engine().ingest(pkt.ptr(), pkt.size(), token) == CLOCKWORK_OK);
 }
+
+size_t countOf(EngineFixture& fx, const char* address) {
+    size_t n = 0;
+    for (const auto& r : fx.allReplies()) if (r.address == address) ++n;
+    return n;
+}
+
 } // namespace
 
-TEST_CASE("NotifyClients: addresses differing only by token are distinct",
-          "[notify]") {
-    const ReplyAddress a = ringReply(1);
-    const ReplyAddress b = ringReply(2);
+TEST_CASE("notify: /notify is answered with its token, and a notification carries none",
+          "[notify][token]") {
+    EngineFixture fx;
+    fx.clearReplies();
 
-    CHECK_FALSE(a == b);
-    CHECK((a < b) != (b < a));   // strict weak ordering separates them
+    sendWith(fx, osc_test::message("/notify", int32_t{1}), 5);
+    OscReply done;
+    REQUIRE(fx.waitForReply("/done", done));
+    CHECK(done.parsed().argString(0) == "/notify");
+    CHECK(done.token == 5);
+
+    // A new group is announced to the registered client: /n_go answers no
+    // message, whatever token the /g_new that caused it was sent with.
+    sendWith(fx, osc_test::message("/g_new", int32_t{100}, int32_t{0}, int32_t{0}), 6);
+    OscReply go;
+    REQUIRE(fx.waitForReply("/n_go", go));
+    CHECK(go.token == 0);
 }
 
-TEST_CASE("NotifyClients: the same token compares equal", "[notify]") {
-    const ReplyAddress a = ringReply(7);
-    const ReplyAddress b = ringReply(7);
+TEST_CASE("notify: asking again with another token is the same registration",
+          "[notify][token]") {
+    EngineFixture fx;
+    fx.clearReplies();
 
-    CHECK(a == b);
-    CHECK_FALSE(a < b);
-    CHECK_FALSE(b < a);
-}
+    sendWith(fx, osc_test::message("/notify", int32_t{1}), 5);
+    OscReply done;
+    REQUIRE(fx.waitForReply("/done", done));
+    sendWith(fx, osc_test::message("/notify", int32_t{1}), 7);
+    REQUIRE(fx.waitForReply("/done", done));
+    CHECK(done.token == 7);
 
-TEST_CASE("NotifyClients: a client set holds one entry per client", "[notify]") {
-    std::set<ReplyAddress> users;
-    users.insert(ringReply(1));
-    users.insert(ringReply(2));
-    users.insert(ringReply(3));
+    // One client, one registration: the group is announced once.
+    fx.clearReplies();
+    sendWith(fx, osc_test::message("/g_new", int32_t{100}, int32_t{0}, int32_t{0}), 0);
+    OscReply go;
+    REQUIRE(fx.waitForReply("/n_go", go));
+    fx.waitForBlocks(16);
+    CHECK(countOf(fx, "/n_go") <= 1);   // waitForReply took the one; no second arrived
 
-    REQUIRE(users.size() == 3);
-
-    // Re-registering an existing client stays idempotent.
-    users.insert(ringReply(2));
-    CHECK(users.size() == 3);
-
-    // Every registered client is found — this is the lookup NotifyCmd::Stage2
-    // uses to decide "already registered", and the iteration NodeReplyMsg /
-    // NodeEndMsg use to fan a reply out.
-    CHECK(users.count(ringReply(1)) == 1);
-    CHECK(users.count(ringReply(2)) == 1);
-    CHECK(users.count(ringReply(3)) == 1);
-}
-
-TEST_CASE("NotifyClients: unsubscribing one client leaves the others",
-          "[notify]") {
-    std::set<ReplyAddress> users;
-    users.insert(ringReply(1));
-    users.insert(ringReply(2));
-
-    users.erase(ringReply(1));
-
-    CHECK(users.size() == 1);
-    CHECK(users.count(ringReply(1)) == 0);
-    CHECK(users.count(ringReply(2)) == 1);
+    // And it is undone with any token.
+    sendWith(fx, osc_test::message("/notify", int32_t{0}), 9);
+    REQUIRE(fx.waitForReply("/done", done));
+    CHECK(done.parsed().argString(0) == "/notify");
+    CHECK(done.token == 9);
 }
