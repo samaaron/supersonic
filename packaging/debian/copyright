@@ -18,7 +18,7 @@ Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
  .
  The source package is assembled from three upstream tarballs:
  the main tarball (this repository with clockwork/ filled in), the "link"
- component (pristine Ableton Link 4.0 with its asio-standalone submodule;
+ component (pristine Ableton Link 4.1.1 with its asio-standalone submodule;
  clockwork's patches under debian/patches apply to it), and the
  "rust-vendor" component (the output of `cargo vendor` for the committed
  clockwork/rust/Cargo.lock, which resolves clockwork's crates by path). See
@@ -107,11 +107,11 @@ Comment: Compiled SuperCollider synth definitions (.scsyndef). The preferred
 Files: link/*
 Copyright: 2016-2024 Ableton AG
 License: GPL-2+
-Comment: Pristine Ableton Link 4.0 ("link" component tarball). Debian ships
- ableton-link-dev 3.x, which is too old for this package and lacks the four
+Comment: Pristine Ableton Link 4.1.1 ("link" component tarball). Debian ships
+ ableton-link-dev 3.x, which is too old for this package and lacks the five
  clockwork-carried patches applied under debian/patches (loopback-only
  discovery, peer enumeration, monotonic commit timestamps, a LinkAudio
- teardown race fix).
+ teardown race fix, a bounds check in the string deserializer).
 
 Files: link/modules/asio-standalone/*
 Copyright: 2003-2024 Christopher M. Kohlhoff

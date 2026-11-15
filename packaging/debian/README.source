@@ -11,9 +11,9 @@ This source package uses format 3.0 (quilt) with three upstream tarballs:
       Uncommitted changes are not included.
 
   supersonic_<v>.orig-link.tar.xz
-      Pristine Ableton Link 4.1 including its asio-standalone submodule
+      Pristine Ableton Link 4.1.1 including its asio-standalone submodule
       (the GitHub tag tarball does NOT contain the submodule, so this is
-      assembled from a recursive clone). Unpacks to link/. clockwork's four
+      assembled from a recursive clone). Unpacks to link/. clockwork's five
       Link patches (kept in clockwork/external/*.patch as the single source
       of truth) are applied to it via debian/patches/, path-shifted under
       link/.

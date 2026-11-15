@@ -56,7 +56,7 @@ supply is vendored, each with a one-line justification in `debian/copyright`:
 | Audio file writers | clockwork's own (`clockwork_audio_file`: WAV and FLAC) | same |
 | libsamplerate (Link Audio) | `clockwork/src/vendor/libsamplerate` (0.2.2, unmodified) | `libsamplerate0-dev` (`-DCLOCKWORK_SYSTEM_SAMPLERATE=ON`); clockwork's copy is left out of the orig tarball |
 | Catch2 (tests) | an installed Catch2 3, else FetchContent pin v3.5.2 | `catch2` (found automatically via `find_package`) |
-| Ableton Link | FetchContent Link-4.1 + clockwork's 4 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
+| Ableton Link | FetchContent Link-4.1.1 + clockwork's 5 patches | **vendored** `orig-link` component tarball — Debian's `ableton-link-dev` is 3.x and lacks the patches |
 | CLAP / VST3 SDKs (plugin hosting) | installed headers, else fetched at configure time | **compiled out** (`-DCLOCKWORK_PLUGINS=OFF`): Debian ships neither SDK |
 | Rust crates | crates.io (`--locked`) | **vendored** `orig-rust-vendor` component tarball, built offline (`-DCLOCKWORK_CARGO_OFFLINE=ON`) |
 | midir (patched fork) | `clockwork/external/midir` (cargo path dep) | same — path deps need no vendoring |
@@ -82,12 +82,13 @@ Format 3.0 (quilt), three upstream tarballs (see
   archived into `clockwork/`, minus `Files-Excluded` (the Steinberg ASIO SDK
   inside clockwork, Windows-only and dual-licensed; and clockwork's copy of
   libsamplerate, since the package links the archive's)
-- `supersonic_<v>.orig-link.tar.xz` — pristine Link 4.1 **with the
+- `supersonic_<v>.orig-link.tar.xz` — pristine Link 4.1.1 (the tag
+  `clockwork/external/fetch-link.cmake` names, which the script reads) **with the
   asio-standalone submodule** (GitHub tag tarballs omit submodules)
 - `supersonic_<v>.orig-rust-vendor.tar.xz` — `cargo vendor` for the
   committed `clockwork/rust/Cargo.lock`
 
-The four Link patches remain single-sourced in `clockwork/external/*.patch`;
+The five Link patches remain single-sourced in `clockwork/external/link-*.patch`;
 the assembly script path-shifts them under `link/` into `debian/patches/`, so
 they flow through the normal quilt machinery.
 
@@ -218,10 +219,11 @@ Points a prospective maintainer will care about, and where they stand:
   engine is built with that directory as its second place to look
   (clockwork's `CLOCKWORK_PLUGIN_BRIDGE_DIR`).
 - **Ableton Link is embedded** — Debian's `ableton-link-dev` (3.x) is too old
-  and lacks four functional patches (loopback-only discovery, peer
-  enumeration, monotonic commit timestamps, LinkAudio teardown race). Until
-  Debian ships Link 4 and the patches are upstreamed, the component tarball
-  is the honest representation.
+  and lacks five patches clockwork carries (loopback-only discovery, peer
+  enumeration, monotonic commit timestamps, a LinkAudio teardown race, a
+  bounds check in the string deserializer). Until Debian ships Link 4 and
+  the patches are upstreamed, the component tarball is the honest
+  representation.
 - **Rust crates** — the default source package vendors them, which the
   archive does not take for dependencies. The package also builds against
   the archive's `librust-*-dev` packages ("Building against the archive's own

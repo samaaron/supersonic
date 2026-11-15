@@ -11,7 +11,10 @@
 #                                           (the ASIO SDK, and clockwork's copy
 #                                           of libsamplerate: the package links
 #                                           the archive's)
-#   supersonic_<uv>.orig-link.tar.xz        pristine Ableton Link 4.0 with its
+#   supersonic_<uv>.orig-link.tar.xz        pristine Ableton Link, the release
+#                                           clockwork builds against
+#                                           (clockwork/external/fetch-link.cmake),
+#                                           with its
 #                                           asio-standalone submodule (the
 #                                           GitHub tag tarball lacks
 #                                           submodules, hence the clone)
@@ -19,7 +22,7 @@
 #                                           committed clockwork/rust/Cargo.lock
 #   supersonic_<dv>.dsc + .debian.tar.xz    via dpkg-buildpackage -S
 #
-# The four Link patches are clockwork's (clockwork/external/*.patch); they are
+# The Link patches are clockwork's (clockwork/external/link-*.patch); they are
 # path-shifted under link/ into debian/patches here so dpkg-source applies
 # them to the component tree.
 #
@@ -68,7 +71,13 @@ if [ "$GAMEPAD" = off ] && [ "$CRATES" != system ]; then
     echo "ERROR: SUPERSONIC_DEB_GAMEPAD=off needs SUPERSONIC_DEB_CRATES=system" >&2; exit 1
 fi
 
-LINK_TAG="Link-4.1"
+# The Link release clockwork builds against, from where clockwork names it:
+# every other build fetches that tag, and the package carries the same one.
+LINK_TAG="$(sed -n 's/^ *GIT_TAG  *\(Link-[0-9][0-9.]*\) *$/\1/p' "$PROJECT_ROOT/clockwork/external/fetch-link.cmake")"
+[ "$(wc -l <<<"$LINK_TAG")" = 1 ] && [ -n "$LINK_TAG" ] || {
+    echo "ERROR: expected one 'GIT_TAG Link-<version>' in clockwork/external/fetch-link.cmake, found: '$LINK_TAG'" >&2
+    exit 1
+}
 LINK_REPO="https://github.com/Ableton/link.git"
 
 cd "$PROJECT_ROOT"
