@@ -63,6 +63,12 @@ struct OscReply {
     }
 };
 
+// Default timeout for the fixture's waits. A wait returns as soon as its condition is true, so this only affects a
+// test that is already failing: it stops it hanging forever. It used to be 2 s, which a Debug or sanitizer build on a
+// busy CI runner could use up just booting the engine or switching a device. Tests that check something does NOT
+// happen pass their own shorter timeout instead.
+constexpr int kWaitLimitMs = 30000;
+
 class EngineFixture {
 public:
     EngineFixture();
@@ -120,18 +126,18 @@ public:
     // Wait for a reply whose address matches `addr`. Returns true if found
     // within the timeout. The matched reply is written to `out`.
     bool waitForReply(const std::string& addr, OscReply& out,
-                      int timeoutMs = 2000);
+                      int timeoutMs = kWaitLimitMs);
 
     // Convenience: send + wait for /done
     bool sendAndExpectDone(const osc_test::Packet& pkt,
-                           int timeoutMs = 2000);
+                           int timeoutMs = kWaitLimitMs);
 
     // ── Progress waits (robust alternative to fixed sleeps) ────────────
     // Wait until the audio thread has rendered `n` more blocks than now,
     // or timeout. Anchors reads of live audio/state to actual DSP progress
     // instead of wall-clock, which a loaded CI runner can't honour — a
     // fixed sleep_for elapses while the audio thread was preempted.
-    bool waitForBlocks(uint32_t n, int timeoutMs = 2000);
+    bool waitForBlocks(uint32_t n, int timeoutMs = kWaitLimitMs);
 
     // Poll `pred()` until it returns true, or timeout.
     // Generic deadline loop for non-block conditions: a metric atomic
@@ -151,7 +157,7 @@ public:
     // waits for comes from the blocks and passes it runs, so timeoutMs of
     // audio, a block a turn, and no sleeping.
     template <typename Pred>
-    bool pollUntil(Pred pred, int timeoutMs = 2000) {
+    bool pollUntil(Pred pred, int timeoutMs = kWaitLimitMs) {
         if (testIsTheHost()) {
             for (uint32_t owed = blocksOfAudio(timeoutMs);; --owed) {
                 if (pred()) return true;
@@ -169,7 +175,7 @@ public:
     // when the test is the host, pumped 30 s of audio in half a second on a
     // loaded runner and gave up before the thread had been scheduled.
     template <typename Pred>
-    bool waitForThread(Pred pred, int timeoutMs = 2000) { return pollOnBothClocks(pred, timeoutMs); }
+    bool waitForThread(Pred pred, int timeoutMs = kWaitLimitMs) { return pollOnBothClocks(pred, timeoutMs); }
 
     // The blocks the engine renders in `ms` of audio, at its rate and block size.
     uint32_t blocksOfAudio(int ms) const;
@@ -194,7 +200,7 @@ public:
     bool loadSynthDef(const std::string& name);
 
     // Wait for `/done <cmd>` — the completion of THAT command, not any /done.
-    bool waitForDone(const std::string& cmd, int timeoutMs = 2000);
+    bool waitForDone(const std::string& cmd, int timeoutMs = kWaitLimitMs);
 
     // A number no other fixture in this process has had: a helper that keeps
     // state per engine (SampleLane.h's pool) keys on it, since a fresh engine

@@ -154,17 +154,26 @@ void EngineFixture::init(const ClockworkEngine::Config& cfg,
     mEngine.init(shared);
     if (beside) bootCompanions(shared, beforeBoot, engines);
 
-    // Wait for the engine to be ready (a pumped one is pumped by the wait)
+    // With Config::hostDrainsEgress the engine's replies go to the host's egress pump, not to this fixture, so the
+    // fixture cannot wait for /synced. It does not send /sync either: the replies would reach the test's own
+    // transport ahead of the ones the test is waiting for.
+    const bool hearsReplies = !cfg.hostDrainsEgress;
     OscReply r;
-    send(osc_test::message("/sync", 0));
-    waitForReply("/synced", r);
+
+    // Wait for the engine to be ready (a pumped one is pumped by the wait)
+    if (hearsReplies) {
+        send(osc_test::message("/sync", 0));
+        waitForReply("/synced", r);
+    }
 
     // Create default group (1) — scsynth only creates root group (0).
     // All SuperCollider clients create group 1 at startup.
     send(osc_test::message("/g_new", 1, 0, 0));
     // Barrier: wait until /g_new has been processed (node tree mirror updated)
-    send(osc_test::message("/sync", 1));
-    waitForReply("/synced", r);
+    if (hearsReplies) {
+        send(osc_test::message("/sync", 1));
+        waitForReply("/synced", r);
+    }
 
     // Clear any boot-time debug/reply output so tests start with a clean slate
     clearReplies();
