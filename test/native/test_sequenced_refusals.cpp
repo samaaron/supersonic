@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Sam Aaron
 /*
  * test_sequenced_refusals.cpp - sequenced commands whose Init returns early.

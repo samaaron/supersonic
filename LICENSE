@@ -14,8 +14,9 @@ You should have received a copy of the GNU Affero General Public License along
 with this program (COPYING). If not, see <https://www.gnu.org/licenses/>.
 
 SuperSonic is a scsynth-compatible synth powered by clockwork. The licence above is that of the
-combined program. Each source file carries an SPDX-License-Identifier header
-giving the licence of that file, and some are more permissive than the whole.
+combined program and of SuperSonic's own code, except for the components
+listed below. A source file's SPDX-License-Identifier header, where it has
+one, gives the licence of that file.
 
 
 Components, under their own licences:
@@ -24,6 +25,16 @@ Components, under their own licences:
                                  (c) Sam Aaron. A git submodule; see
                                  clockwork/LICENSE for its terms and its own
                                  third-party components.
+
+  dsp/scsynth/                   SuperSonic's code that runs scsynth inside
+                                 clockwork, (c) Sam Aaron. GPL-3.0-or-later,
+                                 as it is built into scsynth.
+
+  scripts/gen-scsynth-tables.cpp
+  test/native/test_scsynth_tables.cpp
+                                 (c) Sam Aaron. GPL-3.0-or-later: they compute
+                                 scsynth's lookup tables with scsynth's own
+                                 formulas.
 
   dsp/scsynth/synth/             scsynth, the SuperCollider audio engine,
                                  (c) 2002 James McCartney and contributors.

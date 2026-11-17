@@ -27,17 +27,26 @@ Comment: The Steinberg ASIO SDK (Windows-only; dual-licensed proprietary or
 Files: *
 Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
 License: AGPL-3+
-Comment: The effective licence of the combined program. Individual first-party
- files carry SPDX headers naming their own terms: the scsynth glue and the
- host are GPL-3+, the JavaScript client files that predate clockwork are
- Expat or GPL-3+, and build scripts are Expat. All are compatible with, and
- subsumed by, AGPL-3+ in the built program.
+Comment: The licence of the combined program, and of SuperSonic's own code
+ outside the stanzas below.
 
 Files: clockwork/*
 Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
 License: AGPL-3+
 Comment: clockwork is dual-licensed upstream (AGPL-3.0-or-later OR a
  commercial licence). This package takes it under the AGPL.
+
+Files: dsp/scsynth/*
+Copyright: 2025-2026 Sam Aaron <sam@sonic-pi.net>
+License: GPL-3+
+Comment: SuperSonic's code that runs scsynth inside clockwork. It is built
+ into scsynth, so it is under scsynth's licence.
+
+Files: scripts/gen-scsynth-tables.cpp
+       test/native/test_scsynth_tables.cpp
+Copyright: 2026 Sam Aaron <sam@sonic-pi.net>
+License: GPL-3+
+Comment: These compute scsynth's lookup tables with scsynth's own formulas.
 
 Files: dsp/scsynth/synth/*
 Copyright: 2002-2023 James McCartney and SuperCollider contributors

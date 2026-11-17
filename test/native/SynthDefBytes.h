@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Sam Aaron
 // SynthDef files written byte by byte, for the cases that send the reader a
 // def it must refuse, and the checks those cases share.

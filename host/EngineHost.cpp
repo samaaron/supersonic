@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025-2026 Sam Aaron
 // See EngineHost.h. Brought over from clockwork's former reference host, which is gone:
 // this is SuperSonic's process, built on clockwork the library.

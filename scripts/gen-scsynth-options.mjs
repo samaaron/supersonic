@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2025-2026 Sam Aaron
 /*
  * gen-scsynth-options.mjs — js/lib/scsynth_options_schema.js from

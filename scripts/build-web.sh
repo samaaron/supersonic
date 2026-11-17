@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (c) 2025-2026 Sam Aaron
 #
 # build-web.sh — SuperSonic compiled for the AudioWorklet.

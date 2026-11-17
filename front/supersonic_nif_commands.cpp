@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Copyright (c) 2026 Sam Aaron
 // The NIF sends through supersonic::Commands, as SuperSonic's server does: a
 // BEAM client's /d_load and /b_allocRead are read here, never on the audio
