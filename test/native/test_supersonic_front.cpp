@@ -1084,3 +1084,125 @@ TEST_CASE("front: a batch of definitions in flight when the engine is rebuilt fa
     CHECK(rig.sink.count("/fail", kSpider) == 0);
     CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
 }
+
+// ── Definitions as assets (dsp/scsynth/definition_assets.h) ─────────────────
+//
+// The front commits each definition it loads, and each a client sends with /d_recv, as a RAW asset in the lane.
+// Clockwork hands the assets to a new instance on a rebuild, so the definitions are still there after a cold swap,
+// with nothing sent again, and their slots stay held until the guest releases them.
+
+namespace {
+
+std::vector<uint8_t> synthdefFile(const char* name) {
+    std::ifstream f(std::filesystem::path(CLOCKWORK_SYNTHDEFS_DIR) / (std::string(name) + ".scsyndef"), std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+// /d_recv bytes [completion]
+osc_test::Packet dRecv(const std::vector<uint8_t>& bytes, const osc_test::Packet* completion = nullptr) {
+    osc_test::Builder b;
+    auto& s = b.begin("/d_recv");
+    s << osc::Blob(bytes.data(), static_cast<osc::osc_bundle_element_size_t>(bytes.size()));
+    if (completion) s << osc::Blob(completion->ptr(), completion->size());
+    return b.end();
+}
+
+} // namespace
+
+TEST_CASE("front: definitions loaded with /d_loadDir are still there after a cold swap, their slots still held",
+          "[front][synthdef][ColdSwap]") {
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    Rig rig;
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
+    const uint32_t held = rig.front.laneFreeBytes();
+    CHECK(held < rig.front.laneBytes());   // the definitions are in the lane
+
+    coldSwap(rig);
+    CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
+    CHECK(synthKnown(rig, "sonic-pi-piano", kSpider));
+    CHECK(rig.front.laneFreeBytes() == held);
+}
+
+TEST_CASE("front: loading the same directory again gives the replaced definitions' slots back",
+          "[front][synthdef]") {
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    Rig rig;
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
+    const uint32_t once = rig.front.laneFreeBytes();
+    REQUIRE(once < rig.front.laneBytes());   // the definitions are in the lane
+
+    rig.sink.clear();
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_loadDir", nullptr, 30000));
+    // each definition replaced one of the same name, and the guest released the old one's asset
+    CHECK(rig.fx.pollUntil([&] { return rig.front.laneFreeBytes() == once; }, 500));
+}
+
+TEST_CASE("front: /d_recv is answered /done /d_recv, and its definition is still there after a cold swap",
+          "[front][synthdef][ColdSwap]") {
+    Rig rig;
+    const auto beep = synthdefFile("sonic-pi-beep");
+    REQUIRE(!beep.empty());
+    REQUIRE(rig.ingress(dRecv(beep)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_recv", nullptr));
+    CHECK(rig.sink.count("/clockwork/asset/committed", kSpider) == 0);   // the engine's answer stays behind the front
+    CHECK(rig.front.laneFreeBytes() < rig.front.laneBytes());
+
+    coldSwap(rig);
+    CHECK(synthKnown(rig, "sonic-pi-beep", kSpider));
+}
+
+TEST_CASE("front: a /s_new sent straight after /d_recv finds the definition", "[front][synthdef]") {
+    // The commit goes into the ring before ingress returns, so a message the sender sends next is behind it, as a
+    // /d_recv passed on to the engine would be.
+    Rig rig;
+    REQUIRE(rig.ingress(dRecv(synthdefFile("sonic-pi-beep"))));
+    rig.sink.clear();
+    osc_test::Builder b;
+    b.begin("/s_new") << "sonic-pi-beep" << int32_t{1001} << int32_t{0} << int32_t{0};
+    const auto sNew = b.end();
+    rig.fx.engine().ingest(sNew.ptr(), sNew.size(), kSpider);
+    rig.fx.engine().ingest(osc_test::message("/sync", int32_t{7}).ptr(), osc_test::message("/sync", int32_t{7}).size(), kSpider);
+    REQUIRE(rig.waitFor("/synced", kSpider, nullptr, nullptr));
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+}
+
+TEST_CASE("front: /d_recv's completion message runs once the definition is in", "[front][synthdef]") {
+    Rig rig;
+    osc_test::Builder b;
+    b.begin("/s_new") << "sonic-pi-beep" << int32_t{1002} << int32_t{0} << int32_t{0} << "sustain" << 1000.0f;
+    const auto completion = b.end();
+    REQUIRE(rig.ingress(dRecv(synthdefFile("sonic-pi-beep"), &completion)));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_recv", nullptr));
+    // the completion's synth is playing, with the sustain it was given (/s_get answers its sender with /n_set)
+    osc_test::Builder get;
+    get.begin("/s_get") << int32_t{1002} << "sustain";
+    const auto query = get.end();
+    rig.fx.engine().ingest(query.ptr(), query.size(), kSpider);
+    OscReply set;
+    REQUIRE(rig.waitFor("/n_set", kSpider, nullptr, &set));
+    CHECK(set.parsed().argFloat(2) == 1000.0f);
+    CHECK(rig.sink.count("/fail", kSpider) == 0);
+}
+
+TEST_CASE("front: /d_free of a definition sent with /d_recv gives its slot back", "[front][synthdef]") {
+    Rig rig;
+    REQUIRE(rig.ingress(dRecv(synthdefFile("sonic-pi-beep"))));
+    REQUIRE(rig.waitFor("/done", kSpider, "/d_recv", nullptr));
+    REQUIRE(rig.front.laneFreeBytes() < rig.front.laneBytes());
+    rig.fx.send(osc_test::message("/d_free", "sonic-pi-beep"));
+    CHECK(rig.laneWholeWithin(100));
+}
+
+TEST_CASE("front: a /d_recv the engine cannot read fails to its sender, and its slot goes back", "[front][synthdef]") {
+    Rig rig;
+    auto truncated = synthdefFile("sonic-pi-beep");
+    REQUIRE(truncated.size() > 40);
+    truncated.resize(40);
+    REQUIRE(rig.ingress(dRecv(truncated)));
+    REQUIRE(rig.waitFor("/fail", kSpider, "/d_recv", nullptr));
+    CHECK(rig.sink.count("/done", kSpider) == 0);
+    CHECK(rig.laneWholeWithin(100));
+}

@@ -22,8 +22,13 @@
  *   /b_write                            /b_query → /supersonic/buffer/publish
  *                                       (the guest puts the frames in the
  *                                       returns) → encode here
- *   /d_load, /d_loadDir                 read the files → one /d_recv each,
- *                                       paced so a block parses a few
+ *   /d_load, /d_loadDir                 read the files → each definition
+ *                                       staged in the lane and committed as
+ *                                       an asset, paced so a block parses a
+ *                                       few (definition_assets.h)
+ *   /d_recv                             the definition staged and committed
+ *                                       as an asset at once, so it is still
+ *                                       there after a rebuild
  *   /clockwork/record/start, /stop      the master tap (audio slot 0) pulled
  *                                       into a file here (Recorder.h); the
  *                                       engine is not told
@@ -48,6 +53,7 @@
 #include "OscFront.h"
 #include "Recorder.h"
 #include "clockwork_client.h"
+#include "definition_assets.h"   // kDefinitionAssetFirst: a definition asset's first id
 
 #include <atomic>
 #include <condition_variable>
@@ -145,7 +151,7 @@ public:
     // Size of the ring this front sends into (ClockworkClientInfo send_ring_bytes), or 0 if unknown. Synthdef
     // batches are capped at half of it, which leaves room for other messages.
     uint32_t sendRingBytes() const { return mSendRingBytes; }
-    // The batch with the most /d_recv definitions ever handed to the engine at once (loadDefs): how many, their
+    // The batch with the most definitions ever handed to the engine at once (loadDefs): how many, their
     // bytes, and the share of a callback they were sent under (0 for a load's first batch: no callback measured).
     struct DefBatch { uint32_t defs = 0, bytes = 0, budget = 0; };
     DefBatch largestDefBatch() { std::lock_guard<std::mutex> lock(mMut); return mLargestDefBatch; }
@@ -174,15 +180,15 @@ private:
     };
     // What the front sent the engine and has not answered the asker for yet.
     struct Pending {
-        enum What { Commit, ReadInto, WriteQuery, WritePublish } what;
+        enum What { Commit, ReadInto, WriteQuery, WritePublish, Definition } what;
         uint32_t             token;
-        int32_t              bufnum;
+        int32_t              bufnum;      // the buffer, or (Definition) the definition's asset id
         std::string          cmd;         // the verb the asker used
         uint32_t             slot;        // lane (Commit, ReadInto) or returns (WritePublish)
         std::vector<uint8_t> completion;
         Job                  job;         // Write: carried through to the encode
     };
-    struct DefLoad {              // the /d_recv messages of one /d_load or /d_loadDir
+    struct DefLoad {              // the definitions of one /d_load or /d_loadDir
         uint32_t             token;
         std::string          cmd;
         std::string          path;
@@ -207,6 +213,12 @@ private:
     // none is out. Under mMut.
     std::deque<DefLoad>::iterator defInFlight(uint32_t token);
     void sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>& defs);
+    enum class DefSend { Sent, RingFull, NoRoom };
+    DefSend commitDefinition(uint32_t token, const std::string& cmd, const uint8_t* bytes, size_t n,
+                             std::vector<uint8_t> completion, std::string* why);
+    bool recvDefinition(const uint8_t* data, uint32_t size, uint32_t token);
+    void definitionAnswered(uint32_t token, bool defined);
+    void definitionRebuilt(uint32_t token, const std::string& why);
     // Sends the next batch for every load marked waiting: its last batch hit a full ring and nothing is in flight
     // to trigger the next one. Called from poll(), runPending() and the worker loop.
     void resumeDefs();
@@ -277,7 +289,10 @@ private:
     uint32_t                      mPoolBytes = 0, mOutPoolBytes = 0;
     std::map<int32_t, uint32_t>   mLive;       // bufnum → lane slot the guest holds
     std::deque<Pending>           mPending;    // in send order
-    std::deque<DefLoad>           mDefLoads;   // in order; a /d_recv reply answers the oldest for its token
+    std::deque<DefLoad>           mDefLoads;   // in order; one batch in flight at a time for each token
+    // The next definition asset's id: from kDefinitionAssetFirst, only ever up (definition_assets.h). One front
+    // commits an engine's definitions; a second over the same engine would start again and reuse ids.
+    int32_t                       mNextDefinitionId = static_cast<int32_t>(kDefinitionAssetFirst);
     DefBatch                      mLargestDefBatch;          // largestDefBatch()
     uint32_t                      mDefBatchesOverShare = 0;  // defBatchesOverShare()
 

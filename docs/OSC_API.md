@@ -76,8 +76,9 @@ Replies arrive on its `in` and `in:osc` events.
   `no instance` or `stalled`, rather than dropped: nothing sent is left
   unanswered. `generation` is the one that closed; wait for
   [`/clockwork/setup`](#notify-and-lifecycle) and send again. A
-  `/d_load`, `/d_loadDir` or sample load the front had in flight when the
-  rebuild came answers its asker with scsynth's `/fail` instead.
+  `/d_load`, `/d_loadDir`, `/d_recv` or sample load the front had in flight
+  when the rebuild came answers its asker with scsynth's `/fail` instead.
+  The definitions and samples it had already loaded are still there.
 - **A bundle is scsynth's**, whole and unopened. A `/clockwork/` message
   inside a bundle reaches scsynth and is dropped there. To time a clockwork
   verb, wrap it in [`/clockwork/schedule`](#scheduling).
@@ -698,13 +699,24 @@ Hosts: **S W**. N answers, but gives a client no way to write the assets area.
 `→ /clockwork/asset/commit i:id i:kind i:offset i:bytes i:channels i:frames f:rate`
 
 Hands scsynth bytes the client wrote into the assets area lane at
-`offset`…`offset + bytes`. SuperSonic's scsynth takes `id` as the buffer
-number. On S the assets area is in the shared-memory segment, sized by
-`--assets-mb` (default 512); on W it is in the module's memory.
+`offset`…`offset + bytes`. SuperSonic's scsynth takes an audio asset's `id`
+as the buffer number. On S the assets area is in the shared-memory segment,
+sized by `--assets-mb` (default 512); on W it is in the module's memory.
+
+A raw asset with an `id` of 1048576 (2^20) or more is a synth definition:
+the bytes of a `.scsyndef` file, defined as `/d_recv` defines them. Clockwork
+hands every asset it holds to a new scsynth when it rebuilds one, so a
+definition committed this way is still there after a sample-rate change,
+with nothing sent again. Give each definition a higher `id` than the last
+and never reuse one: of two definitions with the same name, the one with
+the higher `id` is kept. scsynth releases a definition's asset when the
+definition is replaced, freed (`/d_free`) or all are freed (`/d_freeAll`).
+The native server's front commits every definition it loads this way
+(`/d_load`, `/d_loadDir`, `/d_recv`).
 
 | `kind` | |
 |---|---|
-| 0 | Raw bytes. `channels`, `frames` and `rate` are ignored. |
+| 0 | Raw bytes: a synth definition with an `id` of 1048576 or more, refused otherwise. `channels`, `frames` and `rate` are ignored. |
 | 1 | Interleaved float32 audio. `frames × channels × 4` must equal `bytes`; `rate > 0`. |
 
 | ← | |

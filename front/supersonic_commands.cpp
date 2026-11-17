@@ -171,6 +171,7 @@ bool Commands::ingress(const uint8_t* data, uint32_t size, uint32_t token) {
         clockwork_log(clockwork_client_core(mClient), "%s", ("\x01\n" + mSummary).c_str());
         return true;
     }
+    if (isMessage(data, size, "/d_recv")) return recvDefinition(data, size, token);
     Job job;
     job.token = token;
     if (isMessage(data, size, "/b_allocRead"))             job.kind = Kind::AllocRead;
@@ -548,28 +549,23 @@ bool Commands::takeNextDefs(uint32_t token, std::vector<std::vector<uint8_t>>& o
     return false;
 }
 
+// Commits each definition of a load's batch as an asset (commitDefinition). One the lane has no room for counts as one
+// the engine could not read, and the load carries on.
 void Commands::sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>& defs) {
-    std::vector<char> buf;
+    if (defs.empty()) return;
+    std::string cmd;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        auto it = defInFlight(token);
+        if (it == mDefLoads.end()) return;
+        cmd = it->cmd;
+    }
     size_t sent = 0;
     for (; sent < defs.size(); ++sent) {
-        const auto& bytes = defs[sent];
-        buf.resize(bytes.size() + 64);
-        osc::OutboundPacketStream p(buf.data(), buf.size());
-        p << osc::BeginMessage("/d_recv")
-          << osc::Blob(bytes.data(), static_cast<osc::osc_bundle_element_size_t>(bytes.size()))
-          << osc::EndMessage;
-        const ClockworkStatus st = sendOn(reinterpret_cast<const uint8_t*>(p.Data()),
-                                          static_cast<uint32_t>(p.Size()), token, false);
-        if (st == CLOCKWORK_E_TOO_BIG) {
-            // Too big for the ring: answer it ourselves with /fail /d_recv, as scsynth does for a definition it
-            // can't read. egress() then counts it as one failed definition and the load carries on.
-            char failBuf[256];
-            osc::OutboundPacketStream f(failBuf, sizeof failBuf);
-            f << osc::BeginMessage("/fail") << "/d_recv" << CLOCKWORK_REFUSED_TOO_BIG << osc::EndMessage;
-            egress(reinterpret_cast<const uint8_t*>(f.Data()), static_cast<uint32_t>(f.Size()), token);
-            continue;
-        }
-        if (st == CLOCKWORK_E_FULL) break;   // ring full: requeue this definition and the rest (below)
+        std::string why;
+        const DefSend st = commitDefinition(token, cmd, defs[sent].data(), defs[sent].size(), {}, &why);
+        if (st == DefSend::RingFull) break;   // requeue this definition and the rest (below)
+        if (st == DefSend::NoRoom) definitionAnswered(token, false);
         // Otherwise it was sent, or refused with "no instance" (sendOn passed that to egress(), which fails the load).
     }
     if (sent == defs.size()) return;
@@ -600,6 +596,144 @@ void Commands::sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>&
         { std::lock_guard<std::mutex> q(mQueueMut); }   // so the worker can't miss this notify between checking and waiting
         mQueueCv.notify_one();
     }
+}
+
+// Stages `n` bytes of a definition in a lane slot and commits them as a RAW asset with the next definition id
+// (definition_assets.h: the ids only go up), sent with `token`. It is recorded as pending before it is sent, so its
+// answer always finds it. RingFull and NoRoom say why in `why`, and leave nothing pending and no slot held.
+Commands::DefSend Commands::commitDefinition(uint32_t token, const std::string& cmd, const uint8_t* bytes, size_t n,
+                                             std::vector<uint8_t> completion, std::string* why) {
+    uint32_t slot = 0;
+    int32_t id = 0;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        if (!ensurePools()) {
+            *why = "the engine has no assets lane to load into";
+            return DefSend::NoRoom;
+        }
+        if (mNextDefinitionId == INT32_MAX) {   // an asset id is an OSC int32
+            *why = "no definition ids left";
+            return DefSend::NoRoom;
+        }
+        if (n == 0 || n > static_cast<size_t>(INT32_MAX)
+            || clockwork_asset_pool_alloc(mPool, static_cast<uint32_t>(n), &slot) != 0) {
+            *why = "assets lane full: " + std::to_string(n) + " bytes needed, "
+                 + std::to_string(clockwork_asset_pool_free_bytes(mPool)) + " free";
+            return DefSend::NoRoom;
+        }
+        id = mNextDefinitionId++;
+        mPending.push_back(Pending{ Pending::Definition, token, id, cmd, slot, std::move(completion), {} });
+    }
+    std::memcpy(assetsLane() + slot, bytes, n);
+    char buf[128];
+    osc::OutboundPacketStream p(buf, sizeof buf);
+    p << osc::BeginMessage("/clockwork/asset/commit")
+      << id << static_cast<int32_t>(CLOCKWORK_ASSET_RAW) << static_cast<int32_t>(slot) << static_cast<int32_t>(n)
+      << int32_t{0} << int32_t{0} << 0.f << osc::EndMessage;
+    const ClockworkStatus st = sendOn(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()),
+                                      token, false);
+    if (st != CLOCKWORK_E_FULL && st != CLOCKWORK_E_TOO_BIG) return DefSend::Sent;   // "no instance": egress() has it
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        Pending unsent;
+        if (takePending(Pending::Definition, token, id, &unsent) && mPool) clockwork_asset_pool_free(mPool, slot);
+    }
+    *why = st == CLOCKWORK_E_FULL ? CLOCKWORK_REFUSED_FULL : CLOCKWORK_REFUSED_TOO_BIG;
+    return st == CLOCKWORK_E_FULL ? DefSend::RingFull : DefSend::NoRoom;
+}
+
+// /d_recv bytes [completion]: staged and committed here, on the sender's thread, before ingress returns, so whatever
+// the sender sends next reaches the engine after it, as the /d_recv itself would have. The sender hears /done /d_recv
+// once the guest has the definition, then its completion message runs. A /d_recv with no bytes is the engine's to
+// refuse.
+bool Commands::recvDefinition(const uint8_t* data, uint32_t size, uint32_t token) {
+    const void* def = nullptr;
+    osc::osc_bundle_element_size_t n = 0;
+    std::vector<uint8_t> completion;
+    try {
+        osc::ReceivedMessage m(osc::ReceivedPacket(reinterpret_cast<const char*>(data),
+                                                   static_cast<osc::osc_bundle_element_size_t>(size)));
+        auto it = m.ArgumentsBegin();
+        const auto end = m.ArgumentsEnd();
+        if (it == end || !it->IsBlob()) return false;
+        (it++)->AsBlobUnchecked(def, n);
+        if (!def || n == 0) return false;
+        if (it != end && it->IsBlob()) {
+            const void* c = nullptr;
+            osc::osc_bundle_element_size_t cn = 0;
+            it->AsBlobUnchecked(c, cn);
+            if (c && cn > 0) completion.assign(static_cast<const uint8_t*>(c), static_cast<const uint8_t*>(c) + cn);
+        }
+    } catch (const osc::Exception&) {
+        return false;   // malformed: the engine's refusal says what is wrong
+    }
+    std::string why;
+    if (commitDefinition(token, "/d_recv", static_cast<const uint8_t*>(def), static_cast<size_t>(n),
+                         std::move(completion), &why) != DefSend::Sent)
+        sendFailCmd(token, "/d_recv", why);
+    return true;
+}
+
+// One definition of the load in flight for `token` answered: defined, or not (the guest could not read it, or the lane
+// had no room), which skips it as scsynth skips a file in a directory it cannot read. The last answer to a batch sends
+// the next; the last of the whole load answers its asker. An answer for a load a rebuild has already failed is
+// swallowed.
+void Commands::definitionAnswered(uint32_t token, bool defined) {
+    DefLoad finished;
+    bool last = false;
+    std::vector<std::vector<uint8_t>> next;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        auto it = defInFlight(token);
+        if (it == mDefLoads.end()) return;
+        --it->inFlight;
+        if (it->refused) {
+            if (it->inFlight == 0) mDefLoads.erase(it);
+        } else {
+            if (!defined) ++it->failed;
+            if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
+        }
+        takeNextDefs(token, next);
+    }
+    if (last) {
+        if (finished.failed == finished.total) {
+            sendFailCmd(token, finished.cmd.c_str(), finished.path);
+        } else {
+            if (!finished.completion.empty())
+                sendOn(finished.completion.data(), static_cast<uint32_t>(finished.completion.size()), token);
+            sendDoneCmd(token, finished.cmd.c_str());
+        }
+    }
+    sendDefs(token, next);
+}
+
+// A definition of the load in flight for `token` refused by clockwork: a rebuild, or no instance. The definitions the
+// old instance already took are kept, and the new one has them (Clockwork hands it every asset); the rest of the load
+// is not sent. The load fails to its asker, who asks again, as a sample load caught by a rebuild does. The rest of
+// the batch is answered too, refused or not, before the next load for the token takes its turn.
+void Commands::definitionRebuilt(uint32_t token, const std::string& why) {
+    std::string failCmd, failPath;
+    std::vector<std::vector<uint8_t>> next;
+    bool first = false;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        auto it = defInFlight(token);
+        if (it == mDefLoads.end()) return;
+        if (!it->refused) {
+            it->refused = true;
+            it->pending.clear();
+            first = true;
+            failCmd = it->cmd;
+            failPath = it->path;
+        }
+        if (--it->inFlight == 0) {
+            mDefLoads.erase(it);
+            takeNextDefs(token, next);
+        }
+    }
+    if (first)
+        sendFailCmd(token, failCmd.c_str(), "the engine was rebuilt while '" + failPath + "' was loading (" + why + ")");
+    sendDefs(token, next);
 }
 
 void Commands::resumeDefs() {
@@ -673,52 +807,13 @@ bool Commands::egress(const uint8_t* data, uint32_t size, uint32_t token) {
         return false;
     }
 
-    // A refusal of anything else we had in flight on this token — a sample's
-    // commit, a read, a query, a publish — fails that ask to its asker, in
+    // A refusal of anything we had in flight on this token — a sample's or a
+    // definition's commit, a read, a query, a publish — fails that ask to its asker, in
     // scsynth's words, and frees what the ask held: the oldest such ask, since
     // a refusal names the message and not which ask sent it, and clockwork
     // refuses what waited in the order it was sent. Not ours: left for
     // whoever is.
     if (kind == Error) {
-        // A definition refused is not one scsynth skipped (its own /fail,
-        // below, costs the load one definition): the World it was going into
-        // is gone, with every definition already in it, and the rest have no
-        // World to go to. The whole load fails to its asker, nothing more is
-        // sent for it, and the next load queued for the token takes its turn
-        // — to be refused in turn, until the new World is up.
-        // The rest of its batch is answered too, refused or not, before the
-        // next load takes its turn: swallowed (the /d_recv path below), so
-        // none is taken for the next load's.
-        if (cmd == "/d_recv") {
-            std::string failCmd, failPath;
-            std::vector<std::vector<uint8_t>> next;
-            bool found = false, first = false;
-            {
-                std::lock_guard<std::mutex> lock(mMut);
-                auto it = defInFlight(token);
-                if (it != mDefLoads.end()) {
-                    found = true;
-                    token = it->token;   // the asker's, from here
-                    if (!it->refused) {
-                        it->refused = true;
-                        it->pending.clear();
-                        first = true;
-                        failCmd = it->cmd;
-                        failPath = it->path;
-                    }
-                    if (--it->inFlight == 0) {
-                        mDefLoads.erase(it);
-                        takeNextDefs(token, next);
-                    }
-                }
-            }
-            if (!found) return false;
-            if (first)
-                sendFailCmd(token, failCmd.c_str(),
-                            "the engine was rebuilt while '" + failPath + "' was loading (" + why + ")");
-            sendDefs(token, next);
-            return true;
-        }
         // The refusal names the message WE sent; a pending ask remembers the
         // verb its ASKER used. The kind of ask is what the two share.
         int what = -1;
@@ -727,54 +822,28 @@ bool Commands::egress(const uint8_t* data, uint32_t size, uint32_t token) {
         else if (cmd == "/b_query")                   what = Pending::WriteQuery;
         else if (cmd == "/supersonic/buffer/publish") what = Pending::WritePublish;
         if (what < 0) return false;
+        // A commit is a sample's or a definition's, and the refusal goes to the oldest of either.
+        auto refused = [&](const Pending& p) {
+            return p.token == token && (p.what == what || (what == Pending::Commit && p.what == Pending::Definition));
+        };
         Pending failed;
         {
             std::lock_guard<std::mutex> lock(mMut);
-            auto it = std::find_if(mPending.begin(), mPending.end(),
-                                   [&](const Pending& p) { return p.token == token && p.what == what; });
+            auto it = std::find_if(mPending.begin(), mPending.end(), refused);
             if (it == mPending.end()) return false;
-            if (mPool && (it->what == Pending::Commit || it->what == Pending::ReadInto))
+            if (mPool && it->what != Pending::WriteQuery && it->what != Pending::WritePublish)
                 clockwork_asset_pool_free(mPool, it->slot);
             failed = std::move(*it);
             mPending.erase(it);
         }
+        if (failed.what == Pending::Definition) {
+            if (failed.cmd == "/d_recv") sendFailCmd(failed.token, "/d_recv", "the engine refused it: " + why);
+            else                         definitionRebuilt(failed.token, why);
+            return true;
+        }
         sendFail(failed.token, failed.cmd.c_str(), "the engine refused it: " + why, failed.bufnum);
         return true;
     }
-    // /d_recv replies: the batch in flight for that token, oldest load first
-    // — and the last answer to a batch is what sends the next one. An answer
-    // for a load a rebuild has already failed to its asker is swallowed.
-    if ((kind == Done || kind == Fail) && cmd == "/d_recv") {
-        DefLoad finished;
-        bool last = false;
-        std::vector<std::vector<uint8_t>> next;
-        {
-            std::lock_guard<std::mutex> lock(mMut);
-            auto it = defInFlight(token);
-            if (it == mDefLoads.end()) return false;
-            token = it->token;   // the asker's, from here
-            --it->inFlight;
-            if (it->refused) {
-                if (it->inFlight == 0) mDefLoads.erase(it);
-            } else {
-                if (kind == Fail) ++it->failed;
-                if (--it->remaining == 0) { finished = std::move(*it); mDefLoads.erase(it); last = true; }
-            }
-            takeNextDefs(token, next);
-        }
-        if (last) {
-            if (finished.failed == finished.total) {
-                sendFailCmd(token, finished.cmd.c_str(), finished.path);
-            } else {
-                if (!finished.completion.empty())
-                    sendOn(finished.completion.data(), static_cast<uint32_t>(finished.completion.size()), token);
-                sendDoneCmd(token, finished.cmd.c_str());
-            }
-        }
-        sendDefs(token, next);
-        return true;
-    }
-
     // /supersonic/buffer/read replies: the /b_read or /b_readChannel they answer.
     if ((kind == Done || kind == Fail) && cmd == "/supersonic/buffer/read") {
         Pending p;
@@ -814,9 +883,22 @@ bool Commands::egress(const uint8_t* data, uint32_t size, uint32_t token) {
         Pending p;
         {
             std::lock_guard<std::mutex> lock(mMut);
-            if (!takePending(Pending::Commit, token, id, &p)) return false;
+            if (!takePending(Pending::Definition, token, id, &p) && !takePending(Pending::Commit, token, id, &p))
+                return false;
             if (kind == Committed) mLive[id] = p.slot;
             else if (mPool)        clockwork_asset_pool_free(mPool, p.slot);
+        }
+        if (p.what == Pending::Definition) {
+            if (p.cmd != "/d_recv") {
+                definitionAnswered(p.token, kind == Committed);
+            } else if (kind == Committed) {
+                if (!p.completion.empty())
+                    sendOn(p.completion.data(), static_cast<uint32_t>(p.completion.size()), p.token);
+                sendDoneCmd(p.token, "/d_recv");
+            } else {
+                sendFailCmd(p.token, "/d_recv", why.empty() ? "the engine could not read the definition" : why);
+            }
+            return true;
         }
         if (kind == Committed) finish(p.token, p.cmd.c_str(), id, p.completion);
         else                   sendFail(p.token, p.cmd.c_str(), why.empty() ? "the engine refused the sample" : why, id);

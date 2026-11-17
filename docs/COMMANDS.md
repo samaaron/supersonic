@@ -3,11 +3,13 @@
 `supersonic::Commands` (`front/supersonic_commands.h`) is what a client of
 SuperSonic sends its commands through. It answers the verbs scsynth did with
 files and the OS — `/b_allocRead`, `/b_allocReadChannel`, `/b_read`,
-`/b_readChannel`, `/b_write`, `/d_load`, `/d_loadDir`, `/clockwork/record/*`,
-`/clockwork/summary`, `/quit` — and passes everything else to the engine.
-The engine has no files (clockwork's `docs/THREATS.md`): a sample is decoded
-by the client into the assets area and committed as an asset; a synthdef
-file becomes `/d_recv`.
+`/b_readChannel`, `/b_write`, `/d_load`, `/d_loadDir`, `/d_recv`,
+`/clockwork/record/*`, `/clockwork/summary`, `/quit` — and passes everything
+else to the engine. The engine has no files (clockwork's `docs/THREATS.md`):
+a sample is decoded by the client into the assets area and committed as an
+asset, and so is a synth definition, from a file or a `/d_recv`
+(`dsp/scsynth/definition_assets.h`), so both are still there after the
+engine is rebuilt.
 
 This document is the contract for where `Commands` sits and what it is built
 on. The rule: **every path to the engine answers the same verbs**, because
@@ -31,7 +33,7 @@ What it needs from the handle, and nothing more:
 |---|---|
 | the assets area (it writes) and the returns area (it reads) | `clockwork_client_region(ASSETS)`, `(RETURNS)` |
 | send a command on an asker's behalf, or its own | `clockwork_client_send(c, bytes, n, token)` |
-| the engine's block count and block size, to pace `/d_recv` batches | `clockwork_client_metrics` (the `PerformanceMetrics` words) |
+| the engine's block count and block size, to pace a load's definitions | `clockwork_client_metrics` (the `PerformanceMetrics` words) |
 | the engine's replies, to answer the asker in scsynth's words | see below |
 
 A front is made once the engine has an arena — after `init()` for an

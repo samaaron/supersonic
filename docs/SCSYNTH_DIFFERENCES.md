@@ -137,8 +137,9 @@ The engine has no files on any host. Each host deals with the file verbs differe
 
 | Command | Web | Native server and NIF |
 |---------|-----|-----------------------|
-| `/d_load` | Refused with `/fail`: use `loadSynthDef()`, or `/d_recv` with the bytes | Reads the file and sends `/d_recv` |
-| `/d_loadDir` | Refused with `/fail`: use `loadSynthDefs()` | Reads each file and sends `/d_recv` |
+| `/d_load` | Refused with `/fail`: use `loadSynthDef()`, or `/d_recv` with the bytes | Reads the file and commits each definition as an asset, which a rebuild keeps |
+| `/d_loadDir` | Refused with `/fail`: use `loadSynthDefs()` | Reads each file and commits each definition as an asset, which a rebuild keeps |
+| `/d_recv` | Sent to the engine; the client sends it again after a reload | Commits the definition as an asset, which a rebuild keeps |
 | `/b_read` | The client fetches and decodes the file; the engine copies the frames in. Replies `/done /supersonic/buffer/read bufnum` | Decodes the file |
 | `/b_readChannel` | As `/b_read`, with channel selection | Decodes the file |
 | `/b_allocRead` | The client fetches and decodes the file and commits it as an asset. Replies `/clockwork/asset/committed bufnum` | Decodes the file |
