@@ -30,15 +30,20 @@
 
 #include "EngineFixture.h"
 #include "OscBuilder.h"
+#include "SampleLane.h"           // the assets lane's pool, shared with the sample tests
+#include "definition_assets.h"    // kDefinitionAssetFirst
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <vector>
 
 namespace {
 
 // /status.reply args: unused(1), numUgens, numSynths, numGroups, numSynthDefs...
+constexpr int kArgUgens      = 1;
 constexpr int kArgSynths     = 2;
 constexpr int kArgSynthDefs  = 4;
 
@@ -82,6 +87,84 @@ bool newSynth(EngineFixture& fix, const char* defName, int32_t nodeId) {
     fix.send(osc_test::message("/sync", nodeId));
     OscReply r;
     return fix.waitForReply("/synced", r);
+}
+
+// ── Definitions as assets (definition_assets.h) ─────────────────────────────
+
+constexpr uint32_t kFirst = supersonic::kDefinitionAssetFirst;
+
+// A packaged definition file's bytes.
+std::vector<uint8_t> definitionFile(const std::string& name) {
+    std::ifstream f(std::filesystem::path(CLOCKWORK_SYNTHDEFS_DIR) / (name + ".scsyndef"), std::ios::binary);
+    if (!f) return {};
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+
+// A version 2 file's header: "SCgf", int32 version, int16 count. Its definitions follow.
+constexpr size_t kV2Header = 10;
+
+bool isV2(const std::vector<uint8_t>& f) {
+    return f.size() > kV2Header && std::memcmp(f.data(), "SCgf\0\0\0\2", 8) == 0;
+}
+
+// One file holding both files' definitions (both version 2).
+std::vector<uint8_t> joined(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+    REQUIRE(isV2(a));
+    REQUIRE(isV2(b));
+    REQUIRE(a[8] == 0);
+    REQUIRE(b[8] == 0);
+    std::vector<uint8_t> out(a.begin(), a.begin() + kV2Header);
+    out[9] = static_cast<uint8_t>(a[9] + b[9]);
+    out.insert(out.end(), a.begin() + kV2Header, a.end());
+    out.insert(out.end(), b.begin() + kV2Header, b.end());
+    return out;
+}
+
+// A one-definition version 2 file with its definition's name changed to `to`, a name of the same length.
+std::vector<uint8_t> renamed(std::vector<uint8_t> f, const std::string& to) {
+    REQUIRE(isV2(f));
+    REQUIRE(f[kV2Header] == to.size());   // the name is a pascal string right after the header
+    std::memcpy(f.data() + kV2Header + 1, to.data(), to.size());
+    return f;
+}
+
+// Copies `bytes` into a slot of the assets lane and returns the message that commits them as definition asset `id`.
+// The slot goes back to the pool when the guest releases the asset (sample_lane::poolFor).
+osc_test::Packet stagedDefinition(EngineFixture& fix, uint32_t id, const std::vector<uint8_t>& bytes) {
+    sample_lane::LanePool& lp = sample_lane::poolFor(fix);
+    uint32_t slot = 0;
+    REQUIRE(clockwork_asset_pool_alloc(lp.pool, static_cast<uint32_t>(bytes.size()), &slot) == 0);
+    std::memcpy(const_cast<uint8_t*>(fix.engine().guestAssets()) + slot, bytes.data(), bytes.size());
+    lp.held.push_back({ static_cast<int32_t>(id), slot });
+    osc_test::Builder b;
+    b.begin("/clockwork/asset/commit") << static_cast<int32_t>(id) << static_cast<int32_t>(CLOCKWORK_ASSET_RAW)
+                                       << static_cast<int32_t>(slot) << static_cast<int32_t>(bytes.size())
+                                       << int32_t{0} << int32_t{0} << 0.0f;
+    return b.end();
+}
+
+bool commitDefinition(EngineFixture& fix, uint32_t id, const std::vector<uint8_t>& bytes) {
+    fix.send(stagedDefinition(fix, id, bytes));
+    OscReply r;
+    return fix.waitForReply("/clockwork/asset/committed", r, 3000) && r.parsed().argInt(0) == static_cast<int32_t>(id);
+}
+
+// The ids in the /clockwork/asset/released replies since the replies were last cleared. statusField() clears them,
+// so read these first.
+std::multiset<int32_t> releasedIds(EngineFixture& fix) {
+    std::multiset<int32_t> ids;
+    for (const auto& r : fix.allReplies())
+        if (r.address == "/clockwork/asset/released") ids.insert(r.parsed().argInt(0));
+    return ids;
+}
+
+// How many unit generators run while one synth of `defName` plays: tells two definitions of one name apart.
+int ugensOf(EngineFixture& fix, const char* defName, int32_t nodeId) {
+    REQUIRE(newSynth(fix, defName, nodeId));
+    const int ugens = statusField(fix, kArgUgens);
+    fix.send(osc_test::message("/n_free", nodeId));
+    fix.pumpBlock(2);
+    return ugens;
 }
 
 } // namespace
@@ -417,4 +500,105 @@ TEST_CASE("Definitions: rapid cold swaps leave a usable engine",
     const int before = synthCount(fix);
     REQUIRE(newSynth(fix, "sonic-pi-beep", 4200));
     CHECK(synthCount(fix) == before + 1);
+}
+
+// ── Definitions as assets ───────────────────────────────────────────────────
+//
+// A client can commit a definition file's bytes as a RAW asset with an id from kDefinitionAssetFirst up
+// (definition_assets.h). Clockwork hands the assets it holds to each new instance, so these definitions are still
+// there after a cold swap, unlike the ones sent with /d_recv above.
+
+TEST_CASE("Definitions: a definition committed as an asset is still there after a cold swap",
+          "[definitions][assets][ColdSwap]") {
+    EngineFixture fix;
+    const int before = synthDefCount(fix);
+    REQUIRE(before >= 0);
+    REQUIRE(commitDefinition(fix, kFirst, definitionFile("sonic-pi-beep")));
+    REQUIRE(synthDefCount(fix) == before + 1);
+
+    auto result = fix.engine().switchDevice("", 44100);
+    REQUIRE(result.success);
+    REQUIRE(result.type == SwapType::Cold);
+
+    CHECK(synthDefCount(fix) == before + 1);
+    const int synths = synthCount(fix);
+    REQUIRE(newSynth(fix, "sonic-pi-beep", 4300));
+    CHECK(synthCount(fix) == synths + 1);
+}
+
+TEST_CASE("Definitions: a definition asset that replaces one of the same name releases the replaced one's asset",
+          "[definitions][assets]") {
+    EngineFixture fix;
+    const auto beep = definitionFile("sonic-pi-beep");
+    REQUIRE(commitDefinition(fix, kFirst, beep));
+    fix.clearReplies();
+    REQUIRE(commitDefinition(fix, kFirst + 1, beep));
+    CHECK(releasedIds(fix) == std::multiset<int32_t>{ static_cast<int32_t>(kFirst) });
+}
+
+TEST_CASE("Definitions: /d_free releases a definition's asset once no definition from it is left",
+          "[definitions][assets]") {
+    EngineFixture fix;
+    REQUIRE(commitDefinition(fix, kFirst, joined(definitionFile("sonic-pi-beep"), definitionFile("sonic-pi-piano"))));
+    fix.clearReplies();
+
+    fix.send(osc_test::message("/d_free", "sonic-pi-beep"));
+    fix.pumpBlock(4);
+    CHECK(releasedIds(fix).empty());   // sonic-pi-piano still comes from it
+
+    fix.send(osc_test::message("/d_free", "sonic-pi-piano"));
+    fix.pumpBlock(4);
+    CHECK(releasedIds(fix) == std::multiset<int32_t>{ static_cast<int32_t>(kFirst) });
+}
+
+TEST_CASE("Definitions: /d_freeAll releases each definition asset once", "[definitions][assets]") {
+    EngineFixture fix;
+    REQUIRE(commitDefinition(fix, kFirst, joined(definitionFile("sonic-pi-beep"), definitionFile("sonic-pi-piano"))));
+    REQUIRE(commitDefinition(fix, kFirst + 1, definitionFile("sonic-pi-rodeo")));
+    fix.clearReplies();
+
+    fix.send(osc_test::message("/d_freeAll"));
+    fix.pumpBlock(4);
+    CHECK(releasedIds(fix) == std::multiset<int32_t>{ static_cast<int32_t>(kFirst), static_cast<int32_t>(kFirst + 1) });
+    CHECK(synthDefCount(fix) == 0);
+}
+
+TEST_CASE("Definitions: a definition asset scsynth cannot read is refused", "[definitions][assets]") {
+    EngineFixture fix;
+    const int before = synthDefCount(fix);
+    auto truncated = definitionFile("sonic-pi-beep");
+    REQUIRE(truncated.size() > 40);
+    truncated.resize(40);
+
+    fix.send(stagedDefinition(fix, kFirst, truncated));
+    OscReply r;
+    REQUIRE(fix.waitForReply("/clockwork/asset/refused", r, 3000));
+    CHECK(r.parsed().argInt(0) == static_cast<int32_t>(kFirst));
+    CHECK(synthDefCount(fix) == before);
+}
+
+// A new instance is handed the assets in Clockwork's table order, not the order they were committed in. With these
+// two ids, in a 4096-slot table, the newer asset (kFirst + 2) comes before the older one (kFirst + 1). The older one
+// still holds a live definition (sonic-pi-beep), so it is handed over too, with a sonic-pi-piano the newer one
+// replaced. The newer definition must still be the one left afterwards. A second cold swap checks that neither asset
+// was released during the first: before the fix, the older piano replaced the newer one and released its asset.
+TEST_CASE("Definitions: after a cold swap, the newer of two definition assets with the same name wins",
+          "[definitions][assets][ColdSwap]") {
+    EngineFixture fix;
+    const auto piano = definitionFile("sonic-pi-piano");
+    const auto beep  = definitionFile("sonic-pi-beep");
+    const auto rodeo = definitionFile("sonic-pi-rodeo");
+    REQUIRE(commitDefinition(fix, kFirst + 1, joined(piano, beep)));
+    const int pianoUgens = ugensOf(fix, "sonic-pi-piano", 4400);
+    REQUIRE(commitDefinition(fix, kFirst + 2, renamed(rodeo, "sonic-pi-piano")));
+    const int rodeoUgens = ugensOf(fix, "sonic-pi-piano", 4401);
+    REQUIRE(pianoUgens != rodeoUgens);   // so the two can be told apart
+
+    for (const double rate : { 44100.0, 48000.0 }) {
+        auto result = fix.engine().switchDevice("", rate);
+        REQUIRE(result.success);
+        REQUIRE(result.type == SwapType::Cold);
+        CHECK(ugensOf(fix, "sonic-pi-piano", 4402) == rodeoUgens);
+        CHECK(ugensOf(fix, "sonic-pi-beep", 4403) > 0);
+    }
 }

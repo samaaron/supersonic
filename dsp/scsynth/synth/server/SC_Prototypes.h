@@ -95,6 +95,7 @@ struct GraphDef* World_GetGraphDef(struct World* inWorld, int32* inKey);
 void World_FreeAllGraphDefs(World* inWorld);
 void GraphDef_Free(World* inWorld, GraphDef* inGraphDef);
 void GraphDef_Define(World* inWorld, GraphDef* inList);
+void GraphDef_ReleaseAsset(World* inWorld, GraphDef* inGone);   // SuperSonic: definition_assets.h
 
 SCErr bufAlloc(World* inWorld, struct SndBuf* buf, int numChannels, int numFrames, double sampleRate);
 

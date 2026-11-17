@@ -77,6 +77,11 @@ struct GraphDef {
 
     uint32 mNumVariants;
     struct GraphDef* mVariants;
+
+    // SuperSonic: the id of the Clockwork asset this definition was read from (definition_assets.h), or 0 when it came
+    // in a /d_recv message. Set on the original only: a variant is a copy made while reading, and keeps 0. The asset
+    // is released when no original read from it is left in the library.
+    uint32 mAssetId;
 };
 
 GraphDef* GraphDef_Recv(World* inWorld, const char* buffer, size_t size, GraphDef* inList, std::string* outErrorMsg = nullptr);

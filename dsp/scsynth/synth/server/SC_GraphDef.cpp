@@ -498,6 +498,7 @@ GraphDef* GraphDef_Read(World* inWorld, const char*& buffer, const char* end, Gr
     // finally add to list
     graphDef->mNext = inList;
     graphDef->mRefCount = 1;
+    // mAssetId stays 0 (the GraphDef is value-initialised); dsp_asset sets it when the definition came from an asset
 
     return graphDef.release();
 }
@@ -510,6 +511,7 @@ void GraphDef_Define(World* inWorld, GraphDef* inList) {
         GraphDef* previousDef = World_GetGraphDef(inWorld, graphDef->mNodeDef.mName);
         if (previousDef) {
             World_RemoveGraphDef(inWorld, previousDef);
+            GraphDef_ReleaseAsset(inWorld, previousDef);   // SuperSonic: the replaced one's asset, if nothing else uses it
             GraphDef_Release(inWorld, previousDef);
         }
         World_AddGraphDef(inWorld, graphDef);
@@ -526,9 +528,26 @@ SCErr GraphDef_Remove(World* inWorld, int32* inName) {
     GraphDef* graphDef = World_GetGraphDef(inWorld, inName);
     if (graphDef) {
         World_RemoveGraphDef(inWorld, graphDef);
+        GraphDef_ReleaseAsset(inWorld, graphDef);   // SuperSonic: /d_free lets its asset go, if nothing else uses it
         return GraphDef_Release(inWorld, graphDef);
     }
     return kSCErr_SynthDefNotFound;
+}
+
+/** @brief SuperSonic: a definition read from an asset (definition_assets.h) has left the library. When no definition
+ *  still in the library was read from the same asset, release it, so the client can reuse its bytes. Not called when an
+ *  instance is torn down: the asset must stay held so Clockwork hands it to the next instance.
+ */
+void GraphDef_ReleaseAsset(World* inWorld, GraphDef* inGone) {
+    if (inGone->mAssetId == 0)
+        return;
+    GrafDefTable* lib = inWorld->hw->mGraphDefLib;
+    for (int i = 0; i < lib->TableSize(); ++i) {
+        GraphDef* def = lib->AtIndex(i);
+        if (def && def != inGone && def->mOriginal == def && def->mAssetId == inGone->mAssetId)
+            return;
+    }
+    supersonic_guest_release_asset(inWorld, inGone->mAssetId);
 }
 
 /** @brief Release a GraphDef.

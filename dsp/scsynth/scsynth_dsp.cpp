@@ -31,6 +31,7 @@
 #include "dsp_api.h"
 #include "engine_api.h"
 #include "guest_doors.h"
+#include "definition_assets.h"   // a synth definition's asset id range
 #include "scsynth_config.h"
 #include "scsynth_options.h"
 #include "buffer_commands.h"   // buffer_set_data: a buffer onto an asset's frames
@@ -39,6 +40,8 @@
 #include "SC_WorldOptions.h"
 #include "SC_HiddenWorld.h"
 #include "SC_Group.h"        // mTopGroup is only a forward declaration in SC_World.h
+#include "SC_GraphDef.h"     // dsp_asset reads a definition from an asset
+#include "SC_Prototypes.h"   // GraphDef_Define
 #include "SC_InterfaceTable.h"   // ScopeBufferHnd, the ugens' shape of a scope handle
 #include "node_tree.h"
 #include "scsynth_scope.h"
@@ -503,6 +506,12 @@ void supersonic_guest_release_buffer(World* world, int bufnum) {
     d->host.asset_release(d->host.ctx, (uint32_t)bufnum);
 }
 
+void supersonic_guest_release_asset(World* world, uint32_t id) {
+    SupersonicGuest* d = guestOf(world);
+    if (!d || !d->host.asset_release) return;
+    d->host.asset_release(d->host.ctx, id);
+}
+
 const short* supersonic_piano_wavetable(World* world, size_t* frames) {
     SupersonicGuest* d = guestOf(world);
     if (frames) *frames = d ? d->piano_frames : 0;
@@ -694,15 +703,48 @@ struct Dsp* dsp_new(const DspConfig* config, const DspHost* host, char* err, uin
     return reinterpret_cast<struct Dsp*>(d);
 }
 
-// An asset is a sample: interleaved float frames the client decoded into the
-// assets, keyed by buffer number. Bind the buffer to them where they lie. A
-// buffer that already holds something must be freed first — the audio thread
-// cannot give heap memory back here, and the client's own /b_free is the
-// honest way to ask.
+// An asset is a sample or a synth definition.
+//
+// A sample: interleaved float frames the client decoded into the assets, keyed
+// by buffer number. Bind the buffer to them where they lie. A buffer that
+// already holds something must be freed first — the audio thread cannot give
+// heap memory back here, and the client's own /b_free is the honest way to ask.
+//
+// A definition: a RAW asset with an id from kDefinitionAssetFirst up
+// (definition_assets.h), holding a .scsyndef file's bytes. Read and defined as
+// /d_recv defines them, replacing any of the same name, unless that one came
+// from a newer asset (a higher id). Clockwork hands it to every new instance on
+// a rebuild, so the definition outlives the instance.
 int dsp_asset(struct Dsp* dsp, const ClockworkAsset* asset) {
     auto* d = reinterpret_cast<SupersonicGuest*>(dsp);
     if (!d || !d->world || !asset || asset->struct_bytes < sizeof(ClockworkAsset)) return 1;
-    if (asset->kind != CLOCKWORK_ASSET_AUDIO_F32) return 2;   // a buffer holds audio; raw bytes mean nothing here
+    if (asset->kind == CLOCKWORK_ASSET_RAW && asset->id >= supersonic::kDefinitionAssetFirst) {
+        if (!asset->bytes || asset->byte_count == 0) return 7;
+        GraphDef* defs = GraphDef_Recv(d->world, static_cast<const char*>(asset->bytes), asset->byte_count, nullptr);
+        if (!defs) return 8;   // not a definition scsynth can read: refused, and the client hears so
+        // A new instance is handed its assets in Clockwork's table order, not the order they were committed in, so an
+        // older asset can come after a newer one. Skip any definition whose name is already defined from a newer
+        // asset; the rest replace what is there, as /d_recv does.
+        GraphDef* keep = nullptr;
+        GraphDef** tail = &keep;
+        for (GraphDef* def = defs; def;) {
+            GraphDef* next = def->mNext;
+            def->mNext = nullptr;
+            const GraphDef* there = World_GetGraphDef(d->world, def->mNodeDef.mName);
+            if (there && there->mAssetId > asset->id) {
+                GraphDef_Free(d->world, def);
+            } else {
+                def->mAssetId = asset->id;
+                *tail = def;
+                tail = &def->mNext;
+            }
+            def = next;
+        }
+        if (!keep) return 9;   // every definition in it is defined from a newer asset: nothing to hold it for
+        GraphDef_Define(d->world, keep);
+        return 0;
+    }
+    if (asset->kind != CLOCKWORK_ASSET_AUDIO_F32) return 2;   // a buffer holds audio; other raw bytes mean nothing here
     World* w = d->world;
     const int bufnum = (int)asset->id;
     if (bufnum < 0 || bufnum >= (int)w->mNumSndBufs) return 3;

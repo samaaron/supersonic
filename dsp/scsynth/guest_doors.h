@@ -59,6 +59,10 @@ void        supersonic_guest_log(struct World* world, const char* text, uint32_t
 // once clockwork tells it the asset is released (dsp_api.h, "Assets").
 void        supersonic_guest_release_buffer(struct World* world, int bufnum);
 
+// A definition read from an asset is gone and none read from that asset is left (definition_assets.h): the client
+// reclaims the bytes once clockwork tells it the asset is released.
+void        supersonic_guest_release_asset(struct World* world, uint32_t id);
+
 // Where the assets area is and how big, set at dsp_new. /b_allocPtr names a
 // sample by offset from here. contains: non-zero when `ptr` lies inside it, a
 // range the client owns, which no free on this side may touch.

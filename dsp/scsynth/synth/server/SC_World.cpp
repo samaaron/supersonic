@@ -1034,6 +1034,22 @@ void World_FreeAllGraphDefs(World* inWorld) {
         }
     }
 
+    // SuperSonic: /d_freeAll releases every definition's asset (definition_assets.h), each once: an asset several
+    // definitions were read from is released at the first of them. Only originals carry an asset id (variants keep
+    // 0). The parsed definitions hold nothing of the asset's bytes, so releasing before the library is emptied is safe.
+    for (int i = 0; i < size; ++i) {
+        GraphDef* def = lib->AtIndex(i);
+        if (!def || def->mOriginal != def || def->mAssetId == 0)
+            continue;
+        bool releasedAlready = false;
+        for (int k = 0; k < i && !releasedAlready; ++k) {
+            GraphDef* earlier = lib->AtIndex(k);
+            releasedAlready = earlier && earlier->mOriginal == earlier && earlier->mAssetId == def->mAssetId;
+        }
+        if (!releasedAlready)
+            supersonic_guest_release_asset(inWorld, def->mAssetId);
+    }
+
     lib->MakeEmpty();
 
     if (defList) {
