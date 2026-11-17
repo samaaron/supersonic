@@ -139,6 +139,7 @@ namespace supersonic {
 Commands::Commands(ClockworkClient* client, IOscTransport* replies, Work work)
     : mClient(client), mOwner(client, &clockwork_client_close), mReplies(replies),
       mWork(work), mRecorder(client, work == Work::Own),
+      mSendRingBytes(sendRingOf(client)),
       mWorker(work == Work::Own ? std::thread([this] { run(); }) : std::thread()) {}
 
 Commands::~Commands() {
@@ -257,15 +258,22 @@ void Commands::run() {
     for (;;) {
         {
             std::unique_lock<std::mutex> lock(mQueueMut);
-            mQueueCv.wait(lock, [this] { return mStop || !mQueue.empty(); });
+            // While mDefsWaiting is set, wake every 5 ms and call resumeDefs(). No engine answer will trigger the
+            // retry, because none of the waiting load's definitions are in flight.
+            if (mDefsWaiting.load(std::memory_order_acquire))
+                mQueueCv.wait_for(lock, std::chrono::milliseconds(5), [this] { return mStop || !mQueue.empty(); });
+            else
+                mQueueCv.wait(lock, [this] { return mStop || !mQueue.empty() || mDefsWaiting.load(std::memory_order_acquire); });
             if (mStop) return;
         }
+        resumeDefs();
         runJobs();
     }
 }
 
 void Commands::runPending() {
     if (mWork != Work::Host) return;
+    resumeDefs();
     runJobs();
     mRecorder.pull();
 }
@@ -516,9 +524,12 @@ bool Commands::takeNextDefs(uint32_t token, std::vector<std::vector<uint8_t>>& o
         // load's first batch has no callback to go by, and goes as one.
         const PerformanceMetrics& m = *metrics();
         const uint32_t blocksNow = m.process_count.load(std::memory_order_relaxed);
-        const uint64_t share = load.batches == 0 ? 0
+        uint64_t share = load.batches == 0 ? 0
             : uint64_t{ blocksNow - load.batchSentAt } * m.audio_block_size.load(std::memory_order_relaxed)
                   * kDefBytesPerFrame;
+        // Cap the batch at half the send ring. Without the cap, a big host callback (or several at once) gives a
+        // share bigger than the ring itself: a plugin's ring is 64 KB, and a 4096-frame callback's share is 256 KB.
+        if (mSendRingBytes > 0) share = std::min<uint64_t>(share, mSendRingBytes / 2);
         uint64_t bytes = 0;
         do {
             bytes += load.pending.front().size();
@@ -539,14 +550,74 @@ bool Commands::takeNextDefs(uint32_t token, std::vector<std::vector<uint8_t>>& o
 
 void Commands::sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>& defs) {
     std::vector<char> buf;
-    for (const auto& bytes : defs) {
+    size_t sent = 0;
+    for (; sent < defs.size(); ++sent) {
+        const auto& bytes = defs[sent];
         buf.resize(bytes.size() + 64);
         osc::OutboundPacketStream p(buf.data(), buf.size());
         p << osc::BeginMessage("/d_recv")
           << osc::Blob(bytes.data(), static_cast<osc::osc_bundle_element_size_t>(bytes.size()))
           << osc::EndMessage;
-        sendOn(reinterpret_cast<const uint8_t*>(p.Data()), static_cast<uint32_t>(p.Size()), token);
+        const ClockworkStatus st = sendOn(reinterpret_cast<const uint8_t*>(p.Data()),
+                                          static_cast<uint32_t>(p.Size()), token, false);
+        if (st == CLOCKWORK_E_TOO_BIG) {
+            // Too big for the ring: answer it ourselves with /fail /d_recv, as scsynth does for a definition it
+            // can't read. egress() then counts it as one failed definition and the load carries on.
+            char failBuf[256];
+            osc::OutboundPacketStream f(failBuf, sizeof failBuf);
+            f << osc::BeginMessage("/fail") << "/d_recv" << CLOCKWORK_REFUSED_TOO_BIG << osc::EndMessage;
+            egress(reinterpret_cast<const uint8_t*>(f.Data()), static_cast<uint32_t>(f.Size()), token);
+            continue;
+        }
+        if (st == CLOCKWORK_E_FULL) break;   // ring full: requeue this definition and the rest (below)
+        // Otherwise it was sent, or refused with "no instance" (sendOn passed that to egress(), which fails the load).
     }
+    if (sent == defs.size()) return;
+    // The ring was full. Take the unsent definitions out of inFlight and put them back at the front of the load's
+    // pending queue, in order. They go in the next batch: when the last sent definition is answered, or, if nothing
+    // was sent, from resumeDefs().
+    bool wake = false;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        auto it = defInFlight(token);   // the load this batch belongs to; inFlight still includes the unsent ones
+        if (it == mDefLoads.end()) return;
+        const auto unsent = static_cast<uint32_t>(defs.size() - sent);
+        it->inFlight -= std::min(it->inFlight, unsent);
+        if (it->refused) {
+            // A rebuild failed this load while we were sending: drop the unsent definitions. Once nothing is in
+            // flight, erase the load and mark the next load for this token as waiting, so resumeDefs() starts it.
+            if (it->inFlight == 0) {
+                mDefLoads.erase(it);
+                for (auto& load : mDefLoads) if (load.token == token) { load.waiting = wake = true; break; }
+            }
+        } else {
+            for (size_t i = defs.size(); i-- > sent;) it->pending.push_front(defs[i]);
+            if (it->inFlight == 0) it->waiting = wake = true;
+        }
+        if (wake) mDefsWaiting.store(true, std::memory_order_release);
+    }
+    if (wake) {
+        { std::lock_guard<std::mutex> q(mQueueMut); }   // so the worker can't miss this notify between checking and waiting
+        mQueueCv.notify_one();
+    }
+}
+
+void Commands::resumeDefs() {
+    if (!mDefsWaiting.load(std::memory_order_acquire)) return;
+    std::vector<std::pair<uint32_t, std::vector<std::vector<uint8_t>>>> batches;
+    {
+        std::lock_guard<std::mutex> lock(mMut);
+        bool still = false;
+        for (auto& load : mDefLoads) {
+            if (!load.waiting) continue;
+            load.waiting = false;
+            std::vector<std::vector<uint8_t>> next;
+            if (takeNextDefs(load.token, next)) batches.emplace_back(load.token, std::move(next));
+            else still = still || load.waiting;
+        }
+        mDefsWaiting.store(still, std::memory_order_release);
+    }
+    for (auto& [token, defs] : batches) sendDefs(token, defs);   // if the ring is still full, sendDefs marks it waiting again
 }
 
 // ── Egress: the engine's replies to what the front sent ──────────────────────
@@ -969,14 +1040,28 @@ bool Commands::send(const uint8_t* data, uint32_t size, uint32_t token) {
 
 // ── The handle ───────────────────────────────────────────────────────────────
 
-void Commands::sendOn(const uint8_t* data, uint32_t size, uint32_t token) {
+ClockworkStatus Commands::sendOn(const uint8_t* data, uint32_t size, uint32_t token, bool refuseRoom) {
     const ClockworkStatus st = clockwork_client_send(mClient, data, size, token);
-    // The engine's own ingest refuses a message it has no instance for back to
-    // its sender; a handle says so to its caller. Said here as the engine
-    // would say it, so the asker hears the same refusal either way.
-    if (st == CLOCKWORK_E_NO_INSTANCE)
-        clockwork_sys_refuse(data, size, CLOCKWORK_REFUSED_NO_INSTANCE, 0,
-                             [this, token](const uint8_t* d, uint32_t n) { egress(d, n, token); });
+    // If clockwork_client_send refuses the message, tell the sender with /clockwork/error <address> <reason>, the
+    // same refusal the engine sends. egress() handles refusals of the front's own requests (a commit, a read) by
+    // failing them; any other refusal goes straight to the sender with reply(). The reasons: no instance; ring full
+    // (it drains every block, so the sender can resend later); too big for the ring.
+    const char* why = st == CLOCKWORK_E_NO_INSTANCE              ? CLOCKWORK_REFUSED_NO_INSTANCE
+                    : st == CLOCKWORK_E_FULL && refuseRoom       ? CLOCKWORK_REFUSED_FULL
+                    : st == CLOCKWORK_E_TOO_BIG && refuseRoom    ? CLOCKWORK_REFUSED_TOO_BIG
+                    : nullptr;
+    if (why)
+        clockwork_sys_refuse(data, size, why, 0, [this, token](const uint8_t* d, uint32_t n) {
+            if (!egress(d, n, token)) reply(token, d, n);
+        });
+    return st;
+}
+
+// Size of the ring `client` sends into, from clockwork_client_info; 0 if this Clockwork doesn't report it.
+uint32_t Commands::sendRingOf(ClockworkClient* client) {
+    ClockworkClientInfo info{};
+    info.struct_bytes = sizeof info;
+    return client && clockwork_client_info(client, &info) == CLOCKWORK_OK ? info.send_ring_bytes : 0;
 }
 
 uint8_t* Commands::assetsLane() {
@@ -999,6 +1084,7 @@ const PerformanceMetrics* Commands::metrics() {
 
 uint32_t Commands::poll(ClockworkClientMessage* out, uint32_t max) {
     if (!out || max == 0) return 0;
+    resumeDefs();
     // The handle's replies, copied: egress() below may answer, and the
     // ring's bytes are the handle's until its next poll, not ours.
     std::vector<ClockworkClientMessage> taken(max);

@@ -49,6 +49,7 @@
 #include "Recorder.h"
 #include "clockwork_client.h"
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
@@ -141,6 +142,9 @@ public:
     uint64_t recordingFramesLost() const { return mRecorder.framesLost(); }
     // The bytes of definitions a callback may be handed, for each frame it renders (loadDefs).
     static constexpr uint32_t kDefBytesPerFrame = 64;
+    // Size of the ring this front sends into (ClockworkClientInfo send_ring_bytes), or 0 if unknown. Synthdef
+    // batches are capped at half of it, which leaves room for other messages.
+    uint32_t sendRingBytes() const { return mSendRingBytes; }
     // The batch with the most /d_recv definitions ever handed to the engine at once (loadDefs): how many, their
     // bytes, and the share of a callback they were sent under (0 for a load's first batch: no callback measured).
     struct DefBatch { uint32_t defs = 0, bytes = 0, budget = 0; };
@@ -191,6 +195,8 @@ private:
         uint32_t             batches = 0;            // batches handed over so far
         uint32_t             batchSentAt = 0;        // the engine's block count when the last one went
         bool                 refused = false;        // failed by a rebuild: its batch's answers are swallowed
+        bool                 waiting = false;        // the ring was full and nothing is in flight:
+                                                     // resumeDefs() sends the next batch
     };
     // The next batch to hand over for `token`, if its oldest load has
     // definitions waiting and no batch in flight: as many as fit the share of
@@ -201,6 +207,9 @@ private:
     // none is out. Under mMut.
     std::deque<DefLoad>::iterator defInFlight(uint32_t token);
     void sendDefs(uint32_t token, const std::vector<std::vector<uint8_t>>& defs);
+    // Sends the next batch for every load marked waiting: its last batch hit a full ring and nothing is in flight
+    // to trigger the next one. Called from poll(), runPending() and the worker loop.
+    void resumeDefs();
 
     void run();
     void runJobs();
@@ -214,7 +223,9 @@ private:
     void reply(uint32_t token, const uint8_t* data, uint32_t size);
     // Through the handle; a refusal for want of an instance is said back to
     // the front as the engine would say it, so the asker hears the same.
-    void sendOn(const uint8_t* data, uint32_t size, uint32_t token);
+    // Sends to the engine and returns clockwork_client_send's status. On "no instance" it always sends the sender a
+    // refusal; on "ring full" and "too big" only when `refuseRoom` is true (sendDefs passes false and handles both).
+    ClockworkStatus sendOn(const uint8_t* data, uint32_t size, uint32_t token, bool refuseRoom = true);
     // The lanes and the metrics, as the handle finds them.
     uint8_t*                  assetsLane();
     const uint8_t*            returnsLane();
@@ -269,6 +280,10 @@ private:
     std::deque<DefLoad>           mDefLoads;   // in order; a /d_recv reply answers the oldest for its token
     DefBatch                      mLargestDefBatch;          // largestDefBatch()
     uint32_t                      mDefBatchesOverShare = 0;  // defBatchesOverShare()
+
+    const uint32_t     mSendRingBytes;                // sendRingBytes(); read once, at construction
+    std::atomic<bool>  mDefsWaiting{false};           // some load is waiting for ring space (resumeDefs)
+    static uint32_t    sendRingOf(ClockworkClient* client);
 
     // LAST, and it must stay last. The constructor starts this thread (under
     // Work::Own) in its member-init list, and members are constructed in

@@ -21,6 +21,9 @@
  */
 #include "FrontRig.h"
 #include "clockwork_audio_file.h"
+#include "clockwork_profile.h"   // the plugin profile: a small IN ring
+#include "lanes/lanes.h"         // clockwork_core_new, clockwork_set_profile
+#include "shared_memory.h"        // the default layout's ring size
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
@@ -480,6 +483,66 @@ TEST_CASE("front: a callback is handed definitions up to its share of bytes, and
             CHECK(batch.budget == supersonic::Commands::kDefBytesPerFrame * frames);
         }
     }
+}
+
+// A plugin's engine has a 64 KB input ring (clockwork_profile_plugin), and a host may render 4096-frame callbacks,
+// which gives a batch share of 256 KB. The front now caps batches at half the ring and requeues definitions that hit
+// a full ring. Before this, the definitions that didn't fit were dropped, their answers never came, and /d_loadDir
+// never finished, so Sonic Pi's built-in synths never loaded in the plugin.
+TEST_CASE("front: /d_loadDir loads every definition into a 64 KB ring with 4096-frame callbacks",
+          "[front][synthdef]") {
+    if (!std::filesystem::is_directory(CLOCKWORK_SYNTHDEFS_DIR)) SKIP("no synthdef dir");
+    size_t files = 0;
+    for (const auto& e : std::filesystem::directory_iterator(CLOCKWORK_SYNTHDEFS_DIR))
+        if (e.path().extension() == ".scsyndef") ++files;
+    REQUIRE(files > 0);
+
+    ClockworkProfile profile{};
+    profile.struct_bytes = sizeof profile;
+    clockwork_profile_plugin(&profile);
+    ClockworkStatus st = CLOCKWORK_OK;
+    ClockworkCore* core = clockwork_core_new(&st);   // the engine takes ownership and closes it at shutdown
+    REQUIRE(core);
+    REQUIRE(clockwork_set_profile(core, &profile) == nullptr);
+    auto cfg = EngineFixture::defaultConfig();
+    cfg.core = core;
+    Rig rig(cfg);
+    REQUIRE(rig.testMovesAll());
+
+    REQUIRE(rig.ingress(osc_test::message("/d_loadDir", CLOCKWORK_SYNTHDEFS_DIR)));
+    for (int i = 0; rig.sink.count("/done", kSpider) == 0; ++i) {
+        REQUIRE(rig.sink.count("/fail", kSpider) == 0);
+        REQUIRE(i < 2000);   // about three minutes of audio: if it isn't done by then, it's stuck
+        rig.fx.pumpCallback(4096);
+    }
+    const auto batch = rig.front.largestDefBatch();
+    INFO("largest batch: " << batch.defs << " definitions, " << batch.bytes << " bytes, under a share of "
+         << batch.budget);
+    CHECK(batch.bytes <= profile.in_ring_bytes / 2);
+
+    rig.fx.send(osc_test::message("/status"));
+    OscReply status;
+    REQUIRE(rig.fx.waitForReply("/status.reply", status));
+    CHECK(static_cast<size_t>(status.parsed().argInt(4)) >= files);   // /status.reply's 5th argument is the synthdef count
+}
+
+// When the ring is full, a message the front forwards gets a /clockwork/error <address> "ring full" reply. Before,
+// it was dropped silently. Separately, refusals the front made for forwarded messages (not its own requests) never
+// reached the sender at all.
+TEST_CASE("front: a forwarded message that hits a full ring gets a ring full error", "[front]") {
+    Rig rig;
+    REQUIRE(rig.testMovesAll());   // the ring is only drained when this thread pumps blocks
+    const uint32_t ring = clockwork::kDefaultLayout.profile.in_ring_bytes;   // the fixture uses the default profile
+    const std::vector<uint8_t> blob(32 * 1024, 0);
+    const auto big = osc_test::messageWithBlob("/x", blob.data(), blob.size());
+    const int most = static_cast<int>(ring / blob.size()) + 2;   // more than the ring can hold
+    for (int i = 0; i < most && rig.sink.count("/clockwork/error", kSpider) == 0; ++i)
+        rig.front.send(big.ptr(), big.size(), kSpider);
+    OscReply refusal;
+    REQUIRE(rig.sink.find("/clockwork/error", kSpider, "/x", &refusal));
+    REQUIRE(refusal.parsed().argCount() >= 2);
+    CHECK(refusal.parsed().argString(1) == "ring full");
+    for (int i = 0; i < 8; ++i) rig.fx.pumpBlock();   // drain the ring before teardown
 }
 
 TEST_CASE("front, measure: what each definition costs the block that parses it", "[front][synthdef][benchmark]") {
