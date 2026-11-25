@@ -649,14 +649,10 @@ void LocalBuf_Ctor(LocalBuf* unit) {
 }
 
 void LocalBuf_Dtor(LocalBuf* unit) {
+    // The synth's slots are freed with the synth (Graph_Dtor), not here: a
+    // LocalBuf that got no slot could not tell it was not the last to hold one,
+    // and freed them again.
     RTFree(unit->mWorld, unit->chunk);
-    if (unit->mParent->localBufNum <= 1) { // only the last time.
-        for (int i = 0; i != unit->mParent->localMaxBufNum; ++i)
-            unit->mParent->mLocalSndBufs[i].~SndBuf();
-        RTFree(unit->mWorld, unit->mParent->mLocalSndBufs);
-        unit->mParent->localMaxBufNum = 0;
-    } else
-        unit->mParent->localBufNum = unit->mParent->localBufNum - 1;
 }
 
 

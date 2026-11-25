@@ -277,6 +277,61 @@ TEST_CASE("UGen ports: Pitch given a minimum frequency its period cannot double 
     stillRunning(fx);
 }
 
+// MaxLocalBufs makes a synth's local buffer slots and each LocalBuf takes one.
+// A SynthDef can hold more LocalBufs than slots, or none, or put them first.
+TEST_CASE("UGen ports: a synth's local buffer slots are freed once, however many LocalBufs it has", "[ugen_ports]") {
+    EngineFixture fx;
+    const UnitSpec slots{"MaxLocalBufs", kScalar, {{-1, 0}}, 1};   // one slot
+    const UnitSpec buffer{"LocalBuf", kScalar, {{-1, 0}, {-1, 1}}, 1};   // one channel, 64 frames
+    std::vector<UnitSpec> units;
+    SECTION("two LocalBufs for one slot") { units = {slots, buffer, buffer}; }
+    SECTION("four LocalBufs for one slot") { units = {slots, buffer, buffer, buffer, buffer}; }
+    SECTION("LocalBufs before the slots are made") { units = {buffer, buffer, slots}; }
+    SECTION("slots and no LocalBuf") { units = {slots}; }
+    SECTION("LocalBufs and no slots") { units = {buffer, buffer}; }
+    SECTION("the slots declared twice") { units = {slots, slots, buffer, buffer}; }
+    REQUIRE(loads(fx, graphDef("localbufs", {1.0f, 64.0f}, units)));
+    // Many synths, so slots that are never freed run the pool out.
+    for (int32_t round = 0; round < 400; ++round) {
+        startNode(fx, "localbufs");
+        fx.pumpBlock(2);
+        fx.send(osc_test::message("/n_free", 2000));
+        fx.pumpBlock(2);
+    }
+    poolStillSound(fx);
+}
+
+// Seen on a build with the real-time pool: one without it has no pool to run out.
+TEST_CASE("UGen ports: local buffer slots no LocalBuf took are freed with the synth", "[ugen_ports]") {
+    EngineFixture fx;
+    // 65536 slots, the most MaxLocalBufs makes: megabytes for each synth.
+    const UnitSpec slots{"MaxLocalBufs", kScalar, {{-1, 0}}, 1};
+    REQUIRE(loads(fx, graphDef("slots_only", {65536.0f}, {slots})));
+    // The same slots, one LocalBuf (one channel, 64 frames), and its buffer
+    // number written to control bus 0: -1 when it got no buffer.
+    REQUIRE(loads(fx, graphDef("slots_used", {65536.0f, 1.0f, 64.0f, 0.0f},
+                               {slots,
+                                {"LocalBuf", kScalar, {{-1, 1}, {-1, 2}}, 1},
+                                {"Out", kControl, {{-1, 3}, {1, 0}}, 0}})));
+    const auto localBufferNumber = [&fx] {
+        startNode(fx, "slots_used");
+        fx.pumpBlock(2);
+        const float number = controlBus(fx, 0);
+        fx.send(osc_test::message("/n_free", 2000));
+        fx.pumpBlock(2);
+        return number;
+    };
+    const float before = localBufferNumber();
+    REQUIRE(before >= 0.0f);
+    for (int32_t round = 0; round < 400; ++round) {
+        startNode(fx, "slots_only");
+        fx.pumpBlock(2);
+        fx.send(osc_test::message("/n_free", 2000));
+        fx.pumpBlock(2);
+    }
+    REQUIRE(localBufferNumber() == before);
+}
+
 TEST_CASE("UGen ports: every unit type given control-rate inputs plays and frees", "[ugen_ports]") {
     EngineFixture fx;
     REQUIRE(fx.sendAndExpectDone(osc_test::message("/b_alloc", 0, 1024, 1)));

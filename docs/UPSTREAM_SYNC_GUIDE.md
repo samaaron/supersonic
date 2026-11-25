@@ -345,6 +345,7 @@ Keep these when merging; each is also a candidate to send upstream.
 - Vibrato and XLine: a negative delay, attack or duration wrote past a one-sample output.
 - Limiter and Normalizer: a lookahead of 0 hung the audio thread.
 - LocalBuf channel and frame counts; `MaxLocalBufs` count and zeroed slots; SetBuf's offset; GrainTap's buffer number before its first lookup; the grain window macros (assert-only range check).
+- A synth's local buffer slots are freed by `Graph_Dtor`, once. `LocalBuf_Dtor` freed them when the count of LocalBufs holding a slot was 1 or less, so a synth with more LocalBufs than slots freed them once for each LocalBuf that got none, and a synth with `MaxLocalBufs` and no LocalBuf never freed them.
 - DegreeToKey: a negative index on a multiple of the table size read one past the table.
 - PitchShift window size; Gendy memory size; Pitch bins per octave; PV temporary buffer when the pool is full; LocalIn flag alignment; OffsetOut's saved samples when there are none.
 - `Graph_Ctor`: a resample factor that is not a number divided by zero; a factor is at most 64 (`kMaxResampleFactor`).

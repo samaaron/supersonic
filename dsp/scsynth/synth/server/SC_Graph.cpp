@@ -84,6 +84,15 @@ static void Graph_Dtor(Graph* inGraph) {
         }
     }
 
+    // The local buffer slots MaxLocalBufs made, freed once and after every
+    // unit that may hold one. Their data is each LocalBuf's to free.
+    if (inGraph->mLocalSndBufs) {
+        World_Free(world, inGraph->mLocalSndBufs);
+        inGraph->mLocalSndBufs = nullptr;
+        inGraph->localBufNum = 0;
+        inGraph->localMaxBufNum = 0;
+    }
+
     // NOTE: mBufRate is allocated as part of mFullRate, see Graph_Ctor()!
     if (inGraph->mFullRate != &world->mFullRate)
         World_Free(world, inGraph->mFullRate);
