@@ -229,10 +229,12 @@ missing from the list).
 heard. The outcome is one push to the notify targets (none is sent when
 there are none):
 
-`← /clockwork/devices/switch.done i:success s:requestedOutput s:requestedInput s:actualOutput s:actualInput s:error i:inputUnavailable s:inputUnavailableReason`
+`← /clockwork/devices/switch.done i:success s:requestedOutput s:requestedInput s:actualOutput s:actualInput s:error i:inputUnavailable s:inputUnavailableReason i:sampleRate i:bufferSize`
 
 `actualOutput` is where the engine is, whether or not the switch
-succeeded: record the user's choice from it. `inputUnavailable` is 1 when
+succeeded: record the user's choice from it. `sampleRate` and `bufferSize`
+are likewise what the engine is at, which need not be what was asked for: a
+device another program holds at its own rate refuses ours. `inputUnavailable` is 1 when
 the output opened but the input could not. A device report follows on
 success.
 
